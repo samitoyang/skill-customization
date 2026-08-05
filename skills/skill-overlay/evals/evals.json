@@ -1,0 +1,65 @@
+{
+  "skill_name": "skill-overlay",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Customize the installed handoff skill so every handoff is also archived locally, while continuing to take upstream workflow improvements.",
+      "expected_output": "Chooses a coexist semantic overlay, discovers a live source, and names it from handoff plus local archive.",
+      "files": [],
+      "expectations": [
+        "The response chooses semantic-overlay rather than fork.",
+        "The customized name differs from handoff and describes local archive.",
+        "The workflow requires a confirmed live-source binding."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I rewrote an abandoned private deploy skill and need it to work after the original checkout is deleted.",
+      "expected_output": "Routes to skill-fork because no runtime source can be required.",
+      "files": [],
+      "expectations": [
+        "The response rejects a semantic overlay.",
+        "The response recommends snapshot and diff provenance."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Create a separate release-report skill that calls the existing deploy skill but does not change deploy behavior.",
+      "expected_output": "Routes to a companion skill without a customization descriptor.",
+      "files": [],
+      "expectations": [
+        "The response identifies a companion rather than an overlay or fork."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Keep the same review name as the source and make my customized review win in Codex.",
+      "expected_output": "Treats this as replacement and requires precedence, ambiguity checks, and explicit confirmation.",
+      "files": [],
+      "expectations": [
+        "The response uses replace activation only after confirmation.",
+        "The response records customization-first host precedence."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "$skill-overlay add our project release checklist to the installed deploy workflow without freezing upstream changes.",
+      "expected_output": "Runs the normal overlay workflow after explicit invocation, with no separate invocation-mode setup.",
+      "files": [],
+      "expectations": [
+        "The response treats explicit invocation as the same model-invoked overlay workflow.",
+        "The response preserves a live source and a project-scoped binding."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Run my existing customized handoff-local-archive workflow; its customization descriptor is already present.",
+      "expected_output": "Validates and reconciles the existing customization before following the source workflow plus its documented delta.",
+      "files": [],
+      "expectations": [
+        "The response does not rename or scaffold the existing overlay.",
+        "The response validates, resolves, and reconciles before applying CUSTOMIZATION.md."
+      ]
+    }
+  ]
+}

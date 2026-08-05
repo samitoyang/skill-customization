@@ -1,0 +1,25 @@
+{
+  "skills": [
+    {
+      "id": "review-id",
+      "name": "review",
+      "central_path": "/library/review",
+      "source_type": "git",
+      "source_ref": "git@git.example.test:team/skills.git",
+      "source_ref_resolved": "https://git.example.test/team/skills.git",
+      "source_subpath": "skills/review",
+      "source_branch": "main",
+      "source_revision": "abc123",
+      "content_hash": "hash-review",
+      "enabled": true
+    },
+    {
+      "id": "private-id",
+      "name": "private-helper",
+      "path": "/library/private-helper",
+      "source_type": "local",
+      "source_ref": "/work/private-helper",
+      "enabled": false
+    }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skill-customization.dev/schema/customization-v1.json",
+  "title": "Skill customization descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "type",
+    "name",
+    "entrypoint",
+    "customization",
+    "dependencies",
+    "source",
+    "activation"
+  ],
+  "properties": {
+    "$schema": { "$ref": "#/$defs/nonMachinePathString" },
+    "schema_version": { "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^(?![Ff][Ii][Ll][Ee]:)(?![A-Za-z]:[\\\\/])[a-z][a-z0-9+.-]*:[^\\s]+$"
+    },
+    "type": { "enum": ["semantic-overlay", "fork"] },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 63
+    },
+    "entrypoint": { "$ref": "#/$defs/relativePath" },
+    "customization": { "$ref": "#/$defs/relativePath" },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        "maxLength": 63
+      }
+    },
+    "source": {
+      "oneOf": [
+        { "$ref": "#/$defs/repositorySource" },
+        { "$ref": "#/$defs/localSource" }
+      ]
+    },
+    "activation": { "$ref": "#/$defs/activation" },
+    "fork": { "$ref": "#/$defs/fork" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "type": { "const": "fork" } },
+        "required": ["type"]
+      },
+      "then": { "required": ["fork"] },
+      "else": { "not": { "required": ["fork"] } }
+    },
+    {
+      "if": {
+        "properties": {
+          "activation": {
+            "properties": { "mode": { "const": "replace" } },
+            "required": ["mode"]
+          }
+        },
+        "required": ["activation"]
+      },
+      "then": {
+        "properties": {
+          "activation": { "required": ["precedence"] }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonMachinePathString": {
+      "type": "string",
+      "allOf": [
+        { "not": { "pattern": "^/" } },
+        { "not": { "pattern": "^\\\\" } },
+        { "not": { "pattern": "^[A-Za-z]:[\\\\/]" } },
+        { "not": { "pattern": "^[Ff][Ii][Ll][Ee]:" } },
+        { "not": { "pattern": "^~[^\\\\/]*(?:[\\\\/]|$)" } }
+      ]
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "repositorySource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skill_name",
+        "kind",
+        "repository",
+        "upstream_path",
+        "license",
+        "review"
+      ],
+      "properties": {
+        "skill_name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 63
+        },
+        "kind": { "const": "repository" },
+        "repository": {
+          "type": "string",
+          "pattern": "^https://(?![^/\\s]*@)[^/\\s]+/[^?#\\s]+$"
+        },
+        "upstream_path": { "$ref": "#/$defs/relativePath" },
+        "license": {
+          "$ref": "#/$defs/nonMachinePathString",
+          "minLength": 1
+        },
+        "review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["revision", "fingerprint"],
+          "properties": {
+            "revision": {
+              "$ref": "#/$defs/nonMachinePathString",
+              "minLength": 1
+            },
+            "fingerprint": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "localSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skill_name", "kind", "identity"],
+      "properties": {
+        "skill_name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 63
+        },
+        "kind": { "const": "local" },
+        "identity": {
+          "type": "string",
+          "pattern": "^local:sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "activation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["coexist", "replace"] },
+        "precedence": { "const": "customization-first" }
+      }
+    },
+    "fork": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot", "diff"],
+      "properties": {
+        "snapshot": { "$ref": "#/$defs/relativePath" },
+        "diff": { "$ref": "#/$defs/relativePath" }
+      }
+    }
+  }
+}

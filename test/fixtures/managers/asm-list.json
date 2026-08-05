@@ -1,0 +1,30 @@
+{
+  "data": {
+    "skills": [
+      {
+        "name": "review",
+        "dirName": "review",
+        "path": "/home/me/.codex/skills/review",
+        "scope": "global",
+        "provider": "codex"
+      },
+      {
+        "name": "review",
+        "dirName": "review",
+        "path": "/work/app/.agents/skills/review",
+        "scope": "project",
+        "provider": "copilot"
+      },
+      {
+        "name": "deploy",
+        "path": "/home/me/.claude/skills/deploy",
+        "scope": "global",
+        "provider": "claude",
+        "sourceType": "github",
+        "sourceUrl": "https://github.com/example/skills.git",
+        "skillPath": "skills/deploy/SKILL.md",
+        "commitHash": "abc123"
+      }
+    ]
+  }
+}

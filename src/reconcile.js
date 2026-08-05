@@ -1,0 +1,655 @@
+import { lstat, readFile, readdir, stat } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { assertValidDescriptor } from "./descriptor.js";
+import { ReconciliationError } from "./errors.js";
+import {
+  fingerprintFile,
+  fingerprintFiles,
+  fingerprintPath,
+} from "./fingerprint.js";
+import { generateLocalIdentity } from "./normalization.js";
+import { resolveOwnedPath } from "./paths.js";
+import { readJsonState, updateJsonAtomic } from "./state.js";
+
+const EMPTY_CACHE = { version: 1, compatibility: {} };
+
+export function compatibilityCachePath({ env = process.env, home = os.homedir() } = {}) {
+  return env.XDG_STATE_HOME
+    ? path.join(env.XDG_STATE_HOME, "skill-customization", "compatibility.json")
+    : path.join(home, ".agents", "skill-customization", "compatibility.json");
+}
+
+async function sourceEntrypoint(sourcePath) {
+  if (!sourcePath) {
+    throw new ReconciliationError("semantic overlays require a live source", {
+      code: "LIVE_SOURCE_REQUIRED",
+    });
+  }
+  let info;
+  try {
+    info = await stat(sourcePath);
+  } catch {
+    throw new ReconciliationError(`live source is unavailable: ${sourcePath}`, {
+      code: "LIVE_SOURCE_REQUIRED",
+    });
+  }
+  const entrypoint = info.isDirectory() ? path.join(sourcePath, "SKILL.md") : sourcePath;
+  try {
+    const entrypointInfo = await stat(entrypoint);
+    if (!entrypointInfo.isFile()) throw new Error("not a regular file");
+  } catch {
+    throw new ReconciliationError(`live source entrypoint is unavailable: ${entrypoint}`, {
+      code: "LIVE_SOURCE_REQUIRED",
+    });
+  }
+  return entrypoint;
+}
+
+function sourceCheckpoint(descriptor, sourceFingerprint) {
+  const sourceIdentity = generateLocalIdentity({
+    skillName: descriptor.source.skill_name,
+    fingerprint: sourceFingerprint,
+  });
+  const expected = descriptor.source.kind === "repository"
+    ? descriptor.source.review.fingerprint
+    : descriptor.source.identity;
+  const actual = descriptor.source.kind === "repository"
+    ? sourceFingerprint
+    : sourceIdentity;
+  return { expected, actual, sourceIdentity, match: actual === expected };
+}
+
+function baseResult(descriptor, sourceFingerprint, customizationFingerprint) {
+  const checkpoint = sourceCheckpoint(descriptor, sourceFingerprint);
+  return {
+    customization: descriptor.id,
+    type: descriptor.type,
+    sourceFingerprint,
+    customizationFingerprint,
+    ...(descriptor.source.kind === "repository"
+      ? { checkpointFingerprint: checkpoint.expected }
+      : {
+          sourceIdentity: checkpoint.sourceIdentity,
+          checkpointIdentity: checkpoint.expected,
+        }),
+    checkpointMatch: checkpoint.match,
+    stopped: false,
+    cached: false,
+    flags: { ambiguousDrift: false, absorbedDeltas: [] },
+  };
+}
+
+async function forkSnapshotEntrypoint(snapshot) {
+  const info = await lstat(snapshot);
+  if (info.isFile()) return snapshot;
+  if (!info.isDirectory()) {
+    throw new Error("fork snapshot must be a file or directory");
+  }
+  const entrypoint = path.join(snapshot, "SKILL.md");
+  const entrypointInfo = await lstat(entrypoint).catch(() => undefined);
+  if (!entrypointInfo?.isFile()) {
+    throw new Error("fork snapshot directory must contain SKILL.md");
+  }
+  return entrypoint;
+}
+
+function structuralDiffLine(line) {
+  return line.endsWith("\r") ? line.slice(0, -1) : line;
+}
+
+function diffPath(header, prefix) {
+  const value = structuralDiffLine(header)
+    .slice(4)
+    .split("\t", 1)[0]
+    .trim();
+  if (value === "/dev/null") return null;
+  if (!value || value.startsWith('"')) {
+    throw new Error("fork diff uses an unsupported or missing file path");
+  }
+  const relative = value.startsWith(`${prefix}/`)
+    ? value.slice(prefix.length + 1)
+    : value;
+  const parts = relative.split("/");
+  if (
+    relative.includes("\\")
+    || relative.includes("\0")
+    || path.posix.isAbsolute(relative)
+    || /^[A-Za-z]:[\\/]/.test(relative)
+    || parts.some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new Error(`fork diff path is not a safe relative path: ${value}`);
+  }
+  return parts.join("/");
+}
+
+function parseHunkHeader(line) {
+  const match = structuralDiffLine(line).match(
+    /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/,
+  );
+  if (!match) return undefined;
+  const oldStart = Number(match[1]);
+  const oldCount = match[2] === undefined ? 1 : Number(match[2]);
+  const newStart = Number(match[3]);
+  const newCount = match[4] === undefined ? 1 : Number(match[4]);
+  if (
+    (oldCount > 0 && oldStart === 0)
+    || (newCount > 0 && newStart === 0)
+  ) {
+    throw new Error("fork diff has an invalid zero hunk position");
+  }
+  return { oldStart, oldCount, newStart, newCount };
+}
+
+function parseUnifiedDiff(contents) {
+  if (!contents.trim()) throw new Error("fork diff must not be empty");
+  const lines = contents.split("\n");
+  const patches = [];
+  let index = 0;
+  while (index < lines.length) {
+    const oldHeader = structuralDiffLine(lines[index]);
+    const newHeader = structuralDiffLine(lines[index + 1] ?? "");
+    if (!oldHeader.startsWith("--- ") || !newHeader.startsWith("+++ ")) {
+      index += 1;
+      continue;
+    }
+    const patch = {
+      oldPath: diffPath(oldHeader, "a"),
+      newPath: diffPath(newHeader, "b"),
+      hunks: [],
+    };
+    if (!patch.oldPath && !patch.newPath) {
+      throw new Error("fork diff cannot patch /dev/null to /dev/null");
+    }
+    index += 2;
+    let hasChange = false;
+    while (index < lines.length) {
+      const line = structuralDiffLine(lines[index]);
+      if (
+        line.startsWith("diff --git ")
+        || (
+          line.startsWith("--- ")
+          && structuralDiffLine(lines[index + 1] ?? "").startsWith("+++ ")
+        )
+      ) {
+        break;
+      }
+      if (!line) {
+        index += 1;
+        continue;
+      }
+      const header = parseHunkHeader(line);
+      if (!header) {
+        throw new Error(`fork diff has unexpected content outside a hunk: ${line}`);
+      }
+      index += 1;
+      const operations = [];
+      let oldLines = 0;
+      let newLines = 0;
+      while (oldLines < header.oldCount || newLines < header.newCount) {
+        if (index >= lines.length) {
+          throw new Error("fork diff hunk ended before its declared line counts");
+        }
+        const raw = lines[index];
+        const kind = raw[0];
+        if (![" ", "-", "+"].includes(kind)) {
+          throw new Error("fork diff hunk contains an invalid line");
+        }
+        const operation = { kind, text: raw.slice(1), newline: true };
+        operations.push(operation);
+        if (kind !== "+") oldLines += 1;
+        if (kind !== "-") newLines += 1;
+        if (kind !== " ") hasChange = true;
+        if (oldLines > header.oldCount || newLines > header.newCount) {
+          throw new Error("fork diff hunk exceeds its declared line counts");
+        }
+        index += 1;
+        if (
+          structuralDiffLine(lines[index] ?? "")
+          === "\\ No newline at end of file"
+        ) {
+          operation.newline = false;
+          index += 1;
+        }
+      }
+      patch.hunks.push({ ...header, operations });
+    }
+    if (patch.hunks.length === 0 || !hasChange) {
+      throw new Error("fork diff file must contain a hunk with changed lines");
+    }
+    patches.push(patch);
+  }
+  if (patches.length === 0) {
+    throw new Error("fork diff must contain unified file headers and hunks");
+  }
+  const targets = new Set();
+  for (const patch of patches) {
+    const target = patch.newPath ?? patch.oldPath;
+    if (targets.has(target)) {
+      throw new Error(`fork diff repeats target path ${target}`);
+    }
+    targets.add(target);
+  }
+  return patches;
+}
+
+function splitTextLines(contents) {
+  const lines = [];
+  let start = 0;
+  for (let index = 0; index < contents.length; index += 1) {
+    if (contents[index] === "\n") {
+      lines.push(contents.slice(start, index + 1));
+      start = index + 1;
+    }
+  }
+  if (start < contents.length) lines.push(contents.slice(start));
+  return lines;
+}
+
+function applyUnifiedFilePatch(contents, patch) {
+  const source = splitTextLines(contents);
+  const output = [];
+  let sourceIndex = 0;
+  for (const hunk of patch.hunks) {
+    const oldIndex = hunk.oldCount === 0 ? hunk.oldStart : hunk.oldStart - 1;
+    const newIndex = hunk.newCount === 0 ? hunk.newStart : hunk.newStart - 1;
+    if (
+      oldIndex < sourceIndex
+      || oldIndex > source.length
+      || newIndex !== output.length + (oldIndex - sourceIndex)
+    ) {
+      throw new Error(`fork diff does not apply cleanly at ${patch.oldPath ?? patch.newPath}`);
+    }
+    output.push(...source.slice(sourceIndex, oldIndex));
+    sourceIndex = oldIndex;
+    for (const operation of hunk.operations) {
+      const line = `${operation.text}${operation.newline ? "\n" : ""}`;
+      if (operation.kind !== "+") {
+        if (source[sourceIndex] !== line) {
+          throw new Error(`fork diff does not apply to snapshot at ${patch.oldPath}`);
+        }
+        sourceIndex += 1;
+      }
+      if (operation.kind !== "-") output.push(line);
+    }
+  }
+  output.push(...source.slice(sourceIndex));
+  return output.join("");
+}
+
+function portableRelative(root, absolutePath) {
+  return path.relative(root, absolutePath).split(path.sep).join("/");
+}
+
+function isExcludedPayloadPath(relativePath, excludedPaths) {
+  return excludedPaths.some(
+    (excluded) => relativePath === excluded || relativePath.startsWith(`${excluded}/`),
+  );
+}
+
+async function mapDirectoryPayload(
+  root,
+  { excludedPaths = [], label = "fork payload" } = {},
+) {
+  const payload = new Map();
+  async function visit(directory) {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolutePath = path.join(directory, entry.name);
+      const relativePath = portableRelative(root, absolutePath);
+      if (isExcludedPayloadPath(relativePath, excludedPaths)) continue;
+      const info = await lstat(absolutePath);
+      if (info.isSymbolicLink()) {
+        throw new Error(`${label} contains symbolic link at ${relativePath}`);
+      }
+      if (info.isDirectory()) {
+        await visit(absolutePath);
+      } else if (info.isFile()) {
+        payload.set(relativePath, await readFile(absolutePath));
+      } else {
+        throw new Error(`${label} contains unsupported file type at ${relativePath}`);
+      }
+    }
+  }
+  await visit(root);
+  return payload;
+}
+
+async function mapSnapshotPayload(snapshot, snapshotInfo, snapshotFilePath) {
+  if (snapshotInfo.isFile()) {
+    return new Map([[snapshotFilePath, await readFile(snapshot)]]);
+  }
+  if (!snapshotInfo.isDirectory()) {
+    throw new Error("fork snapshot must be a file or directory");
+  }
+  return mapDirectoryPayload(snapshot, { label: "fork snapshot" });
+}
+
+function assertPayloadPathShape(payload, candidatePath) {
+  for (const existingPath of payload.keys()) {
+    if (
+      existingPath !== candidatePath
+      && (
+        existingPath.startsWith(`${candidatePath}/`)
+        || candidatePath.startsWith(`${existingPath}/`)
+      )
+    ) {
+      throw new Error(
+        `fork diff creates a file/directory path conflict between ${candidatePath} and ${existingPath}`,
+      );
+    }
+  }
+}
+
+function decodePatchSource(buffer, relativePath) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    throw new Error(`fork diff target is not UTF-8 text: ${relativePath}`);
+  }
+}
+
+function applyPatchesToPayload(payload, patches) {
+  const reconstructed = new Map(payload);
+  for (const patch of patches) {
+    let source = "";
+    if (patch.oldPath) {
+      const sourceBuffer = reconstructed.get(patch.oldPath);
+      if (!sourceBuffer) {
+        throw new Error(
+          `fork diff does not apply; snapshot path is missing: ${patch.oldPath}`,
+        );
+      }
+      source = decodePatchSource(sourceBuffer, patch.oldPath);
+    } else if (reconstructed.has(patch.newPath)) {
+      throw new Error(`fork diff new file already exists in snapshot: ${patch.newPath}`);
+    }
+
+    const patched = applyUnifiedFilePatch(source, patch);
+    if (patch.oldPath) reconstructed.delete(patch.oldPath);
+    if (patch.newPath) {
+      assertPayloadPathShape(reconstructed, patch.newPath);
+      reconstructed.set(patch.newPath, Buffer.from(patched, "utf8"));
+    } else if (patched !== "") {
+      throw new Error(`fork diff deletion leaves content at ${patch.oldPath}`);
+    }
+  }
+  return reconstructed;
+}
+
+function compareForkPayloads(reconstructed, owned) {
+  for (const [relativePath, ownedContents] of owned) {
+    const reconstructedContents = reconstructed.get(relativePath);
+    if (!reconstructedContents) {
+      throw new Error(`unrepresented payload file ${relativePath}`);
+    }
+    if (!reconstructedContents.equals(ownedContents)) {
+      throw new Error(`reconstructed fork does not match owned fork payload at ${relativePath}`);
+    }
+  }
+  for (const relativePath of reconstructed.keys()) {
+    if (!owned.has(relativePath)) {
+      throw new Error(`owned fork payload is missing reconstructed file ${relativePath}`);
+    }
+  }
+}
+
+async function verifyForkDiff({
+  contents,
+  snapshot,
+  customizationRoot,
+  snapshotFilePath,
+  excludedPaths,
+}) {
+  const patches = parseUnifiedDiff(contents);
+  const snapshotInfo = await lstat(snapshot);
+  const snapshotPayload = await mapSnapshotPayload(
+    snapshot,
+    snapshotInfo,
+    snapshotFilePath,
+  );
+  const reconstructed = applyPatchesToPayload(snapshotPayload, patches);
+  const owned = await mapDirectoryPayload(customizationRoot, {
+    excludedPaths,
+    label: "owned fork payload",
+  });
+  compareForkPayloads(reconstructed, owned);
+  return patches.map((patch) => patch.newPath ?? patch.oldPath);
+}
+
+function reconcileOutcome(base, outcome) {
+  if (Array.isArray(outcome)) {
+    const normalized = outcome.map((item) => JSON.stringify(item));
+    if (new Set(normalized).size !== 1) {
+      return {
+        ...base,
+        status: "ambiguous-drift",
+        stopped: true,
+        flags: { ambiguousDrift: true, absorbedDeltas: [] },
+      };
+    }
+    outcome = outcome[0];
+  }
+  if (!outcome || outcome.ambiguous) {
+    return {
+      ...base,
+      status: "ambiguous-drift",
+      stopped: true,
+      flags: { ambiguousDrift: true, absorbedDeltas: [] },
+    };
+  }
+  const absorbedDeltas = Array.isArray(outcome.absorbedDeltas)
+    ? outcome.absorbedDeltas
+    : [];
+  if (absorbedDeltas.length > 0) {
+    return {
+      ...base,
+      status: "absorbed-delta",
+      stopped: true,
+      evidence: outcome.evidence,
+      flags: { ambiguousDrift: false, absorbedDeltas },
+    };
+  }
+  if (outcome.compatible === true) {
+    return { ...base, status: "compatible", evidence: outcome.evidence };
+  }
+  return {
+    ...base,
+    status: "incompatible",
+    stopped: true,
+    evidence: outcome.evidence,
+  };
+}
+
+async function readCompatibility(
+  cachePath,
+  descriptorId,
+  fingerprint,
+  customizationFingerprint,
+) {
+  if (!cachePath) return undefined;
+  const cache = await readJsonState(cachePath, EMPTY_CACHE);
+  assertCompatibilityCache(cache, cachePath);
+  const cached = cache.compatibility[descriptorId]?.[fingerprint];
+  return cached?.customizationFingerprint === customizationFingerprint
+    ? cached
+    : undefined;
+}
+
+function assertCompatibilityCache(cache, cachePath) {
+  if (
+    cache?.version !== 1
+    || !cache.compatibility
+    || typeof cache.compatibility !== "object"
+    || Array.isArray(cache.compatibility)
+  ) {
+    throw new ReconciliationError(`invalid compatibility cache ${cachePath}`, {
+      code: "INVALID_COMPATIBILITY_CACHE",
+    });
+  }
+}
+
+async function cacheCompatibility(
+  cachePath,
+  descriptorId,
+  fingerprint,
+  customizationFingerprint,
+  result,
+) {
+  if (!cachePath) return;
+  await updateJsonAtomic(cachePath, EMPTY_CACHE, (cache) => {
+    assertCompatibilityCache(cache, cachePath);
+    cache.compatibility[descriptorId] ??= {};
+    cache.compatibility[descriptorId][fingerprint] = {
+      status: result.status,
+      evidence: result.evidence,
+      customizationFingerprint,
+    };
+    return cache;
+  });
+}
+
+async function reconcileOverlay({
+  descriptor,
+  customizationRoot,
+  sourcePath,
+  cachePath = compatibilityCachePath(),
+  semanticReconciler,
+}) {
+  const entrypoint = await sourceEntrypoint(sourcePath);
+  const customizationEntrypoint = await resolveOwnedPath(
+    customizationRoot,
+    descriptor.entrypoint,
+  ).catch((error) => {
+    throw new ReconciliationError(
+      `customization entrypoint is not owned: ${error.message}`,
+      { code: "CUSTOMIZATION_PATH_NOT_OWNED" },
+    );
+  });
+  const customizationInstructions = await resolveOwnedPath(
+    customizationRoot,
+    descriptor.customization,
+  ).catch((error) => {
+    throw new ReconciliationError(
+      `customization instructions are not owned: ${error.message}`,
+      { code: "CUSTOMIZATION_PATH_NOT_OWNED" },
+    );
+  });
+  const sourceFingerprint = await fingerprintFile(entrypoint);
+  const customizationFingerprint = await fingerprintFiles([
+    customizationEntrypoint,
+    customizationInstructions,
+  ]);
+  const base = baseResult(
+    descriptor,
+    sourceFingerprint,
+    customizationFingerprint,
+  );
+  if (base.checkpointMatch) return { ...base, status: "compatible" };
+
+  const cached = await readCompatibility(
+    cachePath,
+    descriptor.id,
+    sourceFingerprint,
+    customizationFingerprint,
+  );
+  if (cached?.status === "compatible") {
+    return { ...base, ...cached, cached: true };
+  }
+  if (typeof semanticReconciler !== "function") {
+    return reconcileOutcome(base, { ambiguous: true });
+  }
+  const outcome = await semanticReconciler({
+    descriptor,
+    sourceEntrypoint: entrypoint,
+    sourceFingerprint,
+    customizationEntrypoint,
+    customizationInstructions,
+  });
+  const result = reconcileOutcome(base, outcome);
+  if (result.status === "compatible") {
+    await cacheCompatibility(
+      cachePath,
+      descriptor.id,
+      sourceFingerprint,
+      customizationFingerprint,
+      result,
+    );
+  }
+  return result;
+}
+
+async function reconcileFork({ descriptor, customizationRoot }) {
+  try {
+    const snapshot = await resolveOwnedPath(
+      customizationRoot,
+      descriptor.fork.snapshot,
+      { rejectSymlinks: true },
+    );
+    const diff = await resolveOwnedPath(customizationRoot, descriptor.fork.diff, {
+      rejectSymlinks: true,
+    });
+    const entrypoint = await resolveOwnedPath(
+      customizationRoot,
+      descriptor.entrypoint,
+    );
+    const snapshotEntrypoint = await forkSnapshotEntrypoint(snapshot);
+    const snapshotEntrypointFingerprint = await fingerprintFile(
+      snapshotEntrypoint,
+    );
+    const checkpoint = sourceCheckpoint(
+      descriptor,
+      snapshotEntrypointFingerprint,
+    );
+    if (!checkpoint.match) {
+      throw new Error("fork snapshot entrypoint does not match its source checkpoint");
+    }
+    const diffTargets = await verifyForkDiff({
+      contents: await readFile(diff, "utf8"),
+      snapshot,
+      customizationRoot,
+      snapshotFilePath: descriptor.source.kind === "repository"
+        ? path.posix.basename(descriptor.source.upstream_path)
+        : "SKILL.md",
+      excludedPaths: [
+        "customization.json",
+        descriptor.customization,
+        descriptor.fork.snapshot,
+        descriptor.fork.diff,
+      ],
+    });
+    return {
+      customization: descriptor.id,
+      type: descriptor.type,
+      status: "fork-ready",
+      runtimeSourceRequired: false,
+      stopped: false,
+      provenance: {
+        source: descriptor.source,
+        snapshotFingerprint: await fingerprintPath(snapshot),
+        snapshotEntrypointFingerprint,
+        diffFingerprint: await fingerprintFile(diff),
+        diffTargets,
+        forkFingerprint: await fingerprintFile(entrypoint),
+      },
+    };
+  } catch (error) {
+    throw new ReconciliationError(`fork provenance is incomplete: ${error.message}`, {
+      code: "INCOMPLETE_FORK_PROVENANCE",
+    });
+  }
+}
+
+export async function reconcileCustomization(options) {
+  const { descriptor, customizationRoot } = options;
+  assertValidDescriptor(descriptor);
+  if (!customizationRoot) {
+    throw new ReconciliationError("customizationRoot is required", {
+      code: "CUSTOMIZATION_ROOT_REQUIRED",
+    });
+  }
+  return descriptor.type === "fork"
+    ? reconcileFork(options)
+    : reconcileOverlay(options);
+}

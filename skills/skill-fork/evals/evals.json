@@ -1,0 +1,63 @@
+{
+  "skill_name": "skill-fork",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Preserve my heavily rewritten incident-response skill as a standalone package even when the source checkout is unavailable.",
+      "expected_output": "Chooses a fork with license, snapshot, and diff provenance and verifies without a live source.",
+      "files": [],
+      "expectations": [
+        "The response chooses fork rather than semantic-overlay.",
+        "The response records snapshot, diff, license, revision, and fingerprint provenance."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Add one local archive step to handoff but automatically retain future upstream handoff changes.",
+      "expected_output": "Routes to skill-overlay because the source must remain live.",
+      "files": [],
+      "expectations": [
+        "The response rejects fork independence and recommends a live semantic overlay."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Build a separate dashboard skill that reads outputs from review; do not alter review itself.",
+      "expected_output": "Routes to a companion skill with a normal dependency.",
+      "files": [],
+      "expectations": [
+        "The response identifies a companion rather than a customization."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Fork review but install it under the same review name everywhere.",
+      "expected_output": "Explains that same-name replacement is contextual, checks ambiguity, and requests explicit confirmation.",
+      "files": [],
+      "expectations": [
+        "The response does not silently activate two review skills in replace mode.",
+        "The response requires customization-first precedence and confirmation."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "$skill-fork turn our private deploy workflow into a redistributable independent skill after checking its license.",
+      "expected_output": "Runs the normal fork workflow after explicit invocation, including redistribution and provenance gates.",
+      "files": [],
+      "expectations": [
+        "The response treats explicit invocation as the same model-invoked fork workflow.",
+        "The response checks license, snapshot, diff, and owned payload independence."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Verify my existing incident-response-standalone fork; its descriptor, snapshot, and diff already exist.",
+      "expected_output": "Validates and reconciles the existing fork without rediscovering or scaffolding it.",
+      "files": [],
+      "expectations": [
+        "The response does not rename or scaffold the existing fork.",
+        "The response verifies the owned snapshot and diff without a live source."
+      ]
+    }
+  ]
+}

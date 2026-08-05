@@ -1,0 +1,19 @@
+{
+  "version": 3,
+  "skills": {
+    "review": {
+      "source": "example/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/example/skills.git",
+      "skillPath": "skills/review/SKILL.md",
+      "skillFolderHash": "sha-review"
+    },
+    "private-helper": {
+      "source": "/srv/private-skill",
+      "sourceType": "local",
+      "sourceUrl": "/srv/private-skill",
+      "skillPath": "SKILL.md",
+      "hash": "sha-private"
+    }
+  }
+}

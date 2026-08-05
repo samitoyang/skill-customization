@@ -1,0 +1,59 @@
+{
+  "version": "3.0",
+  "sources": {
+    "community/example/skills": {
+      "url": "https://github.com/example/skills.git",
+      "type": "community",
+      "repoName": "skills",
+      "installMethod": "git",
+      "installedAt": "2026-08-01T00:00:00.000Z",
+      "updatedAt": "2026-08-02T00:00:00.000Z"
+    },
+    "registry/code-review": {
+      "url": "@example/code-review",
+      "type": "registry",
+      "repoName": "code-review",
+      "installMethod": "registry",
+      "version": "1.2.3",
+      "registryUrl": "https://skillsmgr.dev/example/code-review",
+      "installedAt": "2026-08-01T00:00:00.000Z",
+      "updatedAt": "2026-08-02T00:00:00.000Z"
+    },
+    "custom/archive-helper": {
+      "url": "https://downloads.example.test/archive-helper.zip",
+      "type": "custom",
+      "repoName": "archive-helper",
+      "installMethod": "zip",
+      "installedAt": "2026-08-01T00:00:00.000Z",
+      "updatedAt": "2026-08-02T00:00:00.000Z"
+    },
+    "custom/team/local-one": {
+      "url": "/work/team-skills",
+      "type": "custom",
+      "repoName": "local-one",
+      "installMethod": "local-copy",
+      "installedAt": "2026-08-01T00:00:00.000Z",
+      "updatedAt": "2026-08-02T00:00:00.000Z"
+    }
+  },
+  "bundles": {
+    "git:https://github.com/example/skills": {
+      "type": "git",
+      "url": "https://github.com/example/skills.git",
+      "selectionMode": "all",
+      "members": ["community/example/skills"],
+      "installedAt": "2026-08-01T00:00:00.000Z",
+      "updatedAt": "2026-08-02T00:00:00.000Z"
+    },
+    "registry:@example/code-review": {
+      "type": "registry",
+      "url": "https://skillsmgr.dev/example/code-review",
+      "members": ["registry/code-review"]
+    },
+    "zip:https://downloads.example.test/archive-helper.zip": {
+      "type": "zip",
+      "url": "https://downloads.example.test/archive-helper.zip",
+      "members": ["custom/archive-helper"]
+    }
+  }
+}

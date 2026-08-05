@@ -1,0 +1,55 @@
+{
+  "name": "skill-customization",
+  "version": "0.1.0",
+  "description": "Portable discovery, binding, provenance, and reconciliation for skill customizations.",
+  "keywords": [
+    "agent-skills",
+    "coding-agents",
+    "skill-customization",
+    "semantic-overlays",
+    "skill-forks"
+  ],
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./schema": "./customization.schema.json"
+  },
+  "bin": {
+    "skill-customization": "bin/skill-customization.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/samitoyang/skill-customization.git"
+  },
+  "homepage": "https://github.com/samitoyang/skill-customization#readme",
+  "bugs": {
+    "url": "https://github.com/samitoyang/skill-customization/issues"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "docs/cli.md",
+    "docs/descriptor-v1.md",
+    "docs/discovery-and-bindings.md",
+    "docs/library.md",
+    "docs/reconciliation.md",
+    "customization.schema.json",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "verify": "node scripts/verify.js && node --test",
+    "prepublishOnly": "npm run verify"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT"
+}
