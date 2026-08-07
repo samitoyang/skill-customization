@@ -39,6 +39,24 @@ const packageJson = JSON.parse(
   await readFile(path.join(root, "package.json"), "utf8"),
 );
 
+const contractCheck = spawnSync(
+  process.execPath,
+  [path.join(root, "bin", "skill-customization.js"), "supports", "1"],
+  { encoding: "utf8" },
+);
+if (contractCheck.status !== 0) {
+  throw new Error(contractCheck.stderr || "helper contract 1 is unsupported");
+}
+const contractResult = JSON.parse(contractCheck.stdout);
+if (
+  contractResult.compatible !== true
+  || contractResult.requested_contract !== "1"
+  || !contractResult.supported_contracts?.includes("1")
+  || contractResult.package_version !== packageJson.version
+) {
+  throw new Error("helper contract 1 check returned an invalid result");
+}
+
 for (const skillName of ["skill-overlay", "skill-fork"]) {
   const skillRoot = path.join(root, "skills", skillName);
   const markdown = await readFile(path.join(skillRoot, "SKILL.md"), "utf8");
@@ -48,9 +66,13 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
   if (markdown.includes("../")) {
     throw new Error(`${skillName}/SKILL.md must not reference files outside its skill root`);
   }
-  if (!markdown.includes(`skill-customization@${packageJson.version}`)) {
-    throw new Error(`${skillName}/SKILL.md must pin the matching CLI version`);
+  if (
+    !markdown.includes("skill-customization supports 1")
+    || !markdown.includes("skill-customization@latest supports 1")
+  ) {
+    throw new Error(`${skillName}/SKILL.md must negotiate helper contract 1`);
   }
+  await readFile(path.join(skillRoot, "references", "intake.md"), "utf8");
   const evals = JSON.parse(
     await readFile(path.join(skillRoot, "evals", "evals.json"), "utf8"),
   );
@@ -59,4 +81,6 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
   }
 }
 
-process.stdout.write(`verified ${javascript.length} JavaScript files, schema, package, and skills\n`);
+process.stdout.write(
+  `verified ${javascript.length} JavaScript files, schema, helper contract 1, package, and skills\n`,
+);

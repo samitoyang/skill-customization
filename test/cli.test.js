@@ -254,8 +254,60 @@ test("CLI reports the package version", async () => {
   }
 });
 
+test("CLI reports supported helper contracts as structured JSON", async () => {
+  const packageJson = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  );
+  const result = await run(["supports", "1"]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  assert.deepEqual(JSON.parse(result.stdout), {
+    compatible: true,
+    requested_contract: "1",
+    supported_contracts: ["1"],
+    package_version: packageJson.version,
+  });
+});
+
+test("CLI returns structured incompatibility for unsupported and malformed contracts", async () => {
+  for (const [contract, diagnostic] of [
+    ["2", /unsupported/i],
+    ["1.0", /positive integer/i],
+    ["01", /positive integer/i],
+  ]) {
+    const result = await run(["supports", contract]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, diagnostic);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.compatible, false);
+    assert.equal(output.requested_contract, contract);
+    assert.deepEqual(output.supported_contracts, ["1"]);
+    assert.equal(typeof output.package_version, "string");
+    assert.deepEqual(Object.keys(output), [
+      "compatible",
+      "requested_contract",
+      "supported_contracts",
+      "package_version",
+    ]);
+  }
+});
+
+test("CLI contract checks keep their JSON shape for missing and extra arguments", async () => {
+  for (const args of [["supports"], ["supports", "1", "extra"]]) {
+    const result = await run(args);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /requires one|exactly one/i);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.compatible, false);
+    assert.ok(output.requested_contract === null || output.requested_contract === "1");
+    assert.deepEqual(output.supported_contracts, ["1"]);
+    assert.equal(typeof output.package_version, "string");
+  }
+});
+
 test("CLI rejects unknown long options for every command", async (t) => {
   const commandArguments = {
+    supports: ["1"],
     validate: ["customization.json"],
     fingerprint: ["SKILL.md"],
     discover: ["review"],
@@ -283,6 +335,7 @@ test("CLI rejects unknown long options for every command", async (t) => {
 
 test("CLI rejects extra positional arguments for every command", async (t) => {
   const commandArguments = {
+    supports: ["1", "extra"],
     validate: ["customization.json", "extra"],
     fingerprint: ["SKILL.md", "extra"],
     discover: ["review", "extra"],
@@ -295,10 +348,9 @@ test("CLI rejects extra positional arguments for every command", async (t) => {
     await t.test(command, async () => {
       const result = await run([command, ...argumentsForCommand]);
       assert.equal(result.code, 1);
-      assert.match(
-        result.stderr,
-        new RegExp(`too many positional arguments for ${command}`, "i"),
-      );
+      assert.match(result.stderr, command === "supports"
+        ? /exactly one helper contract/i
+        : new RegExp(`too many positional arguments for ${command}`, "i"));
     });
   }
 });

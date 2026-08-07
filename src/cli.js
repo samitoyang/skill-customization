@@ -7,6 +7,10 @@ import {
   classifyBindingScope,
   resolveBinding,
 } from "./bindings.js";
+import {
+  helperContractSupport,
+  isValidHelperContract,
+} from "./contracts.js";
 import { readDescriptor } from "./descriptor.js";
 import {
   activeSkillInventory,
@@ -24,12 +28,14 @@ import { reconcileCustomization } from "./reconcile.js";
 
 function usage() {
   return `Usage:
+  skill-customization supports <contract>
   skill-customization validate <customization.json> [--inventory inventory.json]
   skill-customization fingerprint <path>
   skill-customization discover [name|repository|path] [--root path] [--custom-path path]
   skill-customization bind <customization.json> --source path --context context [--scope global|workspace] [--state path] [--root path]
   skill-customization resolve <customization.json> --context context [--state path] [--root path]
-  skill-customization reconcile <customization.json> --context context [--state path] [--root path] [--cache path] [--decision compatible|absorbed|incompatible] [--evidence text] [--absorbed-delta text]
+  skill-customization reconcile <customization.json> --context context [--state path] [--root path] [--cache path] [--decision compatible|absorbed|incompatible|ambiguous] [--evidence text] [--absorbed-delta text]
+  skill-customization help
 
 Options:
   -h, --help     Show this help
@@ -44,6 +50,7 @@ async function packageVersion() {
 }
 
 const COMMAND_OPTIONS = Object.freeze({
+  supports: new Set(),
   validate: new Set(["inventory"]),
   fingerprint: new Set(),
   discover: new Set(["root", "custom-path"]),
@@ -63,6 +70,7 @@ const COMMAND_OPTIONS = Object.freeze({
 });
 
 const COMMAND_POSITIONAL_MAX = Object.freeze({
+  supports: Number.MAX_SAFE_INTEGER,
   validate: 1,
   fingerprint: 1,
   discover: 1,
@@ -104,6 +112,34 @@ function parseArguments(command, argv) {
 
 function outputJson(io, value) {
   io.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function commandSupports(positionals, io) {
+  const requested = positionals[0];
+  const result = helperContractSupport(requested, await packageVersion());
+  if (positionals.length !== 1 || !isValidHelperContract(requested)) {
+    result.compatible = false;
+  }
+  outputJson(io, result);
+  if (positionals.length === 0) {
+    io.stderr.write("supports requires one helper contract\n");
+    return 1;
+  }
+  if (positionals.length > 1) {
+    io.stderr.write("supports accepts exactly one helper contract\n");
+    return 1;
+  }
+  if (!isValidHelperContract(requested)) {
+    io.stderr.write("helper contract must be a positive integer without leading zeroes\n");
+    return 1;
+  }
+  if (!result.compatible) {
+    io.stderr.write(
+      `helper contract ${requested} is unsupported; supported contracts: ${result.supported_contracts.join(", ")}\n`,
+    );
+    return 1;
+  }
+  return 0;
 }
 
 async function ttyConfirmation(io, question) {
@@ -472,6 +508,7 @@ export async function main(argv = process.argv.slice(2), io = process) {
       io.stdout.write(`${usage()}\n`);
       return 0;
     }
+    if (command === "supports") return await commandSupports(positionals, io);
     if (command === "validate") await commandValidate(positionals[0], options, io);
     else if (command === "fingerprint") {
       io.stdout.write(`${await fingerprintPath(requireValue(positionals[0], "path is required"))}\n`);

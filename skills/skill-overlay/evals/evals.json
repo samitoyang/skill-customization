@@ -3,62 +3,101 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Customize the installed handoff skill so every handoff is also archived locally, while continuing to take upstream workflow improvements.",
-      "expected_output": "Chooses a coexist semantic overlay, discovers a live source, and names it from handoff plus local archive.",
+      "prompt": "/skill-overlay customize /workspace/.agents/skills/handoff so every completed handoff is archived under this project while future upstream workflow changes remain live.",
+      "expected_output": "Uses the complete path and idea to derive evidence and placement, asks only unresolved questions, and presents one overlay brief before helper-backed work.",
       "files": [],
       "expectations": [
-        "The response chooses semantic-overlay rather than fork.",
-        "The customized name differs from handoff and describes local archive.",
-        "The workflow requires a confirmed live-source binding."
+        "The response chooses overlay rather than fork and confirms the concrete source identity.",
+        "The response derives workspace scope and avoids re-asking facts available from the path and request.",
+        "An available agent-writing or skill-creation skill reviews the delta, source conventions, triggers, examples, and completion criteria before the final brief.",
+        "The brief includes conditional npm fetch permission and is confirmed before any npx command."
       ]
     },
     {
       "id": 2,
-      "prompt": "I rewrote an abandoned private deploy skill and need it to work after the original checkout is deleted.",
-      "expected_output": "Routes to skill-fork because no runtime source can be required.",
+      "prompt": "/skill-overlay handoff",
+      "expected_output": "Treats handoff as a source name, discovers its copies, resolves ambiguity, and asks for the missing customization idea.",
       "files": [],
       "expectations": [
-        "The response rejects a semantic overlay.",
-        "The response recommends snapshot and diff provenance."
+        "The response inventories and discovers handoff before asking questions.",
+        "The response confirms one source copy and asks what behavior should change.",
+        "The response does not start deterministic creation from only a name."
       ]
     },
     {
       "id": 3,
-      "prompt": "Create a separate release-report skill that calls the existing deploy skill but does not change deploy behavior.",
-      "expected_output": "Routes to a companion skill without a customization descriptor.",
+      "prompt": "I want every completed agent handoff archived in this repository, but I do not know which installed skill produces handoffs.",
+      "expected_output": "Auto-selects overlay intake, inventories the workspace, offers source candidates with evidence, and confirms one candidate.",
       "files": [],
       "expectations": [
-        "The response identifies a companion rather than an overlay or fork."
+        "The natural-language request triggers the overlay workflow without requiring slash invocation.",
+        "The response inspects inventory before offering relevant source candidates.",
+        "The response confirms the source instead of inventing one."
       ]
     },
     {
       "id": 4,
-      "prompt": "Keep the same review name as the source and make my customized review win in Codex.",
-      "expected_output": "Treats this as replacement and requires precedence, ambiguity checks, and explicit confirmation.",
+      "prompt": "/skill-overlay",
+      "expected_output": "Inventories first, then asks for source and customization idea together without fetching the helper.",
       "files": [],
       "expectations": [
-        "The response uses replace activation only after confirmation.",
-        "The response records customization-first host precedence."
+        "The response inventories installed skills before asking for missing input.",
+        "The response asks for both source and desired behavior in one interaction.",
+        "The response performs no npx fetch and no creation before a confirmed brief."
       ]
     },
     {
       "id": 5,
-      "prompt": "$skill-overlay add our project release checklist to the installed deploy workflow without freezing upstream changes.",
-      "expected_output": "Runs the normal overlay workflow after explicit invocation, with no separate invocation-mode setup.",
+      "prompt": "Customize the installed deploy workflow with our release checklist and keep taking upstream deploy improvements.",
+      "expected_output": "Auto-selects a live semantic overlay and completes intake before deterministic operations.",
       "files": [],
       "expectations": [
-        "The response treats explicit invocation as the same model-invoked overlay workflow.",
-        "The response preserves a live source and a project-scoped binding."
+        "The response chooses semantic-overlay and a confirmed live-source binding.",
+        "The response defaults to a collision-free coexist name.",
+        "The final brief records desired behavior, preserved behavior, non-goals, and observable success."
       ]
     },
     {
       "id": 6,
-      "prompt": "Run my existing customized handoff-local-archive workflow; its customization descriptor is already present.",
-      "expected_output": "Validates and reconciles the existing customization before following the source workflow plus its documented delta.",
+      "prompt": "Run my existing handoff-local-archive customization; its descriptor, CUSTOMIZATION.md, and binding are already present.",
+      "expected_output": "Uses the artifacts as stored intake, validates and reconciles, then runs the source workflow plus its delta.",
       "files": [],
       "expectations": [
-        "The response does not rename or scaffold the existing overlay.",
-        "The response validates, resolves, and reconciles before applying CUSTOMIZATION.md."
+        "The response does not rename, rescope, or repeat intake for the existing overlay.",
+        "The response validates, resolves, and reconciles before applying CUSTOMIZATION.md.",
+        "The response proceeds only when reconciliation is compatible and unstopped."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "/skill-overlay make our private incident-response skill work after its source checkout is deleted.",
+      "expected_output": "Explains that independence conflicts with overlay semantics and asks for confirmation before switching to fork.",
+      "files": [],
+      "expectations": [
+        "The response explains why a live-source overlay cannot satisfy the request.",
+        "The response recommends /skill-fork but waits for explicit routing confirmation.",
+        "The response does not create either model before the mismatch is confirmed."
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Keep the same review name as the source and make my customized review win in Codex.",
+      "expected_output": "Treats same-name activation as replace and obtains a separate confirmation after checking host precedence and collisions.",
+      "files": [],
+      "expectations": [
+        "The response distinguishes replace from the default coexist activation.",
+        "The response checks deterministic customization-first precedence and active copies.",
+        "The response requests a separate replace confirmation."
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Create a release-report skill that calls deploy but leaves the deploy workflow unchanged.",
+      "expected_output": "Routes to a companion skill rather than an overlay, fork, or replacement.",
+      "files": [],
+      "expectations": [
+        "The response identifies a companion because the source behavior is not changing.",
+        "The response does not create a customization descriptor."
       ]
     }
   ]

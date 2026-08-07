@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "compatibility": {
+    "urn:skill-customization:contract-v1:review-local-archive": {
+      "sha256:b4943bc08230564d6d54ade4976dacb10e961b43051099496cc8a89a7eeff953": {
+        "status": "compatible",
+        "evidence": "contract-v1 golden semantic review",
+        "customizationFingerprint": "sha256:9dd92657d52fe71f28a8f517687857d1902075b974ab228368171829deca97cb"
+      }
+    }
+  }
+}

@@ -31,6 +31,7 @@
     "src",
     "skills",
     "docs/cli.md",
+    "docs/helper-contract-1.md",
     "docs/descriptor-v1.md",
     "docs/discovery-and-bindings.md",
     "docs/library.md",

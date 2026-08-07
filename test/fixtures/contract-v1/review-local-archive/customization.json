@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "urn:skill-customization:contract-v1:review-local-archive",
+  "type": "semantic-overlay",
+  "name": "review-local-archive",
+  "entrypoint": "SKILL.md",
+  "customization": "CUSTOMIZATION.md",
+  "dependencies": [],
+  "source": {
+    "skill_name": "review",
+    "kind": "repository",
+    "repository": "https://github.com/example/skills",
+    "upstream_path": "skills/review/SKILL.md",
+    "license": "MIT",
+    "review": {
+      "revision": "contract-v1-checkpoint",
+      "fingerprint": "sha256:c71c1a5fa2e92c3b4edc648f4e0834bfbdbe91a6c6b0b13e9abb81644aade725"
+    }
+  },
+  "activation": {
+    "mode": "coexist"
+  }
+}

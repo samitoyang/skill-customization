@@ -1,4 +1,5 @@
 export * from "./bindings.js";
+export * from "./contracts.js";
 export * from "./descriptor.js";
 export * from "./discovery.js";
 export * from "./errors.js";

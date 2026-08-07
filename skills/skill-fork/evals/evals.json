@@ -3,60 +3,101 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Preserve my heavily rewritten incident-response skill as a standalone package even when the source checkout is unavailable.",
-      "expected_output": "Chooses a fork with license, snapshot, and diff provenance and verifies without a live source.",
+      "prompt": "/skill-fork make the source at /workspace/.agents/skills/incident-response independent, preserve its escalation flow, add our audit record, and prepare it for team sharing.",
+      "expected_output": "Uses the complete path and idea to derive evidence and placement, confirms distribution and license terms, and presents one fork brief before helper-backed work.",
       "files": [],
       "expectations": [
-        "The response chooses fork rather than semantic-overlay.",
-        "The response records snapshot, diff, license, revision, and fingerprint provenance."
+        "The response chooses fork rather than overlay and confirms the concrete source identity.",
+        "The response derives workspace scope and avoids re-asking facts available from the path and request.",
+        "An available agent-writing or skill-creation skill reviews the delta, source conventions, triggers, examples, and completion criteria before the final brief.",
+        "The brief includes independence, team distribution, and conditional npm fetch permission before any npx command."
       ]
     },
     {
       "id": 2,
-      "prompt": "Add one local archive step to handoff but automatically retain future upstream handoff changes.",
-      "expected_output": "Routes to skill-overlay because the source must remain live.",
+      "prompt": "/skill-fork incident-response",
+      "expected_output": "Treats incident-response as a source name, discovers its copies, resolves ambiguity, and asks for the missing customization idea.",
       "files": [],
       "expectations": [
-        "The response rejects fork independence and recommends a live semantic overlay."
+        "The response inventories and discovers incident-response before asking questions.",
+        "The response confirms one source copy and asks what behavior should change.",
+        "The response does not start deterministic creation from only a name."
       ]
     },
     {
       "id": 3,
-      "prompt": "Build a separate dashboard skill that reads outputs from review; do not alter review itself.",
-      "expected_output": "Routes to a companion skill with a normal dependency.",
+      "prompt": "I need a standalone version with an added audit trail, but I do not know which installed skill currently handles incident response.",
+      "expected_output": "Auto-selects fork intake, inventories the workspace, offers source candidates with evidence, and confirms one candidate.",
       "files": [],
       "expectations": [
-        "The response identifies a companion rather than a customization."
+        "The natural-language request triggers the fork workflow without requiring slash invocation.",
+        "The response inspects inventory before offering relevant source candidates.",
+        "The response confirms the source instead of inventing one."
       ]
     },
     {
       "id": 4,
-      "prompt": "Fork review but install it under the same review name everywhere.",
-      "expected_output": "Explains that same-name replacement is contextual, checks ambiguity, and requests explicit confirmation.",
+      "prompt": "/skill-fork",
+      "expected_output": "Inventories first, then asks for source and customization idea together without fetching the helper.",
       "files": [],
       "expectations": [
-        "The response does not silently activate two review skills in replace mode.",
-        "The response requires customization-first precedence and confirmation."
+        "The response inventories installed skills before asking for missing input.",
+        "The response asks for both source and desired behavior in one interaction.",
+        "The response performs no npx fetch and no creation before a confirmed brief."
       ]
     },
     {
       "id": 5,
-      "prompt": "$skill-fork turn our private deploy workflow into a redistributable independent skill after checking its license.",
-      "expected_output": "Runs the normal fork workflow after explicit invocation, including redistribution and provenance gates.",
+      "prompt": "Preserve my heavily rewritten deploy workflow as a private standalone skill that works after the original checkout is gone.",
+      "expected_output": "Auto-selects a fork, records private distribution intent, and completes intake before deterministic operations.",
       "files": [],
       "expectations": [
-        "The response treats explicit invocation as the same model-invoked fork workflow.",
-        "The response checks license, snapshot, diff, and owned payload independence."
+        "The response chooses fork and records that no runtime source remains required.",
+        "The response defaults to a collision-free coexist name.",
+        "The final brief records desired behavior, preserved behavior, non-goals, and observable success."
       ]
     },
     {
       "id": 6,
-      "prompt": "Verify my existing incident-response-standalone fork; its descriptor, snapshot, and diff already exist.",
-      "expected_output": "Validates and reconciles the existing fork without rediscovering or scaffolding it.",
+      "prompt": "Verify my existing incident-response-standalone fork; its descriptor, CUSTOMIZATION.md, snapshot, and diff already exist.",
+      "expected_output": "Uses the artifacts as stored intake and verifies owned provenance without rediscovery or scaffolding.",
       "files": [],
       "expectations": [
-        "The response does not rename or scaffold the existing fork.",
-        "The response verifies the owned snapshot and diff without a live source."
+        "The response does not rename, rescope, or repeat intake for the existing fork.",
+        "The response validates the descriptor, snapshot, diff, license, and checkpoint.",
+        "The response reconciles to fork-ready without a live source."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "/skill-fork add a local archive step to handoff and automatically keep every future upstream handoff change.",
+      "expected_output": "Explains that a live upstream relationship conflicts with fork independence and asks for confirmation before switching to overlay.",
+      "files": [],
+      "expectations": [
+        "The response explains why an independent fork cannot automatically consume upstream changes.",
+        "The response recommends /skill-overlay but waits for explicit routing confirmation.",
+        "The response does not create either model before the mismatch is confirmed."
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Fork review but install it under the same review name everywhere.",
+      "expected_output": "Treats same-name activation as contextual replace and obtains a separate confirmation after checking host precedence and collisions.",
+      "files": [],
+      "expectations": [
+        "The response distinguishes replace from the default coexist activation.",
+        "The response checks deterministic customization-first precedence and active copies.",
+        "The response requests a separate replace confirmation."
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Build a dashboard skill that reads review output but does not change review itself.",
+      "expected_output": "Routes to a companion skill rather than a fork, overlay, or replacement.",
+      "files": [],
+      "expectations": [
+        "The response identifies a companion because the source behavior is not changing.",
+        "The response does not create fork provenance artifacts."
       ]
     }
   ]
