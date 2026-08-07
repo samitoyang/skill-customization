@@ -87,69 +87,33 @@ test("skill helper policy covers installed, npx, declined, incompatible, and mis
   }
 });
 
-test("README explains the user problem, evidence, intake, and contract compatibility", async () => {
+test("README combines public workflow design with contract-compatible helper behavior", async () => {
   const markdown = await read("README.md");
-  const introduction = markdown.split("## Reported pain points and evidence")[0];
-  assert.doesNotMatch(introduction, /\bI\b|\bmy\b/i);
-  for (const concept of [
-    "read-only",
-    "managed by an updater",
-    "full-copy fork",
-    "loses provenance",
-    "name or trigger",
-    "agent paths and skill managers",
-    "upstream reconciliation",
-  ]) {
-    assert.ok(introduction.includes(concept), `introduction should cover ${concept}`);
-  }
-  assert.match(markdown, /## Reported pain points and evidence/);
-  for (const link of [
-    "https://github.com/anthropics/skills/discussions/380",
-    "https://github.com/anthropics/skills/discussions/911",
-    "https://github.com/anthropics/skills/discussions/166",
-    "https://github.com/vercel-labs/skills/issues/810",
-    "https://github.com/vercel-labs/skills/issues/283",
-  ]) {
-    assert.ok(markdown.includes(link));
-  }
+  assert.match(markdown, /^# 🛠️ Skill Customization/);
+  assert.match(markdown, /provides a rock-solid, production-grade layer/);
+  assert.match(markdown, /## ⚠️ Core Problems/);
+  assert.match(markdown, /Update-managed source skills can overwrite direct tweaks/);
+  assert.match(markdown, /read-only sources cannot be edited in place/);
+  assert.match(markdown, /## 🎛️ Customization Models/);
+  assert.match(markdown, /\| Model \| Desired outcome \| Architectural behavior \|/);
+  assert.match(markdown, /\| Mode \| Naming \| Behavior \|/);
   assert.match(markdown, /npx skills@latest add samitoyang\/skill-customization\n/);
   assert.match(markdown, /--skill skill-overlay/);
   assert.match(markdown, /--skill skill-fork/);
-  assert.match(markdown, /--global/);
-  assert.match(markdown, /Natural-language requests are auto-selected/);
+  assert.doesNotMatch(markdown, /npx skills@[^\n]*--global/);
+  assert.doesNotMatch(markdown, /Reported pain points and evidence/);
+  assert.doesNotMatch(markdown, /github\.com\/(?:anthropics\/skills\/discussions|vercel-labs\/skills\/issues)/);
   assert.match(markdown, /\/skill-overlay customize/);
   assert.match(markdown, /\/skill-fork make/);
+  assert.doesNotMatch(markdown, /\$skill-(?:overlay|fork)/);
   assert.match(markdown, /Both skills retain model discovery and explicit user invocation/);
-  for (const inputCase of [
-    "Complete path and idea",
-    "Skill name only",
-    "Idea without a source",
-    "Missing idea",
-    "Empty invocation",
-    "Existing customization",
-    "Explicit model mismatch",
+  for (const managerLink of [
+    "[skills](https://github.com/vercel-labs/skills)",
+    "[asm](https://github.com/luongnv89/asm)",
+    "[Skills Manager](https://github.com/xingkongliang/skills-manager)",
+    "[skillsmgr](https://github.com/jtianling/skills-manager)",
   ]) {
-    assert.ok(markdown.includes(inputCase), `README should cover ${inputCase}`);
-  }
-  assert.match(markdown, /Node\.js 18 or newer, npm access, and helper contract 1 are required/);
-  assert.match(markdown, /Routing, inventory, and intake can happen before the helper/);
-  assert.ok(
-    markdown.indexOf("After the brief is confirmed")
-      < markdown.indexOf("npx --yes skill-customization@latest supports 1"),
-  );
-  assert.match(markdown, /asks permission/);
-  assert.match(markdown, /reuse npm's cache/);
-  assert.match(markdown, /optionally install the current helper globally/);
-  assert.match(markdown, /original published skill text pinned `skill-customization@0\.1\.0`/);
-  assert.match(markdown, /newer `@latest` helper can be used when `supports 1` succeeds/);
-  assert.match(markdown, /Legacy copies of the exact-pinned skill text still cannot accept newer helpers/);
-  for (const manager of [
-    "Vercel Skills",
-    "ASM",
-    "xingkongliang Skills Manager",
-    "jtianling skillsmgr",
-  ]) {
-    assert.ok(markdown.includes(manager));
+    assert.ok(markdown.includes(managerLink));
   }
   for (const root of [
     ".agents/skills",
@@ -161,7 +125,38 @@ test("README explains the user problem, evidence, intake, and contract compatibi
   ]) {
     assert.ok(markdown.includes(root));
   }
-  assert.match(markdown, /does not imply that every agent loads or executes skills identically/);
+  for (const host of ["Codex", "Claude Code", "GitHub Copilot", "Gemini CLI"]) {
+    assert.ok(markdown.includes(host));
+  }
+  assert.match(markdown, /does not imply that every host loads or executes skills identically/);
+  assert.match(markdown, /## 🧭 Customization Workflow/);
+  assert.match(markdown, /```mermaid/);
+  assert.match(markdown, /model-facing workflows/);
+  assert.match(markdown, /deterministic engine/);
+  assert.match(markdown, /skill name, repository, or path/i);
+  assert.match(markdown, /### 📋 Intake and Confirmed Brief/);
+  assert.match(markdown, /Helper-assisted discovery may be used during intake/);
+  assert.match(markdown, /before the first binding/);
+  assert.match(markdown, /same-name replacement requires separate confirmation/);
+  for (const briefInput of [
+    "Skill name, repository, or path",
+    "Behavior and completion criteria",
+    "Updates or independence",
+    "Name and activation",
+    "Workspace context",
+    "License and provenance",
+    "Helper permission",
+  ]) {
+    assert.ok(markdown.includes(briefInput), `README should cover ${briefInput}`);
+  }
+  assert.match(markdown, /one brief confirms the complete customization boundary/);
+  assert.doesNotMatch(markdown, /## 🔌 Helper Compatibility/);
+  assert.doesNotMatch(markdown, /skill-customization supports 1/);
+  assert.match(markdown, /\[Helper contract 1\]\(docs\/helper-contract-1\.md\)/);
+  assert.equal(markdown.match(/Helper contract 1/g)?.length, 1);
+  assert.match(markdown, /\| Boundary \| Guarantee \|/);
+  assert.match(markdown, /## 🤝 Contributing & License/);
+  assert.match(markdown, /Skill Customization is available under the \[MIT License\]\(LICENSE\)/);
 });
 
 test("public documentation pointers resolve", async () => {
