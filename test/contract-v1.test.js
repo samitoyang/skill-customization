@@ -54,6 +54,20 @@ async function contractDescriptor() {
   return readDescriptor(descriptorPath);
 }
 
+async function contractSourceCheckout(prefix) {
+  const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const sourceRoot = path.join(repositoryRoot, "skills", "review");
+  await mkdir(sourceRoot, { recursive: true });
+  await writeFile(
+    path.join(sourceRoot, "SKILL.md"),
+    await readFile(path.join(liveRoot, "SKILL.md")),
+  );
+  return {
+    sourceRoot,
+    skillsRoot: path.dirname(sourceRoot),
+  };
+}
+
 test("helper contract 1: descriptor v1 and fingerprint goldens remain stable", async () => {
   const [descriptor, golden] = await Promise.all([
     contractDescriptor(),
@@ -132,15 +146,18 @@ test("helper contract 1: CLI output, diagnostics, and exit meanings remain stabl
   assert.equal(JSON.parse(malformed.stdout).compatible, false);
 
   const descriptor = await contractDescriptor();
+  const { sourceRoot, skillsRoot } = await contractSourceCheckout(
+    "contract-v1-exits-source-",
+  );
   const temporary = await mkdtemp(path.join(os.tmpdir(), "contract-v1-exits-"));
   const statePath = path.join(temporary, "bindings.json");
   await bindCustomization({
     descriptor,
-    sourcePath: liveRoot,
+    sourcePath: sourceRoot,
     context: "workspace:contract-v1",
     statePath,
     roots: [{
-      path: path.dirname(liveRoot),
+      path: skillsRoot,
       scope: "workspace",
       origin: "project",
     }],
@@ -155,7 +172,7 @@ test("helper contract 1: CLI output, diagnostics, and exit meanings remain stabl
     "--state",
     statePath,
     "--root",
-    path.dirname(liveRoot),
+    skillsRoot,
     "--cache",
     path.join(temporary, "compatibility.json"),
   ]);
@@ -166,22 +183,26 @@ test("helper contract 1: CLI output, diagnostics, and exit meanings remain stabl
 
 test("helper contract 1: discovery and first-use binding semantics remain stable", async () => {
   const descriptor = await contractDescriptor();
+  const { sourceRoot, skillsRoot } = await contractSourceCheckout(
+    "contract-v1-binding-source-",
+  );
   const roots = [{
-    path: path.dirname(liveRoot),
+    path: skillsRoot,
     scope: "workspace",
     origin: "project",
   }];
   const discovery = await discoverSkills({ input: "review", roots });
   assert.equal(discovery.groups.length, 1);
   assert.equal(discovery.groups[0].name, "review");
-  assert.equal(discovery.groups[0].copies[0].path, liveRoot);
+  assert.equal(discovery.groups[0].copies[0].path, sourceRoot);
+  assert.deepEqual(discovery.groups[0].evidence, []);
 
   const temporary = await mkdtemp(path.join(os.tmpdir(), "contract-v1-binding-"));
   const statePath = path.join(temporary, "bindings.json");
   await assert.rejects(
     bindCustomization({
       descriptor,
-      sourcePath: liveRoot,
+      sourcePath: sourceRoot,
       context: "workspace:contract-v1",
       statePath,
       roots,
@@ -191,7 +212,7 @@ test("helper contract 1: discovery and first-use binding semantics remain stable
   );
   const created = await bindCustomization({
     descriptor,
-    sourcePath: liveRoot,
+    sourcePath: sourceRoot,
     context: "workspace:contract-v1",
     statePath,
     roots,
