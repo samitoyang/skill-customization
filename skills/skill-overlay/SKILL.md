@@ -1,37 +1,38 @@
 ---
 name: skill-overlay
-description: Create or maintain a live-source skill customization that keeps receiving upstream improvements. Use for natural-language or explicit overlay requests, existing overlays, and ambiguous customization requests that need routing among overlay, fork, replacement, and companion.
+description: Create or maintain a live-source skill customization that keeps receiving upstream improvements. Use for natural-language or explicit overlay requests, existing overlay maintenance stops, and ambiguous customization requests that need routing among overlay, fork, replacement, and companion.
 license: MIT
 compatibility: Requires Node.js 18+, npm access, and skill-customization helper contract 1 for deterministic operations.
 ---
 
 # Skill Overlay
 
-A semantic overlay preserves a live source workflow and adds a documented delta. Route to a fork when the result must run without the source, or to a companion when it only calls or consumes the source. `replace` is a separately confirmed activation choice with deterministic host precedence; otherwise use a distinct coexist name.
+An overlay keeps a live source workflow and adds one semantic delta. Generated overlay `SKILL.md` files are thin dispatchers: they run checked preflight and execute its ordered steps without invoking this maintenance skill when status is `ready` or `ready-with-advisory`.
 
 ## Workflow
 
-1. Inventory installed skills and customization artifacts before asking questions. Treat an existing descriptor, `CUSTOMIZATION.md`, and binding as stored intake. When an explicit overlay request conflicts with required independence, explain the mismatch and confirm the switch before routing to `/skill-fork`. **Gate:** the workflow type and existing/new branch are unambiguous.
-2. For a new or materially changing customization, read and follow [Overlay intake](references/intake.md). Routing and intake do not require the helper. **Gate:** the user has confirmed one complete customization brief.
-3. Select a contract-1 helper before the first deterministic operation. **Gate:** one exact helper package version is fixed for the run.
-4. Execute the matching branch below. Treat the source as read-only and write only inside the customization or local state paths. **Gate:** every branch criterion is satisfied or the result stops with one actionable next step.
+1. Inventory installed skills and adjacent customization metadata. For an existing overlay execution request, try the dispatcher fast path before intake. **Gate:** one descriptor and current host/workspace context are identified, or the request is classified as new maintenance work.
+2. Select one contract-1 helper, then run `skill-customization preflight <customization.json> --context <context>`. **Gate:** the result is checked and no runtime file has executed early.
+3. On `ready`, follow every execution step in order. On `ready-with-advisory`, report the advisory and follow the same steps. If preflight names another maintenance handler, delegate to it. **Gate:** execution completes from the checked plan or stops at one handler.
+4. For `maintenance-required`, explicit maintenance, or creation, use the matching branch below. Treat the source as read-only and write only inside the customization or local state paths. **Gate:** accepted changes are recorded atomically and preflight reruns ready, or the result stops with one action.
 
 ## Select the helper
 
-Verify Node.js 18+ and npm, then run `skill-customization supports 1`. Accept only exit `0` with JSON reporting `compatible: true`, `requested_contract: "1"`, `supported_contracts` containing `"1"`, and a non-empty `package_version`. Record that exact version and use the verified installed executable for the rest of the run.
+Run `skill-customization supports 1`. Accept only exit `0` with JSON reporting `compatible: true`, `requested_contract: "1"`, `supported_contracts` containing `"1"`, and a non-empty `package_version`. Use that installed executable for this run.
 
-If the command is unavailable or incompatible, explain that `npx` may download `skill-customization@latest` and reuse npm's cache, then obtain permission. After approval, run `npx --yes skill-customization@latest supports 1`. If compatible, use `npx --yes skill-customization@<package_version> <command>` for every remaining command in this run.
+If unavailable or incompatible, explain that `npx` may download `skill-customization@latest` and reuse npm's cache, then obtain permission. After approval, run `npx --yes skill-customization@latest supports 1`; when compatible, use `npx --yes skill-customization@<package_version> <command>` for the remaining commands. If Node/npm is missing, permission is declined, output is malformed, or contract 1 is unsupported, stop with setup guidance. A dispatcher delegates here when installed preflight is unavailable or incompatible; it never runs unchecked.
 
-Stop with concise setup or compatibility guidance when Node/npm is missing, permission is declined, the result is malformed, or contract 1 is unsupported. Read the [CLI reference](https://github.com/samitoyang/skill-customization/blob/main/docs/cli.md) after selecting the helper when choosing commands or handling a stopped result.
+## Maintain an overlay
 
-## Existing customization
+Use the preflight handler reason to focus reconciliation on the stopped overlay. Review source drift against the semantic delta, repair bindings or owned-payload drift, and decide absorbed or incompatible changes explicitly. After acceptance, run `skill-customization accept-maintenance` with the reviewed source effective fingerprint when it changed, then rerun preflight. Activation resumes only from a ready result.
 
-1. Validate the descriptor, resolve its confirmed binding, and reconcile the live source. **Gate:** reconciliation reports `compatible` and `stopped: false`.
-2. Follow the live source workflow and apply `CUSTOMIZATION.md`. **Gate:** every stored delta and source completion criterion is satisfied.
+## Create an overlay
 
-## New customization
+Read [Overlay intake](references/intake.md), confirm one brief, then create:
 
-1. Write the confirmed `CUSTOMIZATION.md`, entrypoint, and v1 descriptor. **Gate:** provenance is portable and every referenced artifact is owned by the customization directory.
-2. Confirm the context-scoped binding, validate, and reconcile. **Gate:** the result is unstopped and reports the confirmed source, scope, fingerprints, and evidence.
+- a thin `SKILL.md` dispatcher that negotiates contract 1, runs preflight, follows only ready steps, and delegates every stopped/unavailable-helper case to `skill-overlay`;
+- `CUSTOMIZATION.md` containing only the semantic delta;
+- a portable v1 descriptor with reviewed owned-payload and full-source or customization-source effective fingerprints;
+- one confirmed context-scoped source binding.
 
-Stop for a missing source, ambiguous drift, absorbed delta, or unresolved activation collision, and report the exact next action.
+Route to `skill-fork` when runtime independence is required, and to a companion when the new skill only calls or consumes the source. `replace` requires separate confirmation and deterministic customization-first precedence.

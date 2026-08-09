@@ -1,30 +1,21 @@
 # Helper contract 1
 
-Contract 1 is the compatibility boundary between the published skills and the helper. A package may report support only while every behavior below remains compatible.
+Contract 1 is the compatibility boundary between generated dispatchers, maintenance skills, and the helper. A package reports support only while this behavior remains compatible.
 
-## Public surface
-
-| Command | Positionals and options |
+| Command | Contract-1 behavior |
 | --- | --- |
-| `supports` | `<contract>` |
-| `validate` | `<customization.json>`; optional `--inventory` |
-| `fingerprint` | `<path>` |
-| `discover` | optional name, repository, or path; repeatable `--root`; optional `--custom-path` |
-| `bind` | `<customization.json>`; required `--source` and `--context`; optional `--scope`, `--state`, and repeatable `--root` |
-| `resolve` | `<customization.json>`; required `--context`; optional `--state` and repeatable `--root` |
-| `reconcile` | `<customization.json>`; overlay `--context`; optional `--state`, repeatable `--root`, `--cache`, `--decision`, `--evidence`, and repeatable `--absorbed-delta`; `--source` remains a rejected bypass |
-| `help` | no arguments; top-level `-h`/`--help` and `-v`/`--version` remain available |
+| `supports` | Report structured compatibility for one contract. |
+| `validate` | Validate descriptor v1 and owned relative artifacts. |
+| `fingerprint` | Fingerprint exact files or directory trees. |
+| `payload-fingerprint` | Fingerprint runtime-owned files, excluding descriptor and `provenance/`, while rejecting symlinks. |
+| `discover` | Search evidence-backed declared roots plus bounded ancestors and classify adjacent customizations. |
+| `bind` / `resolve` | Confirm or resolve context-local concrete source bindings. |
+| `reconcile` | Make one targeted overlay semantic or fork provenance decision. |
+| `preflight` | Flatten a checked recursive execution graph for one descriptor and context. |
+| `accept-maintenance` | Atomically refresh explicitly accepted review fingerprints and optional fork diff. |
 
-- Keep these commands, positionals, option multiplicities, and validation meanings compatible. Reconciliation decisions remain `compatible`, `absorbed`, `incompatible`, and `ambiguous`.
-- Write structured results to standard output and diagnostics to standard error. Preserve exit `0` for success, `1` for invalid input or operational failure, and `2` for a safe reconciliation stop.
-- Accept and validate descriptor schema v1. Keep binding stores with `version: 1` and compatibility caches with `version: 1` readable.
-- Preserve file, ordered-files, directory-tree, and local-identity fingerprint algorithms and their `sha256:` representation.
+Structured results go to standard output and diagnostics to standard error. Preflight exits `0` for `ready` and `ready-with-advisory`, `2` for `maintenance-required`, and `1` for malformed input or operational failure. A maintenance result contains no executable steps and exactly one actionable handler.
 
-## Resolution and reconciliation
+Preflight preserves these invariants: full-source effective fingerprints; customization-source stable identity; base/fork workflow then inner-to-outer deltas; cycle checks by stable ID and canonical path; depth limit 32; fork runtime-leaf behavior; and advisory-only optional fork tracking.
 
-- Resolve repository identity only from discovery evidence. Search declared roots plus bounded workspace ancestors, retain provenance conflicts, and require confirmation before the first binding.
-- Keep concrete source paths and binding/cache state local. Resolve an overlay from its confirmed context binding; a direct source override cannot bypass it.
-- Preserve activation semantics: `coexist` uses a distinct name, while `replace` requires the source name, deterministic customization-first precedence, active-copy checks, and separate confirmation.
-- Preserve reconciliation statuses `compatible`, `ambiguous-drift`, `absorbed-delta`, `incompatible`, and `fork-ready`, including their stopped/unstopped meanings. A fork remains verifiable from its owned snapshot and diff without a runtime source.
-
-The permanent `helper contract 1:` regression tests and `test/fixtures/contract-v1` goldens enforce this surface. A deliberate incompatible change requires a new contract; package version changes alone do not.
+Binding stores and compatibility caches retain `version: 1`. Fingerprints use lowercase `sha256:` values. Portable descriptors never contain concrete source paths. The named `helper contract 1:` tests and `test/fixtures/contract-v1` goldens enforce the public surface.

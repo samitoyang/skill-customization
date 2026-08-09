@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir, stat } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -6,8 +6,8 @@ import { assertValidDescriptor } from "./descriptor.js";
 import { ReconciliationError } from "./errors.js";
 import {
   fingerprintFile,
-  fingerprintFiles,
   fingerprintPath,
+  payloadFingerprint,
 } from "./fingerprint.js";
 import { generateLocalIdentity } from "./normalization.js";
 import { resolveOwnedPath } from "./paths.js";
@@ -44,7 +44,7 @@ async function sourceEntrypoint(sourcePath) {
       code: "LIVE_SOURCE_REQUIRED",
     });
   }
-  return entrypoint;
+  return realpath(entrypoint);
 }
 
 function sourceCheckpoint(descriptor, sourceFingerprint) {
@@ -52,12 +52,8 @@ function sourceCheckpoint(descriptor, sourceFingerprint) {
     skillName: descriptor.source.skill_name,
     fingerprint: sourceFingerprint,
   });
-  const expected = descriptor.source.kind === "repository"
-    ? descriptor.source.review.fingerprint
-    : descriptor.source.identity;
-  const actual = descriptor.source.kind === "repository"
-    ? sourceFingerprint
-    : sourceIdentity;
+  const expected = descriptor.source.effective_fingerprint;
+  const actual = sourceFingerprint;
   return { expected, actual, sourceIdentity, match: actual === expected };
 }
 
@@ -68,12 +64,10 @@ function baseResult(descriptor, sourceFingerprint, customizationFingerprint) {
     type: descriptor.type,
     sourceFingerprint,
     customizationFingerprint,
-    ...(descriptor.source.kind === "repository"
-      ? { checkpointFingerprint: checkpoint.expected }
-      : {
-          sourceIdentity: checkpoint.sourceIdentity,
-          checkpointIdentity: checkpoint.expected,
-        }),
+    checkpointFingerprint: checkpoint.expected,
+    ...(descriptor.source.kind === "local"
+      ? { sourceIdentity: checkpoint.sourceIdentity }
+      : {}),
     checkpointMatch: checkpoint.match,
     stopped: false,
     cached: false,
@@ -536,16 +530,23 @@ async function reconcileOverlay({
       { code: "CUSTOMIZATION_PATH_NOT_OWNED" },
     );
   });
-  const sourceFingerprint = await fingerprintFile(entrypoint);
-  const customizationFingerprint = await fingerprintFiles([
-    customizationEntrypoint,
-    customizationInstructions,
-  ]);
+  const sourceFingerprint = await fingerprintPath(path.dirname(entrypoint));
+  const customizationFingerprint = await payloadFingerprint(customizationRoot);
   const base = baseResult(
     descriptor,
     sourceFingerprint,
     customizationFingerprint,
   );
+  if (
+    customizationFingerprint !== descriptor.owned_payload.reviewed_fingerprint
+  ) {
+    return {
+      ...base,
+      status: "owned-payload-drift",
+      stopped: true,
+      flags: { ambiguousDrift: false, absorbedDeltas: [] },
+    };
+  }
   if (base.checkpointMatch) return { ...base, status: "compatible" };
 
   const cached = await readCompatibility(
@@ -595,15 +596,17 @@ async function reconcileFork({ descriptor, customizationRoot }) {
       descriptor.entrypoint,
     );
     const snapshotEntrypoint = await forkSnapshotEntrypoint(snapshot);
-    const snapshotEntrypointFingerprint = await fingerprintFile(
-      snapshotEntrypoint,
-    );
-    const checkpoint = sourceCheckpoint(
-      descriptor,
-      snapshotEntrypointFingerprint,
-    );
-    if (!checkpoint.match) {
-      throw new Error("fork snapshot entrypoint does not match its source checkpoint");
+    const snapshotFingerprint = await fingerprintPath(snapshot);
+    const diffFingerprint = await fingerprintFile(diff);
+    const ownedFingerprint = await payloadFingerprint(customizationRoot);
+    if (snapshotFingerprint !== descriptor.fork.snapshot_fingerprint) {
+      throw new Error("fork snapshot fingerprint does not match its reviewed descriptor fingerprint");
+    }
+    if (diffFingerprint !== descriptor.fork.diff_fingerprint) {
+      throw new Error("fork diff fingerprint does not match its reviewed descriptor fingerprint");
+    }
+    if (ownedFingerprint !== descriptor.owned_payload.reviewed_fingerprint) {
+      throw new Error("fork owned payload fingerprint does not match its reviewed descriptor fingerprint");
     }
     const diffTargets = await verifyForkDiff({
       contents: await readFile(diff, "utf8"),
@@ -614,9 +617,7 @@ async function reconcileFork({ descriptor, customizationRoot }) {
         : "SKILL.md",
       excludedPaths: [
         "customization.json",
-        descriptor.customization,
-        descriptor.fork.snapshot,
-        descriptor.fork.diff,
+        "provenance",
       ],
     });
     return {
@@ -627,10 +628,11 @@ async function reconcileFork({ descriptor, customizationRoot }) {
       stopped: false,
       provenance: {
         source: descriptor.source,
-        snapshotFingerprint: await fingerprintPath(snapshot),
-        snapshotEntrypointFingerprint,
-        diffFingerprint: await fingerprintFile(diff),
+        snapshotFingerprint,
+        snapshotEntrypointFingerprint: await fingerprintFile(snapshotEntrypoint),
+        diffFingerprint,
         diffTargets,
+        ownedPayloadFingerprint: ownedFingerprint,
         forkFingerprint: await fingerprintFile(entrypoint),
       },
     };

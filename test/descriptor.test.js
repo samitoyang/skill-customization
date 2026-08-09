@@ -30,19 +30,24 @@ function repositoryDescriptor(overrides = {}) {
     id: "urn:skill-customization:example:review-local-archive",
     type: "semantic-overlay",
     name: "review-local-archive",
+    license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
+    owned_payload: {
+      reviewed_fingerprint:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    },
     source: {
       skill_name: "review",
       kind: "repository",
       repository: "https://github.com/example/skills",
       upstream_path: "skills/review/SKILL.md",
       license: "MIT",
+      effective_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       review: {
         revision: "0123456789abcdef",
-        fingerprint:
-          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       },
     },
     activation: { mode: "coexist" },
@@ -66,6 +71,9 @@ test("descriptor keeps private repositories as repository sources and accepts op
     source: {
       skill_name: "review",
       kind: "local",
+      license: "Proprietary",
+      effective_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       identity:
         "local:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     },
@@ -80,6 +88,9 @@ test("descriptor enforces stable names, source variants, and activation rules", 
     source: {
       skill_name: "review",
       kind: "local",
+      license: "MIT",
+      effective_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       identity: "/Users/alice/private-skill",
       auth: "token",
     },
@@ -149,7 +160,7 @@ test("JSON Schema and runtime share machine-path exclusions", async () => {
   );
   const reference = "#/$defs/nonMachinePathString";
   assert.equal(schema.properties.$schema.$ref, reference);
-  assert.equal(schema.$defs.repositorySource.properties.license.$ref, reference);
+  assert.equal(schema.$defs.license.$ref, reference);
   assert.equal(
     schema.$defs.repositorySource.properties.review.properties.revision.$ref,
     reference,
@@ -157,7 +168,7 @@ test("JSON Schema and runtime share machine-path exclusions", async () => {
   const exclusions = schema.$defs.nonMachinePathString.allOf.map(
     ({ not }) => new RegExp(not.pattern),
   );
-  const idPattern = new RegExp(schema.properties.id.pattern);
+  const idPattern = new RegExp(schema.$defs.stableId.pattern);
 
   for (const id of MACHINE_IDS) assert.equal(idPattern.test(id), false);
   for (const id of [
@@ -198,16 +209,81 @@ test("replace requires an equal source name and deterministic precedence", () =>
 test("fork requires relative snapshot and diff provenance", () => {
   const valid = repositoryDescriptor({
     type: "fork",
-    fork: { snapshot: "provenance/source", diff: "provenance/source.diff" },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      diff_fingerprint:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    },
   });
   assert.deepEqual(validateDescriptor(valid), []);
 
   const invalid = repositoryDescriptor({
     type: "fork",
-    fork: { snapshot: "/tmp/source", diff: "../source.diff" },
+    fork: {
+      snapshot: "/tmp/source",
+      diff: "../source.diff",
+      snapshot_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      diff_fingerprint:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    },
   });
   const errors = validateDescriptor(invalid);
   assert.equal(errors.filter(({ path }) => path.startsWith("/fork/")).length, 2);
+});
+
+test("descriptor supports recursive customization sources and requires reviewed overlay materialization for forks", () => {
+  const source = {
+    skill_name: "review-team-base",
+    kind: "customization",
+    id: "urn:skill-customization:example:review-team-base",
+    type: "semantic-overlay",
+    license: "MIT",
+    effective_fingerprint:
+      "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  };
+  assert.deepEqual(validateDescriptor(repositoryDescriptor({ source })), []);
+
+  const fork = {
+    snapshot: "provenance/source",
+    diff: "provenance/source.diff",
+    snapshot_fingerprint:
+      "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    diff_fingerprint:
+      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  };
+  const missing = validateDescriptor(repositoryDescriptor({
+    type: "fork",
+    source,
+    fork,
+  }));
+  assert.ok(missing.some(({ path: pointer }) => pointer === "/fork/materialization"));
+
+  const valid = repositoryDescriptor({
+    type: "fork",
+    source,
+    fork: {
+      ...fork,
+      materialization: {
+        source_effective_fingerprint: source.effective_fingerprint,
+        snapshot_fingerprint: fork.snapshot_fingerprint,
+        reviewed_at: "2026-08-09T00:00:00Z",
+        evidence: "Reviewed the checked base workflow and ordered deltas.",
+      },
+    },
+  });
+  assert.deepEqual(validateDescriptor(valid), []);
+  assert.deepEqual(
+    validateDescriptor(repositoryDescriptor({
+      type: "fork",
+      source: { ...source, type: "fork" },
+      fork,
+    })),
+    [],
+  );
 });
 
 test("reader checks folder/name equality and inventory collisions", async () => {
@@ -274,7 +350,14 @@ test("reader requires fork snapshot and diff to be owned, non-symlinked provenan
     JSON.stringify(
       repositoryDescriptor({
         type: "fork",
-        fork: { snapshot: "provenance/source", diff: "provenance/source.diff" },
+        fork: {
+          snapshot: "provenance/source",
+          diff: "provenance/source.diff",
+          snapshot_fingerprint:
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          diff_fingerprint:
+            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        },
       }),
     ),
   );

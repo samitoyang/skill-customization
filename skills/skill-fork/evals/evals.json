@@ -60,12 +60,12 @@
     {
       "id": 6,
       "prompt": "Verify my existing incident-response-standalone fork; its descriptor, CUSTOMIZATION.md, snapshot, and diff already exist.",
-      "expected_output": "Uses the artifacts as stored intake and verifies owned provenance without rediscovery or scaffolding.",
+      "expected_output": "Uses helper-first preflight and directly runs the fork's complete checked workflow without invoking maintenance when ready.",
       "files": [],
       "expectations": [
         "The response does not rename, rescope, or repeat intake for the existing fork.",
-        "The response validates the descriptor, snapshot, diff, license, and checkpoint.",
-        "The response reconciles to fork-ready without a live source."
+        "The response runs preflight with the current context before any runtime instruction.",
+        "A ready result executes complete CUSTOMIZATION.md as the workflow without invoking skill-fork maintenance."
       ]
     },
     {
@@ -98,6 +98,37 @@
       "expectations": [
         "The response identifies a companion because the source behavior is not changing.",
         "The response does not create fork provenance artifacts."
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Run incident-response-standalone. Its optional tracked source checkout is offline today.",
+      "expected_output": "Preflight reports a tracking advisory and runs the verified fork unchanged because the source is not a runtime dependency.",
+      "files": [],
+      "expectations": [
+        "Source unavailability produces ready-with-advisory rather than a maintenance stop.",
+        "The response runs the complete fork workflow and leaves adoption or rebase explicit."
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "/skill-fork make our verified deploy-release overlay chain into an independent team skill.",
+      "expected_output": "Creates a reviewed materialization checkpoint before diffing the effective chain to a complete independent workflow.",
+      "files": [],
+      "expectations": [
+        "The descriptor source variant records the customization stable ID, type, license, and effective fingerprint.",
+        "Materialization records the chain effective fingerprint, concrete snapshot fingerprint, review time, and evidence.",
+        "The resulting fork is a runtime leaf with complete CUSTOMIZATION.md."
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "Run review-standalone; a helper file inside the fork was edited directly after provenance review.",
+      "expected_output": "Preflight delegates owned fork payload or provenance drift to skill-fork and executes nothing until accepted maintenance is rechecked.",
+      "files": [],
+      "expectations": [
+        "The changed owned-payload fingerprint produces maintenance-required with skill-fork as the handler.",
+        "After acceptance it updates payload, snapshot, and diff fingerprints atomically and reruns preflight."
       ]
     }
   ]

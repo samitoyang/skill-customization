@@ -4,8 +4,11 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Redesign unpublished descriptor v1 and helper contract 1 around thin dispatchers, reviewed owned payloads, full-source/customization-source effective fingerprints, and helper-first preflight.
+- Add recursive overlay flattening with cycle/depth protection, fork runtime-leaf execution, advisory tracking bindings, reviewed overlay-chain materialization, and targeted maintenance handlers.
+- Add `payload-fingerprint`, `preflight`, and `accept-maintenance` CLI/library behavior with atomic accepted-review updates and public-behavior tests.
 - Add helper contract 1 and the public `skill-customization supports <contract>` compatibility check.
-- Freeze contract-1 descriptors, state readability, fingerprints, discovery/binding semantics, CLI outputs and exits, and reconciliation statuses with named regression tests and golden fixtures.
+- Freeze the redesigned contract-1 descriptors, state readability, fingerprints, discovery/binding semantics, CLI outputs and exits with named regression tests and golden fixtures.
 - Replace exact helper-version coupling in both published skills with confirmed intake, contract negotiation, and an exact-version on-demand run after compatibility succeeds.
 - Add complete-path, name-only, idea-only, empty, existing-artifact, and model-mismatch intake behavior for overlay and fork workflows.
 - Expand user documentation with reported pain points, prerequisites, slash invocation, required-input examples, and legacy exact-pin compatibility guidance.

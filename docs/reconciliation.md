@@ -1,9 +1,9 @@
 # Reconciliation
 
-An overlay must resolve a confirmed live-source binding for its context. Its review hash is SHA-256 over the exact reviewed source entrypoint bytes. A matching checkpoint is compatible; a changed fingerprint needs semantic assessment. The source and customization entrypoint/instructions are fingerprinted independently, and compatible assessments are cached only for that pair without rewriting the descriptor.
+Preflight owns recursive graph traversal. It checks the reviewed owned payload, resolves each overlay binding, detects stable-ID and canonical-path cycles, enforces depth 32, and flattens execution as the base or fork workflow followed by semantic deltas from inner to outer. Inner maintenance stops propagate unchanged.
 
-Ambiguous drift stops activation. If upstream has absorbed a documented delta, reconciliation flags that delta and stops for human review. Source files are read-only inputs.
+Reconciliation stays targeted to one semantic or provenance decision. Overlay source drift may be accepted, rejected, marked ambiguous, or identified as an absorbed delta. Source trees remain read-only. Direct overlay payload edits route to `skill-overlay`; accepted maintenance refreshes the reviewed fingerprints atomically before preflight reruns.
 
-A fork validates and fingerprints its owned snapshot, diff, and entrypoint. A directory snapshot has `SKILL.md` at its root. The diff is a non-empty unified diff that applies cleanly to the snapshot and reproduces the owned fork content; unrelated or mismatched diffs stop validation. A fork reports provenance without resolving a runtime source.
+A fork is a runtime leaf. Reconciliation verifies its reviewed owned payload, snapshot and diff fingerprints, rejects symlinks, applies the unified diff to the snapshot, and requires the result to reproduce the complete independent workflow payload. Fork payload or provenance drift routes to `skill-fork`.
 
-Read [Descriptor v1](descriptor-v1.md) when a stop is caused by invalid provenance fields. Read [Discovery and bindings](discovery-and-bindings.md) when an overlay cannot resolve its confirmed source.
+Fork tracking drift and unavailability are advisory. Adoption or rebase is an explicit maintenance action. Forking an overlay chain first reviews a materialized base-plus-deltas snapshot and records both the chain effective fingerprint and concrete snapshot fingerprint.

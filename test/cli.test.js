@@ -8,7 +8,10 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { bindCustomization } from "../src/bindings.js";
-import { fingerprintFile } from "../src/fingerprint.js";
+import {
+  fingerprintPath,
+  payloadFingerprint,
+} from "../src/fingerprint.js";
 import { main } from "../src/cli.js";
 
 const bin = fileURLToPath(new URL("../bin/skill-customization.js", import.meta.url));
@@ -39,22 +42,26 @@ async function fixture() {
     path.join(source, "SKILL.md"),
     "---\nname: review\n---\nsource\n",
   );
-  const fingerprint = await fingerprintFile(path.join(source, "SKILL.md"));
+  const fingerprint = await fingerprintPath(source);
+  const owned = await payloadFingerprint(custom);
   const descriptor = {
     schema_version: 1,
     id: "urn:skill-customization:fixture:review-local-archive",
     type: "semantic-overlay",
     name: "review-local-archive",
+    license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
+    owned_payload: { reviewed_fingerprint: owned },
     source: {
       skill_name: "review",
       kind: "repository",
       repository: "https://github.com/example/skills",
       upstream_path: "skills/review/SKILL.md",
       license: "MIT",
-      review: { revision: "abc", fingerprint },
+      effective_fingerprint: fingerprint,
+      review: { revision: "abc" },
     },
     activation: { mode: "coexist" },
   };
@@ -69,6 +76,9 @@ test("CLI validates, fingerprints, discovers, binds, resolves, and reconciles", 
   const fingerprint = await run(["fingerprint", path.join(item.source, "SKILL.md")]);
   assert.equal(fingerprint.code, 0);
   assert.match(fingerprint.stdout, /^sha256:[0-9a-f]{64}\s*$/);
+  const payload = await run(["payload-fingerprint", item.custom]);
+  assert.equal(payload.code, 0);
+  assert.equal(payload.stdout.trim(), item.descriptor.owned_payload.reviewed_fingerprint);
   const discovered = await run(["discover", item.source, "--root", path.dirname(item.source)]);
   assert.equal(discovered.code, 0, discovered.stderr);
   assert.equal(JSON.parse(discovered.stdout).groups[0].name, "review");
@@ -127,6 +137,18 @@ test("CLI validates, fingerprints, discovers, binds, resolves, and reconciles", 
   ]);
   assert.equal(reconciledFromBinding.code, 0, reconciledFromBinding.stderr);
   assert.equal(JSON.parse(reconciledFromBinding.stdout).status, "compatible");
+  const ready = await run([
+    "preflight",
+    item.descriptorPath,
+    "--context",
+    "global",
+    "--state",
+    state,
+    "--root",
+    path.dirname(item.source),
+  ]);
+  assert.equal(ready.code, 0, ready.stderr);
+  assert.equal(JSON.parse(ready.stdout).status, "ready");
   const directBypass = await run([
     "reconcile",
     item.descriptorPath,
@@ -139,6 +161,18 @@ test("CLI validates, fingerprints, discovers, binds, resolves, and reconciles", 
     path.join(item.source, "SKILL.md"),
     "---\nname: review\n---\nreviewed drift\n",
   );
+  const maintenance = await run([
+    "preflight",
+    item.descriptorPath,
+    "--context",
+    "global",
+    "--state",
+    state,
+    "--root",
+    path.dirname(item.source),
+  ]);
+  assert.equal(maintenance.code, 2, maintenance.stderr);
+  assert.equal(JSON.parse(maintenance.stdout).status, "maintenance-required");
   const cache = path.join(item.root, "state", "compatibility.json");
   const stopped = await run([
     "reconcile",
@@ -235,6 +269,19 @@ test("CLI discovery loads bounded Claude additionalDirectories", async () => {
   assert.equal(discovery.settingsEvidence.length, 1);
 });
 
+test("CLI accepts an explicit owned-payload maintenance update atomically", async () => {
+  const item = await fixture();
+  await writeFile(
+    path.join(item.custom, "CUSTOMIZATION.md"),
+    "Reviewed replacement delta.\n",
+  );
+  const result = await run(["accept-maintenance", item.descriptorPath]);
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const payload = await run(["payload-fingerprint", item.custom]);
+  assert.equal(output.ownedPayloadFingerprint, payload.stdout.trim());
+});
+
 test("CLI accepts standard top-level help flags", async () => {
   for (const flag of ["--help", "-h"]) {
     const result = await run([flag]);
@@ -310,10 +357,13 @@ test("CLI rejects unknown long options for every command", async (t) => {
     supports: ["1"],
     validate: ["customization.json"],
     fingerprint: ["SKILL.md"],
+    "payload-fingerprint": ["customization"],
     discover: ["review"],
     bind: ["customization.json"],
     resolve: ["customization.json"],
     reconcile: ["customization.json"],
+    preflight: ["customization.json"],
+    "accept-maintenance": ["customization.json"],
     help: [],
   };
   for (const [command, argumentsForCommand] of Object.entries(commandArguments)) {
@@ -338,10 +388,13 @@ test("CLI rejects extra positional arguments for every command", async (t) => {
     supports: ["1", "extra"],
     validate: ["customization.json", "extra"],
     fingerprint: ["SKILL.md", "extra"],
+    "payload-fingerprint": ["customization", "extra"],
     discover: ["review", "extra"],
     bind: ["customization.json", "extra"],
     resolve: ["customization.json", "extra"],
     reconcile: ["customization.json", "extra"],
+    preflight: ["customization.json", "extra"],
+    "accept-maintenance": ["customization.json", "extra"],
     help: ["extra"],
   };
   for (const [command, argumentsForCommand] of Object.entries(commandArguments)) {

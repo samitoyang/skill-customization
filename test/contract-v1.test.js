@@ -21,8 +21,8 @@ import { discoverSkills } from "../src/discovery.js";
 import { readDescriptor, validateDescriptor } from "../src/descriptor.js";
 import {
   fingerprintFile,
-  fingerprintFiles,
   fingerprintPath,
+  payloadFingerprint,
 } from "../src/fingerprint.js";
 import { reconcileCustomization } from "../src/reconcile.js";
 
@@ -79,10 +79,9 @@ test("helper contract 1: descriptor v1 and fingerprint goldens remain stable", a
     {
       checkpoint_file: await fingerprintFile(path.join(checkpointRoot, "SKILL.md")),
       live_file: await fingerprintFile(path.join(liveRoot, "SKILL.md")),
-      customization_semantics: await fingerprintFiles([
-        path.join(customizationRoot, "SKILL.md"),
-        path.join(customizationRoot, "CUSTOMIZATION.md"),
-      ]),
+      checkpoint_effective: await fingerprintPath(checkpointRoot),
+      live_effective: await fingerprintPath(liveRoot),
+      owned_payload: await payloadFingerprint(customizationRoot),
       checkpoint_tree: await fingerprintPath(
         path.join(fixtureRoot, "source-checkpoint"),
       ),
@@ -284,31 +283,39 @@ test("helper contract 1: reconciliation status vocabulary remains stable", async
   await writeFile(path.join(snapshotRoot, "SKILL.md"), "snapshot\n");
   await writeFile(
     path.join(forkRoot, "provenance", "source.diff"),
-    "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-snapshot\n+fork\n",
+    "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-snapshot\n+fork\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+Independent fork.\n",
   );
+  const forkSnapshotFingerprint = await fingerprintPath(snapshotRoot);
+  const forkDiffPath = path.join(forkRoot, "provenance", "source.diff");
   const forkDescriptor = {
     schema_version: 1,
     id: "urn:skill-customization:contract-v1:review-standalone",
     type: "fork",
     name: "review-standalone",
+    license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
+    owned_payload: {
+      reviewed_fingerprint: await payloadFingerprint(forkRoot),
+    },
     source: {
       skill_name: "review",
       kind: "repository",
       repository: "https://github.com/example/skills",
       upstream_path: "skills/review/SKILL.md",
       license: "MIT",
+      effective_fingerprint: forkSnapshotFingerprint,
       review: {
         revision: "contract-v1-checkpoint",
-        fingerprint: await fingerprintFile(path.join(snapshotRoot, "SKILL.md")),
       },
     },
     activation: { mode: "coexist" },
     fork: {
       snapshot: "provenance/source",
       diff: "provenance/source.diff",
+      snapshot_fingerprint: forkSnapshotFingerprint,
+      diff_fingerprint: await fingerprintFile(forkDiffPath),
     },
   };
   await writeFile(

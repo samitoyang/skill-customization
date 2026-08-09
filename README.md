@@ -1,10 +1,10 @@
 # 🛠️ Skill Customization
 
-Skill Customization provides a rock-solid, production-grade layer to adapt installed agent skills safely—tracking their origins, documenting changes, and preventing architectural breakage when upstream sources move forward.
+Skill Customization provides a reliable way to adapt installed agent skills while keeping custom workflows aligned with improvements from their original sources. It tracks where each skill came from, records intentional changes, and prevents future updates from silently overwriting or breaking customized behavior.
 
 ## ⚠️ Core Problems
 
-### 📁 In-Place Editing Faults
+### 📁 In-Place Edits Disappear
 
 Update-managed source skills can overwrite direct tweaks during their next refresh; read-only sources cannot be edited in place.
 
@@ -13,13 +13,17 @@ Update-managed source skills can overwrite direct tweaks during their next refre
 
 ```text
 managed-skills/
-└── handoff/SKILL.md                 # Live, read-only upstream source
+└── handoff/
+    └── SKILL.md                 # Live, read-only upstream source
 
 customizations/
-└── handoff-local-archive/           # Documented delta + descriptor
+└── handoff-local-archive/
+    ├── SKILL.md                 # Thin dispatcher
+    ├── CUSTOMIZATION.md         # Semantic delta from source
+    └── customization.json       # Descriptor: portable identity + review
 ```
 
-### 📉 Full Copy Drifts
+### 📉 Full Copies Drift
 
 Full-copy forks become difficult to audit as they drift, lose provenance, or collide with the source skill's name or trigger.
 
@@ -27,12 +31,18 @@ Full-copy forks become difficult to audit as they drift, lose provenance, or col
 - **Mechanism:** Store a reviewed source snapshot alongside an explicit diff file.
 
 ```text
-incident-response-standalone/
-├── customization.json
-├── SKILL.md
-└── provenance/
-    ├── source/                      # Reviewed snapshot
-    └── source.diff                  # Snapshot → owned payload
+managed-skills/
+└── incident-response/
+    └── SKILL.md                         # Source selected for review
+
+customizations/
+└── incident-response-standalone/
+    ├── SKILL.md                         # Thin dispatcher
+    ├── CUSTOMIZATION.md                 # Complete independent workflow
+    ├── customization.json               # Descriptor: portable identity + provenance
+    └── provenance/
+        ├── source/                      # Reviewed snapshot
+        └── source.diff                  # Snapshot → owned payload
 ```
 
 ### 🛑 Multi-Agent Collisions
@@ -40,24 +50,34 @@ incident-response-standalone/
 One logical skill may be active through several agent paths or skill managers at once, making the selected copy uncertain.
 
 - **The fix:** Use evidence-based discovery and binding.
-- **Mechanism:** Keep identical names distinct, resolve collisions, and scan each physical root once.
+- **Mechanism:** Let the portable descriptor state the expected source identity and fingerprint, then keep the selected concrete path in a context-scoped local binding.
 
 ```text
-project/.agents/skills/review        # Shared agent path
-project/.claude/skills/review        # Host-specific path
-~/.codex/skills/review               # Personal path
-~/.skills-manager/.../review         # Manager path
+project/.agents/skills/review/                  # Shared candidate
+project/.claude/skills/review/                  # Host-specific candidate
+~/.codex/skills/review/                         # Personal candidate
+~/.skills-manager/.../review/                   # Manager candidate
+
+customizations/review-with-policy/
+└── customization.json                       # Descriptor: portable source requirements
+
+$XDG_STATE_HOME/skill-customization/
+└── bindings.json                            # Confirmed path for this context
 ```
 
 ## 🎛️ Customization Models
 
-| Model | Desired outcome | Architectural behavior |
+Customization models describe the runtime relationship between a skill and its source.
+
+| Model | Source relationship | Runtime behavior |
 | --- | --- | --- |
-| `skill-overlay` | Keep receiving source improvements and add a documented behavior change | Retains a live source connection |
-| `skill-fork` | Own an independent skill that works without the source checkout | Owns its snapshot and diff payload |
-| Companion skill | Build a separate skill that only calls or consumes the source | Requires no customization binding |
+| `skill-overlay` | Live ordinary skill, verified overlay, or verified fork | Source workflow followed by a semantic delta; source updates remain available |
+| `skill-fork` | Reviewed ordinary skill, verified overlay, or verified fork | Complete independent workflow; no live runtime source required |
+| Companion skill | Ordinary dependency | Separate workflow that calls or consumes the source; no customization binding |
 
 ### Activation Modes
+
+Activation is separate from source relationship: a customization either coexists with the source or intentionally replaces it.
 
 | Mode | Naming | Behavior |
 | --- | --- | --- |
@@ -66,24 +86,34 @@ project/.claude/skills/review        # Host-specific path
 
 ## 📥 Installation
 
-Install both bundled workflow models with [skills](https://github.com/vercel-labs/skills):
+Install both customization skills with [skills](https://github.com/vercel-labs/skills):
 
 ```sh
 npx skills@latest add samitoyang/skill-customization
 ```
 
-Or install one explicit workflow model:
+Or install either skill:
 
 ```sh
 npx skills@latest add samitoyang/skill-customization --skill skill-overlay
 npx skills@latest add samitoyang/skill-customization --skill skill-fork
 ```
 
-Both skills are independently installable. Natural-language requests can select them automatically, and explicit slash invocation remains available.
+Natural-language requests can select either skill automatically, and explicit slash invocation remains available.
 
-### Ecosystem Compatibility
+Optionally pre-install the helper:
 
-**Supported hosts.** The [checkpointed agent registry](https://github.com/vercel-labs/skills/blob/305ff8be68e59368789d765e2cf0edfab851c453/src/agents.ts) covers Codex, Claude Code, GitHub Copilot, Cursor, Gemini CLI, OpenCode, OpenHands, Windsurf, and other hosts through their declared project and personal roots.
+```sh
+npm install --global skill-customization@latest
+```
+
+The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. Without a pre-installed copy, a skill can ask permission to run it through `npx` when needed. Compatibility is checked before use.
+
+## 🌐 Ecosystem Compatibility
+
+### Hosts and roots
+
+The [checkpointed agent registry](https://github.com/vercel-labs/skills/blob/305ff8be68e59368789d765e2cf0edfab851c453/src/agents.ts) covers Codex, Claude Code, GitHub Copilot, Cursor, Gemini CLI, OpenCode, OpenHands, Windsurf, and other hosts through their declared project and personal roots.
 
 | Root type | Representative paths |
 | --- | --- |
@@ -92,7 +122,9 @@ Both skills are independently installable. Natural-language requests can select 
 | Personal | `~/.agents/skills`, `~/.claude/skills`, `$CODEX_HOME/skills` |
 | Configured | Claude `additionalDirectories`, `COPILOT_SKILLS_DIRS`, manager-owned roots, explicit custom paths |
 
-**Supported manager metadata:**
+### Skill managers
+
+Discovery understands metadata from:
 
 - [skills](https://github.com/vercel-labs/skills) v3 lock metadata
 - [asm](https://github.com/luongnv89/asm)
@@ -104,49 +136,42 @@ Both skills are independently installable. Natural-language requests can select 
 
 ## 💬 Usage
 
-### Natural Language Prompts
-
-- “Customize handoff so every result is archived locally, while keeping upstream updates.”
-- “Make incident-response independent of its original checkout.”
-- “Run my existing customized handoff workflow.”
-
 ### Explicit Skill Invocations
+
+Invoke a skill without a trailing prompt to start interactive creation:
+
+```text
+/skill-overlay
+/skill-fork
+```
+
+Or include an initial request:
 
 ```text
 /skill-overlay customize handoff so every result is archived locally
 /skill-fork make incident-response independent of its original checkout
 ```
 
-Both skills retain model discovery and explicit user invocation; explicit invocation follows the same workflow rather than enabling a separate mode.
+Explicit invocation and automatic model selection enter the same creation process.
 
-## 🧭 Customization Workflow
+### Natural Language Prompts
 
-`skill-overlay` and `skill-fork` are model-facing workflows: they interpret intent, gather decisions, and enforce gates. The `skill-customization` helper is their deterministic engine for local evidence and reproducible operations.
+- “Customize handoff so every result is archived locally, while keeping upstream updates.”
+- “Make incident-response independent of its original checkout.”
+- “Create a separate review skill that still calls the original.”
+- “Run my existing customized handoff workflow.”
 
-```mermaid
-flowchart LR
-    A["Request<br/>skill name, repository, or path"] --> B["Model-facing workflow<br/>clarify intent and route"]
-    B <-->|"deterministic local operations"| C["skill-customization helper"]
-    B --> D["📋 Confirmed brief<br/>source, model, activation"]
-    D --> E["Overlay<br/>live source + delta"]
-    D --> F["Fork<br/>owned snapshot + diff"]
-    D --> G["Companion<br/>ordinary dependency"]
-```
+### After Creation
 
-| Stage | Model-facing workflow | Helper |
-| --- | --- | --- |
-| Resolve a source hint | Clarify the outcome and unresolved choices | Search declared roots and bounded workspace ancestors; inspect metadata; group installed copies and provenance |
-| Create an overlay | Confirm the delta, live-source relationship, name, activation, and context | Validate, bind one confirmed source, fingerprint both sides, and reconcile |
-| Run an existing overlay | Follow the live workflow and apply the documented delta | Revalidate the binding; stop on ambiguous, incompatible, or absorbed upstream changes |
-| Create or verify a fork | Confirm independence, license, owned provenance, and activation | Validate the snapshot and diff; prove they reproduce the complete fork payload without a live runtime source |
+- **Destination:** New workspace customizations use `.agents/skills/<name>/` by default. During creation, a compatible host-specific project root or personal skill root may be selected instead.
 
-A companion skill uses an ordinary dependency and needs no customization descriptor or binding.
+- **Relocation:** Move the entire customization directory to another supported skill root, then reload the agent host. In a different workspace, an overlay requires source confirmation before running; a fork continues independently.
 
-### 📋 Intake and Confirmed Brief
+## 📋 Creation Workflow
 
-Provide a source and customization idea when they are known. For partial or empty requests, the workflow inventories evidence and asks only for unresolved decisions. Existing artifacts remain stored intake, and an overlay/fork mismatch is explained before the workflow changes.
+The creation phase can begin with a bare invocation, a known source and customization idea, or existing artifacts. Helper-assisted discovery inventories available evidence and asks only for unresolved decisions. Existing artifacts count as prior intake, and any overlay/fork mismatch is explained before changes are made.
 
-Before helper-backed creation, one brief confirms the complete customization boundary:
+Before artifacts are written or a binding is created, one brief confirms the complete customization boundary:
 
 | Input | Confirms |
 | --- | --- |
@@ -156,20 +181,52 @@ Before helper-backed creation, one brief confirms the complete customization bou
 | Name and activation | Coexist or explicit replacement |
 | Workspace context | Destination, binding scope, and directory boundaries |
 | License and provenance | Review and redistribution evidence |
-| Helper permission | Whether an on-demand compatibility check may download or reuse cached code |
+| Helper access | Whether to use an installed helper or permit an on-demand compatibility check to download or reuse cached code |
 
 > [!IMPORTANT]
-> Helper-assisted discovery may be used during intake. Confirm the concrete source and activation intent before the first binding; same-name replacement requires separate confirmation.
+> Same-name replacement requires separate confirmation because it changes which skill activates.
+
+## 🧭 Runtime Workflow
+
+After creation, every invocation follows a checked runtime path. The graph distinguishes portable files, local state, installed tooling, and runtime instructions.
+
+```mermaid
+flowchart LR
+    subgraph P["Preflight"]
+        direction TB
+        B["Preflight helper<br/>(skill-customization package)"]
+        B -->|"reads"| G["Descriptor file<br/>(customization.json)<br/>source: ordinary skill / overlay / fork"]
+        B -->|"uses when required"| H["Local binding state<br/>(bindings.json)"]
+    end
+    A["Dispatcher file<br/>(SKILL.md)"] -->|"runs"| B
+    A -->|"helper unavailable / incompatible"| F["Maintenance skills<br/>(skill-overlay / skill-fork)"]
+    B -->|"ready / ready-with-advisory"| C["Runtime instructions<br/>(SKILL.md / CUSTOMIZATION.md)"]
+    C --> D["Base workflow or fork leaf"]
+    D -->|"then, if present"| E["Overlay deltas<br/>(CUSTOMIZATION.md, inner to outer)"]
+    B -->|"maintenance-required"| F
+    F -->|"accepted update"| B
+```
+
+| Graph component | Artifact | Responsibility |
+| --- | --- | --- |
+| Dispatcher file | `SKILL.md` | Selects a compatible helper and starts preflight |
+| Descriptor file | `customization.json` | Stores portable identity, source requirements, and reviewed fingerprints |
+| Local binding state | `bindings.json` | Stores the concrete source path for one context when required |
+| Preflight helper | `skill-customization` package | Validates local evidence and returns checked runtime instructions or a maintenance stop |
+| Runtime instructions | Source `SKILL.md` and customization `CUSTOMIZATION.md` files | Run the base or fork workflow followed by overlay deltas |
+| Maintenance skills | `skill-overlay` or `skill-fork` | Handle creation, drift, repair, incompatible setup, and explicit maintenance |
+
+A ready customization executes its checked runtime instructions directly without invoking a maintenance skill.
 
 ## 🛡️ Security and Provenance
 
 | Boundary | Guarantee |
 | --- | --- |
 | Resolved source | Read-only input; customization writes stay outside it |
-| Portable descriptor | Stable identity, relative artifacts, provenance, and activation; no credentials or machine-local paths |
+| Portable descriptor | Stable identity, own/source licenses, relative artifacts, reviewed fingerprints, and activation; no concrete source paths |
 | Local state | Context-scoped bindings and compatibility decisions written atomically under a cross-process lock |
-| Overlay | Live binding and independent source/customization fingerprints; ambiguous or absorbed drift stops activation |
-| Fork | Owned, relative, symlink-free snapshot and diff that must reproduce the complete payload |
+| Overlay | Live context binding, reviewed owned payload, and full-source or customization-source effective fingerprint |
+| Fork | Runtime leaf with complete workflow and owned, relative, symlink-free snapshot and diff |
 
 Published descriptors keep stable identity and provenance portable. Concrete source paths, credentials, bindings, and compatibility decisions remain local. The supporting Node.js package has no runtime dependencies.
 
@@ -181,14 +238,5 @@ Published descriptors keep stable identity and provenance portable. Concrete sou
 - For roots, evidence order, source selection, and local state, read [Discovery and bindings](docs/discovery-and-bindings.md).
 - For overlay drift and fork-payload verification, read [Reconciliation](docs/reconciliation.md).
 - For embedding the engine in another Node.js tool, read the [Library reference](docs/library.md).
+- For the runtime decision, read [ADR 0001](docs/adr/0001-managed-recursive-runtime.md).
 - For vulnerability reporting and release history, see [Security](SECURITY.md) and the [Changelog](CHANGELOG.md).
-
-## 🤝 Contributing & License
-
-Contributions are highly valued. Read the [structural guidelines](CONTRIBUTING.md) before proposing workflow extensions.
-
-- **Bug reports:** Include the command, expected and actual behavior, Node.js version, a sanitized `customization.json`, and the exact `stderr` diagnostics.
-- **Feature requests:** Describe proposed additions to helper verification or architectural rules, including the public behavior and tests they affect.
-- **Code style:** Preserve the deterministic runtime contract, add `node:test` coverage, and run `npm run verify`.
-
-Skill Customization is available under the [MIT License](LICENSE).

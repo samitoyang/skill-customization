@@ -1,6 +1,6 @@
 # Fork intake
 
-Use this intake only for a new fork or a material change to an existing one. Derive facts from the request, workspace, inventory, source, descriptor, `CUSTOMIZATION.md`, snapshot, and diff before asking; ask only for unresolved decisions.
+Use this intake only for a new fork or an explicit material change. Existing execution starts with helper preflight; derive facts from the request, workspace, inventory, source graph, descriptor, complete `CUSTOMIZATION.md` workflow, snapshot, and diff before asking.
 
 ## Starting point
 
@@ -18,13 +18,16 @@ If the user requires automatic upstream changes from a live source, explain why 
 
 Resolve these fields:
 
-- **Source identity:** confirmed copy, declared name, repository and upstream entrypoint or opaque local identity, review checkpoint, license, and discovery evidence.
-- **Delta:** context, desired behavior, preserved source behavior, non-goals, and observable success.
+- **Source identity:** confirmed full source or verified customization, declared name, stable identity, type, license, expected effective fingerprint, and discovery evidence. Concrete paths belong only in an optional context tracking binding.
+- **Independent workflow:** context, complete desired workflow, preserved behavior, non-goals, and observable success. `CUSTOMIZATION.md` contains the whole runnable workflow, not a delta.
 - **Placement:** workspace or personal scope and exact destination.
 - **Name and activation:** offer two or three collision-free `<source>-<outcome>` names and default to `coexist`. Record `replace` only after a separate confirmation of same-name intent and customization-first host precedence.
-- **Independence and distribution:** state that no runtime source remains required, and record whether the fork is private, team-shared, or public so license and redistribution review match the intended audience.
+- **Independence and distribution:** state that the fork is a runtime leaf, and record whether it is private, team-shared, or public so license and redistribution review match the intended audience.
+- **Materialization:** when the source is an overlay chain, review its checked base-plus-deltas result and record the chain effective fingerprint, concrete snapshot fingerprint, review time, and evidence before diffing to the independent workflow.
+- **Tracking:** ask whether to retain a confirmed advisory binding. No binding is silent; drift or unavailability never blocks; adoption and rebase are explicit.
+- **Dispatcher:** generate a thin `SKILL.md` that runs contract-1 preflight, follows only ready steps, and delegates unavailable, incompatible, or maintenance-required results to `skill-fork`.
 - **Helper fallback:** record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 1. The download may run only after brief confirmation.
 
 Before finalizing, invoke any available skill-creation or agent-writing skill, such as `skill-creator` or `writing-for-agents`. Review the proposed delta against source conventions, trigger behavior, realistic examples, and checkable completion criteria. Fold material findings into the brief.
 
-Present one brief containing every field above and ask for one confirmation. The intake is complete only when source identity, delta, placement, name, activation, independence, distribution intent, conditional helper permission, and any workflow-model switch are explicit and confirmed. Helper-backed creation begins only after that confirmation.
+Present one brief containing every field above and ask for one confirmation. Intake is complete only when source identity, independent workflow, placement, name, activation, materialization/tracking choices, distribution intent, dispatcher behavior, conditional helper permission, and any workflow-model switch are explicit. Helper-backed creation begins after confirmation.

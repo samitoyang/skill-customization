@@ -1,16 +1,9 @@
 # Library reference
 
-Use the library when another Node.js tool needs the same descriptor, discovery, binding, fingerprint, reconciliation, or atomic-state behavior as the CLI. The package supports Node.js 18+ and has no runtime dependencies.
+Import public functions from `skill-customization`; the package root is the supported Node.js 18+, zero-runtime-dependency API. The schema is exported as `skill-customization/schema`.
 
-Import public functions from `skill-customization`; the package root is the supported API boundary. The JSON Schema is exported as `skill-customization/schema`.
+Primary seams are descriptor validation, normalization and naming, full-path and owned-payload fingerprints, bounded discovery and manager records, context bindings, targeted reconciliation, recursive `preflightCustomization`, explicit `acceptMaintenanceUpdate`, and locked atomic file/JSON updates.
 
-The main seams are:
+`preflightCustomization` returns `ready`, `ready-with-advisory`, or `maintenance-required`; ready results contain `effectiveFingerprint`, ordered steps with `role`, `path`, `root`, and `customizationId`, advisories, and at most one maintenance handler. `acceptMaintenanceUpdate` atomically refreshes accepted source/payload/snapshot/diff review data; callers rerun preflight before execution.
 
-- descriptor reading and validation;
-- normalization, naming, and fingerprints;
-- checkpointed host roots, bounded discovery, and manager records;
-- context-scoped bindings and active-skill inventory;
-- overlay and fork reconciliation;
-- locked atomic JSON state updates.
-
-Keep publishable descriptors separate from local paths, credentials, bindings, and compatibility caches. Read [Descriptor v1](descriptor-v1.md) before constructing descriptors, [Discovery and bindings](discovery-and-bindings.md) before resolving sources, and [Reconciliation](reconciliation.md) before activating a customization.
+Keep resolved sources read-only and machine-local state outside portable customization artifacts. Read [Descriptor v1](descriptor-v1.md), [Discovery and bindings](discovery-and-bindings.md), and [Reconciliation](reconciliation.md) before constructing a runtime integration.

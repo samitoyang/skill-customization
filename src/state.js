@@ -103,6 +103,10 @@ export async function readJsonState(filePath, fallback) {
 }
 
 export async function writeJsonAtomic(filePath, value) {
+  return writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+export async function writeFileAtomic(filePath, contents, { mode = 0o600 } = {}) {
   const directory = path.dirname(filePath);
   await mkdir(directory, { recursive: true });
   const temporary = path.join(
@@ -110,7 +114,7 @@ export async function writeJsonAtomic(filePath, value) {
     `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
   );
   try {
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(temporary, contents, { mode });
     await rename(temporary, filePath);
   } catch (error) {
     await unlink(temporary).catch(() => {});

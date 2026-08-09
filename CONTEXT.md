@@ -1,11 +1,14 @@
 # Domain context
 
-- **Customization**: a stable descriptor plus an entrypoint and documented delta.
-- **Semantic overlay**: a customization reconciled against a live source at runtime.
-- **Fork**: a customization that owns its provenance snapshot and diff.
-- **Source**: the original skill identity; repository review data is a checkpoint, not a pin.
-- **Activation**: `coexist` uses a distinct name; `replace` uses the source name with deterministic host precedence.
-- **Discovery evidence**: explicit input, containing Git, manager metadata, embedded metadata, then confirmation.
-- **Binding**: local state mapping customization plus host/workspace context to a concrete source copy.
-- **Compatibility cache**: a local semantic result keyed by source and customization-semantics fingerprints.
-- **Absorbed delta**: customized behavior now supplied upstream and requiring human review.
+- **Customization**: portable v1 descriptor plus a thin dispatcher and runtime-owned workflow material.
+- **Semantic overlay**: a live-source customization whose `CUSTOMIZATION.md` is one semantic delta.
+- **Fork**: an independent runtime leaf whose `CUSTOMIZATION.md` is the complete workflow and whose provenance owns a snapshot and diff.
+- **Full source**: an ordinary skill identified by discovery evidence and a reviewed full-directory effective fingerprint.
+- **Customization source**: a verified overlay or fork identified portably by stable ID, type, name, license, and effective fingerprint.
+- **Effective fingerprint**: the deterministic identity of a checked execution result; recursive overlays compose the base/fork workflow with inner-to-outer deltas.
+- **Owned payload**: every runtime-owned file except `customization.json` and reserved `provenance/`; symlinks are invalid.
+- **Preflight**: helper-owned graph traversal that either returns an ordered checked execution plan, a plan with advisory, or one maintenance handler.
+- **Binding**: context-local mapping from customization ID to a concrete source copy; concrete paths never enter portable artifacts.
+- **Tracking binding**: optional fork binding used only for drift advisories; adoption and rebase remain explicit.
+- **Materialization**: reviewed concrete snapshot of an overlay chain, recording both chain effective and snapshot fingerprints plus review evidence.
+- **Reconciliation**: targeted semantic or provenance review for one maintenance decision; recursive traversal belongs to preflight.

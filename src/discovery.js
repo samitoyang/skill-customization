@@ -10,8 +10,9 @@ import {
 import os from "node:os";
 import path from "node:path";
 
+import { validateDescriptor } from "./descriptor.js";
 import { DiscoveryError } from "./errors.js";
-import { fingerprintFile } from "./fingerprint.js";
+import { fingerprintPath } from "./fingerprint.js";
 import {
   collectManagerRecords,
   managerSkillRoots,
@@ -367,36 +368,68 @@ async function gitEvidence(directory) {
 }
 
 async function embeddedEvidence(directory) {
-  for (const filename of [".skill-source.json", "customization.json"]) {
-    const file = path.join(directory, filename);
-    try {
-      const metadata = JSON.parse(await readFile(file, "utf8"));
-      const source = metadata.source ?? metadata;
-      if (source.kind === "repository" && source.repository) {
-        const upstreamPath = normalizeUpstreamEntrypoint(
-          source.upstream_path ?? source.upstreamPath,
-        );
-        return {
-          kind: "embedded",
-          repository: normalizeRepositoryUrl(source.repository),
-          ...(upstreamPath
-            ? { upstream_path: upstreamPath, upstreamPath }
-            : {}),
-        };
-      }
-      if (source.kind === "local" && source.identity) {
-        return { kind: "embedded", identity: source.identity };
-      }
-    } catch {
-      // Missing or unrelated adjacent metadata is not evidence.
+  const file = path.join(directory, ".skill-source.json");
+  try {
+    const metadata = JSON.parse(await readFile(file, "utf8"));
+    const source = metadata.source ?? metadata;
+    if (source.kind === "repository" && source.repository) {
+      const upstreamPath = normalizeUpstreamEntrypoint(
+        source.upstream_path ?? source.upstreamPath,
+      );
+      return {
+        kind: "embedded",
+        repository: normalizeRepositoryUrl(source.repository),
+        ...(upstreamPath ? { upstream_path: upstreamPath, upstreamPath } : {}),
+      };
+    }
+    if (source.kind === "local" && source.identity) {
+      return { kind: "embedded", identity: source.identity };
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw new DiscoveryError(`malformed embedded source metadata ${file}: ${error.message}`, {
+        code: "MALFORMED_SOURCE_METADATA",
+      });
     }
   }
   return undefined;
 }
 
+async function adjacentCustomization(directory) {
+  const descriptorPath = path.join(directory, "customization.json");
+  let contents;
+  try {
+    contents = await readFile(descriptorPath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    throw new DiscoveryError(`cannot read adjacent customization metadata ${descriptorPath}: ${error.message}`, {
+      code: "MALFORMED_CUSTOMIZATION_METADATA",
+    });
+  }
+  let descriptor;
+  try {
+    descriptor = JSON.parse(contents);
+  } catch (error) {
+    throw new DiscoveryError(`malformed customization metadata ${descriptorPath}: ${error.message}`, {
+      code: "MALFORMED_CUSTOMIZATION_METADATA",
+    });
+  }
+  const errors = validateDescriptor(descriptor);
+  if (errors.length > 0 || descriptor.name !== path.basename(directory)) {
+    throw new DiscoveryError(`invalid customization metadata ${descriptorPath}`, {
+      code: "MALFORMED_CUSTOMIZATION_METADATA",
+      details: errors.length > 0
+        ? errors
+        : [{ path: "/name", message: "must match its directory name" }],
+    });
+  }
+  return descriptor;
+}
+
 async function candidateFromDirectory(directory, rootInfo) {
   const entrypoint = path.join(directory, "SKILL.md");
   const markdown = await readFile(entrypoint, "utf8");
+  const customization = await adjacentCustomization(directory);
   return {
     name: parseSkillMetadata(markdown).name ?? path.basename(directory),
     path: path.resolve(directory),
@@ -406,7 +439,20 @@ async function candidateFromDirectory(directory, rootInfo) {
     owners: rootInfo.owners ?? [rootInfo.owner],
     scope: rootInfo.scope,
     origin: rootInfo.origin,
-    fingerprint: await fingerprintFile(entrypoint),
+    fingerprint: customization?.owned_payload.reviewed_fingerprint
+      ?? await fingerprintPath(directory),
+    classification: customization ? "customization" : "skill",
+    ...(customization
+      ? {
+          customization: {
+            id: customization.id,
+            type: customization.type,
+            license: customization.license,
+            reviewedPayloadFingerprint:
+              customization.owned_payload.reviewed_fingerprint,
+          },
+        }
+      : {}),
     evidence: [],
   };
 }
@@ -540,6 +586,10 @@ function groupCandidates(candidates) {
       evidence: copyEvidence,
       provenance: copyProvenance.identities,
       conflict: copyProvenance.conflict,
+      classification: candidate.classification,
+      ...(candidate.customization
+        ? { customization: structuredClone(candidate.customization) }
+        : {}),
     });
     group.evidence.push(...candidate.evidence);
     groups.set(key, group);

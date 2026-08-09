@@ -19,22 +19,27 @@ import {
   discoverSkills,
 } from "./discovery.js";
 import { DiscoveryError } from "./errors.js";
-import { fingerprintPath } from "./fingerprint.js";
+import { fingerprintPath, payloadFingerprint } from "./fingerprint.js";
 import {
   collectManagerRecords,
   managerSkillRoots,
 } from "./manager-collector.js";
 import { reconcileCustomization } from "./reconcile.js";
+import { preflightCustomization } from "./preflight.js";
+import { acceptMaintenanceUpdate } from "./maintenance.js";
 
 function usage() {
   return `Usage:
   skill-customization supports <contract>
   skill-customization validate <customization.json> [--inventory inventory.json]
   skill-customization fingerprint <path>
+  skill-customization payload-fingerprint <directory>
   skill-customization discover [name|repository|path] [--root path] [--custom-path path]
   skill-customization bind <customization.json> --source path --context context [--scope global|workspace] [--state path] [--root path]
   skill-customization resolve <customization.json> --context context [--state path] [--root path]
   skill-customization reconcile <customization.json> --context context [--state path] [--root path] [--cache path] [--decision compatible|absorbed|incompatible|ambiguous] [--evidence text] [--absorbed-delta text]
+  skill-customization preflight <customization.json> --context context [--state path] [--root path]
+  skill-customization accept-maintenance <customization.json> [--source-effective fingerprint] [--diff-file path] [--reviewed-at timestamp] [--evidence text]
   skill-customization help
 
 Options:
@@ -53,6 +58,7 @@ const COMMAND_OPTIONS = Object.freeze({
   supports: new Set(),
   validate: new Set(["inventory"]),
   fingerprint: new Set(),
+  "payload-fingerprint": new Set(),
   discover: new Set(["root", "custom-path"]),
   bind: new Set(["source", "context", "scope", "state", "root"]),
   resolve: new Set(["context", "state", "root"]),
@@ -66,6 +72,13 @@ const COMMAND_OPTIONS = Object.freeze({
     "absorbed-delta",
     "source",
   ]),
+  preflight: new Set(["context", "state", "root"]),
+  "accept-maintenance": new Set([
+    "source-effective",
+    "diff-file",
+    "reviewed-at",
+    "evidence",
+  ]),
   help: new Set(),
 });
 
@@ -73,10 +86,13 @@ const COMMAND_POSITIONAL_MAX = Object.freeze({
   supports: Number.MAX_SAFE_INTEGER,
   validate: 1,
   fingerprint: 1,
+  "payload-fingerprint": 1,
   discover: 1,
   bind: 1,
   resolve: 1,
   reconcile: 1,
+  preflight: 1,
+  "accept-maintenance": 1,
   help: 0,
 });
 
@@ -482,6 +498,41 @@ async function commandReconcile(descriptorPath, options, io) {
   return result.stopped ? 2 : 0;
 }
 
+async function commandPreflight(descriptorPath, options, io) {
+  const resolvedDescriptorPath = path.resolve(
+    requireValue(descriptorPath, "descriptor path is required"),
+  );
+  const contextValue = requireValue(options.context, "--context is required");
+  const context = await discoveryContext(options);
+  const { activeSkills } = await discoverInventory(context);
+  const result = await preflightCustomization({
+    descriptorPath: resolvedDescriptorPath,
+    context: contextValue,
+    statePath: options.state,
+    roots: context.roots,
+    managerRecords: context.managerRecords,
+    activeSkills,
+  });
+  outputJson(io, result);
+  return result.status === "maintenance-required" ? 2 : 0;
+}
+
+async function commandAcceptMaintenance(descriptorPath, options, io) {
+  const diffContents = options["diff-file"]
+    ? await readFile(options["diff-file"], "utf8")
+    : undefined;
+  outputJson(
+    io,
+    await acceptMaintenanceUpdate({
+      descriptorPath: requireValue(descriptorPath, "descriptor path is required"),
+      sourceEffectiveFingerprint: options["source-effective"],
+      diffContents,
+      reviewedAt: options["reviewed-at"],
+      evidence: options.evidence,
+    }),
+  );
+}
+
 export async function main(argv = process.argv.slice(2), io = process) {
   try {
     if (argv.length === 1 && ["--help", "-h"].includes(argv[0])) {
@@ -512,10 +563,16 @@ export async function main(argv = process.argv.slice(2), io = process) {
     if (command === "validate") await commandValidate(positionals[0], options, io);
     else if (command === "fingerprint") {
       io.stdout.write(`${await fingerprintPath(requireValue(positionals[0], "path is required"))}\n`);
+    } else if (command === "payload-fingerprint") {
+      io.stdout.write(`${await payloadFingerprint(requireValue(positionals[0], "directory is required"))}\n`);
     } else if (command === "discover") await commandDiscover(positionals[0], options, io);
     else if (command === "bind") await commandBind(positionals[0], options, io);
     else if (command === "resolve") await commandResolve(positionals[0], options, io);
     else if (command === "reconcile") return await commandReconcile(positionals[0], options, io);
+    else if (command === "preflight") return await commandPreflight(positionals[0], options, io);
+    else if (command === "accept-maintenance") {
+      await commandAcceptMaintenance(positionals[0], options, io);
+    }
     return 0;
   } catch (error) {
     const action = typeof error.details?.action === "string"

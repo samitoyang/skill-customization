@@ -1,11 +1,11 @@
 # Descriptor v1
 
-`customization.json` contains only publishable identity and provenance. Paths are relative to the customization folder; bindings, absolute paths, authentication, and visibility are local state.
+`customization.json` is portable. It records stable identity and reviewed provenance; concrete source paths, credentials, bindings, caches, and host visibility stay in local state.
 
-Required fields are `schema_version`, stable URI `id`, `type`, customized `name`, `entrypoint`, `customization`, `dependencies`, `source`, and `activation`.
+Required top-level fields are `schema_version`, stable URI `id`, `type`, `name`, own `license`, `entrypoint`, `customization`, `dependencies`, `owned_payload`, `source`, and `activation`. `owned_payload.reviewed_fingerprint` covers every runtime-owned file except `customization.json` and reserved `provenance/` and rejects symlinks.
 
-A repository source records its URL, upstream entrypoint, license, and review checkpoint. A local source records a generated `local:sha256:` identity. Private repositories still use the repository variant.
+Full sources use the repository or local variant and record a license plus the reviewed full-directory `effective_fingerprint`. Repository sources also record canonical repository, upstream entrypoint, and review revision. A customization source records stable ID, type, name, license, and effective fingerprint; its concrete directory comes only from the current context binding. A verified fork may be a source.
 
-`coexist` requires a customized name different from `source.skill_name`. `replace` requires the same name and `customization-first` precedence; binding also asks for explicit replacement confirmation. Forks add relative `fork.snapshot` and `fork.diff` paths.
+`coexist` requires a name different from `source.skill_name`. `replace` requires the source name and `customization-first` precedence plus separate binding confirmation.
 
-Read [Discovery and bindings](discovery-and-bindings.md) when selecting the concrete local source. Read [Reconciliation](reconciliation.md) when interpreting review checkpoints or validating a fork payload.
+Forks add relative, symlink-free snapshot and diff paths with reviewed fingerprints. Forking an overlay source also requires `materialization`: source-chain effective fingerprint, concrete snapshot fingerprint, review time, and evidence. Read [Discovery and bindings](discovery-and-bindings.md) for concrete resolution and [Reconciliation](reconciliation.md) for maintenance decisions.

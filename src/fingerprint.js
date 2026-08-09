@@ -14,6 +14,13 @@ function frame(hash, value) {
   hash.update(";");
 }
 
+export function fingerprintValues(values, domain = "skill-customization-values-v1") {
+  const hash = createHash("sha256");
+  frame(hash, domain);
+  for (const value of values) frame(hash, value);
+  return digest(hash);
+}
+
 export async function fingerprintFile(filePath) {
   const bytes = await readFile(filePath);
   return digest(createHash("sha256").update(bytes));
@@ -46,6 +53,42 @@ async function listTree(root, current = root) {
     }
   }
   return result;
+}
+
+async function listOwnedPayload(root, current = root) {
+  const entries = await readdir(current, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
+  const result = [];
+  for (const entry of entries) {
+    const absolute = path.join(current, entry.name);
+    const relative = path.relative(root, absolute).split(path.sep).join("/");
+    if (relative === "customization.json" || relative === "provenance") continue;
+    if (entry.isSymbolicLink()) {
+      const error = new TypeError(`owned payload contains a symbolic link: ${relative}`);
+      error.code = "OWNED_PAYLOAD_SYMLINK";
+      throw error;
+    }
+    if (entry.isDirectory()) {
+      result.push(...(await listOwnedPayload(root, absolute)));
+    } else if (entry.isFile()) {
+      result.push({ relative, bytes: await readFile(absolute) });
+    }
+  }
+  return result;
+}
+
+export async function payloadFingerprint(directory) {
+  const info = await lstat(directory);
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new TypeError("owned payload root must be a real directory");
+  }
+  const hash = createHash("sha256");
+  frame(hash, "skill-customization-owned-payload-v1");
+  for (const entry of await listOwnedPayload(directory)) {
+    frame(hash, entry.relative);
+    frame(hash, entry.bytes);
+  }
+  return digest(hash);
 }
 
 export async function fingerprintPath(targetPath) {

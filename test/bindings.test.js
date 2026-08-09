@@ -36,19 +36,24 @@ function descriptor(activation = { mode: "coexist" }) {
     id: "urn:skill-customization:fixture:review-local-archive",
     type: "semantic-overlay",
     name: replacing ? "review" : "review-local-archive",
+    license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
+    owned_payload: {
+      reviewed_fingerprint:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    },
     source: {
       skill_name: "review",
       kind: "repository",
       repository: "https://github.com/example/skills",
       upstream_path: "skills/review/SKILL.md",
       license: "MIT",
+      effective_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       review: {
         revision: "fixture",
-        fingerprint:
-          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       },
     },
     activation,
@@ -330,6 +335,9 @@ test("binding rejects a different local identity and non-SKILL file inputs", asy
     source: {
       skill_name: "review",
       kind: "local",
+      license: "MIT",
+      effective_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       identity:
         "local:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     },
@@ -555,6 +563,9 @@ test("resolution preserves a confirmed local binding across content drift", asyn
     source: {
       skill_name: "review",
       kind: "local",
+      license: "MIT",
+      effective_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       identity: generateLocalIdentity({ skillName: "review", fingerprint }),
     },
   };

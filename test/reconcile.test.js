@@ -12,7 +12,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { fingerprintFile } from "../src/fingerprint.js";
+import {
+  fingerprintFile,
+  fingerprintPath,
+  payloadFingerprint,
+} from "../src/fingerprint.js";
 import { generateLocalIdentity } from "../src/normalization.js";
 import {
   compatibilityCachePath,
@@ -39,22 +43,26 @@ async function overlayFixture() {
   await writeFile(path.join(customizationRoot, "SKILL.md"), "customized\n");
   await writeFile(path.join(customizationRoot, "CUSTOMIZATION.md"), "Preserve local archive behavior.\n");
   await writeFile(path.join(sourceRoot, "SKILL.md"), "reviewed source\n");
-  const reviewFingerprint = await fingerprintFile(path.join(sourceRoot, "SKILL.md"));
+  const reviewFingerprint = await fingerprintPath(sourceRoot);
+  const ownedFingerprint = await payloadFingerprint(customizationRoot);
   const descriptor = {
     schema_version: 1,
     id: "urn:skill-customization:fixture:review-local-archive",
     type: "semantic-overlay",
     name: "review-local-archive",
+    license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
+    owned_payload: { reviewed_fingerprint: ownedFingerprint },
     source: {
       skill_name: "review",
       kind: "repository",
       repository: "https://github.com/example/skills",
       upstream_path: "skills/review/SKILL.md",
       license: "MIT",
-      review: { revision: "abc", fingerprint: reviewFingerprint },
+      effective_fingerprint: reviewFingerprint,
+      review: { revision: "abc" },
     },
     activation: { mode: "coexist" },
   };
@@ -137,7 +145,7 @@ test("drift stops as ambiguous unless semantic compatibility is cached by finger
     sourcePath: fixture.sourceRoot,
     cachePath,
   });
-  assert.equal(invalidated.status, "ambiguous-drift");
+  assert.equal(invalidated.status, "owned-payload-drift");
   assert.equal(invalidated.cached, false);
   assert.equal(await readFile(path.join(fixture.sourceRoot, "SKILL.md"), "utf8"), before);
 });
@@ -180,6 +188,8 @@ test("local overlay identity is its checkpoint and changed bytes stop for review
   fixture.descriptor.source = {
     skill_name: "review",
     kind: "local",
+    license: "MIT",
+    effective_fingerprint: await fingerprintPath(fixture.sourceRoot),
     identity: generateLocalIdentity({
       skillName: "review",
       fingerprint: sourceFingerprint,
@@ -242,7 +252,7 @@ test("overlay reconciliation rejects customization paths that escape through sym
 
 async function forkDiffFixture({
   forkEntrypoint = "fork\n",
-  diff = "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-snapshot\n+fork\n",
+  diff = "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-snapshot\n+fork\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+Fork rationale.\n",
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "fork-diff-proof-"));
   const customizationRoot = path.join(root, "review-fork");
@@ -252,28 +262,39 @@ async function forkDiffFixture({
   await writeFile(path.join(customizationRoot, "SKILL.md"), forkEntrypoint);
   await writeFile(path.join(customizationRoot, "CUSTOMIZATION.md"), "Fork rationale.\n");
   await writeFile(snapshotEntrypoint, "snapshot\n");
-  await writeFile(path.join(customizationRoot, "provenance", "source.diff"), diff);
+  const diffPath = path.join(customizationRoot, "provenance", "source.diff");
+  await writeFile(diffPath, diff);
+  const snapshotFingerprint = await fingerprintPath(snapshotRoot);
   const descriptor = {
     schema_version: 1,
     id: "urn:skill-customization:fixture:review-fork-proof",
     type: "fork",
     name: "review-fork",
+    license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
+    owned_payload: {
+      reviewed_fingerprint: await payloadFingerprint(customizationRoot),
+    },
     source: {
       skill_name: "review",
       kind: "repository",
       repository: "https://github.com/example/skills",
       upstream_path: "skills/review/SKILL.md",
       license: "MIT",
+      effective_fingerprint: snapshotFingerprint,
       review: {
         revision: "abc",
-        fingerprint: await fingerprintFile(snapshotEntrypoint),
       },
     },
     activation: { mode: "coexist" },
-    fork: { snapshot: "provenance/source", diff: "provenance/source.diff" },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint: snapshotFingerprint,
+      diff_fingerprint: await fingerprintFile(diffPath),
+    },
   };
   await writeFile(
     path.join(customizationRoot, "customization.json"),
@@ -304,31 +325,48 @@ test("fork reconciliation is independent of a runtime source", async () => {
       "@@ -1 +1 @@",
       "-snapshot",
       "+fork",
+      "--- /dev/null",
+      "+++ b/CUSTOMIZATION.md",
+      "@@ -0,0 +1 @@",
+      "+Fork rationale.",
       "",
     ].join("\n"),
   );
   const snapshotCheckpoint = await fingerprintFile(snapshotEntrypoint);
+  const snapshotFingerprint = await fingerprintPath(
+    path.join(customizationRoot, "provenance", "source"),
+  );
+  const diffPath = path.join(customizationRoot, "provenance", "source.diff");
   const descriptor = {
     schema_version: 1,
     id: "urn:skill-customization:fixture:review-fork",
     type: "fork",
     name: "review-fork",
+    license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
+    owned_payload: {
+      reviewed_fingerprint: await payloadFingerprint(customizationRoot),
+    },
     source: {
       skill_name: "review",
       kind: "repository",
       repository: "https://github.com/example/skills",
       upstream_path: "skills/review/SKILL.md",
       license: "MIT",
+      effective_fingerprint: snapshotFingerprint,
       review: {
         revision: "abc",
-        fingerprint: snapshotCheckpoint,
       }
     },
     activation: { mode: "coexist" },
-    fork: { snapshot: "provenance/source", diff: "provenance/source.diff" }
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint: snapshotFingerprint,
+      diff_fingerprint: await fingerprintFile(diffPath),
+    }
   };
   const result = await reconcileCustomization({ descriptor, customizationRoot });
   assert.equal(result.status, "fork-ready");
@@ -336,24 +374,30 @@ test("fork reconciliation is independent of a runtime source", async () => {
   assert.match(result.provenance.snapshotFingerprint, /^sha256:[0-9a-f]{64}$/);
   assert.equal(result.provenance.snapshotEntrypointFingerprint, snapshotCheckpoint);
   assert.match(result.provenance.diffFingerprint, /^sha256:[0-9a-f]{64}$/);
-  assert.deepEqual(result.provenance.diffTargets, ["SKILL.md"]);
+  assert.deepEqual(result.provenance.diffTargets, ["SKILL.md", "CUSTOMIZATION.md"]);
 });
 
 test("fork provenance accepts a helper-only diff that reconstructs the full payload", async () => {
   const fixture = await forkDiffFixture({
     forkEntrypoint: "snapshot\n",
-    diff: "--- a/OTHER.md\n+++ b/OTHER.md\n@@ -1 +1 @@\n-old\n+new\n",
+    diff: "--- a/OTHER.md\n+++ b/OTHER.md\n@@ -1 +1 @@\n-old\n+new\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+Fork rationale.\n",
   });
   await writeFile(path.join(fixture.snapshotRoot, "OTHER.md"), "old\n");
   await writeFile(path.join(fixture.customizationRoot, "OTHER.md"), "new\n");
+  fixture.descriptor.fork.snapshot_fingerprint = await fingerprintPath(
+    fixture.snapshotRoot,
+  );
+  fixture.descriptor.owned_payload.reviewed_fingerprint = await payloadFingerprint(
+    fixture.customizationRoot,
+  );
 
   const result = await reconcileCustomization(fixture);
 
   assert.equal(result.status, "fork-ready");
-  assert.deepEqual(result.provenance.diffTargets, ["OTHER.md"]);
+  assert.deepEqual(result.provenance.diffTargets, ["OTHER.md", "CUSTOMIZATION.md"]);
 });
 
-test("fork provenance rejects an unrepresented extra owned helper", async () => {
+test("fork provenance detects an unreviewed extra owned helper", async () => {
   const fixture = await forkDiffFixture();
   await writeFile(path.join(fixture.customizationRoot, "EXTRA.md"), "extra\n");
 
@@ -361,11 +405,11 @@ test("fork provenance rejects an unrepresented extra owned helper", async () => 
     reconcileCustomization(fixture),
     (error) =>
       error.code === "INCOMPLETE_FORK_PROVENANCE"
-      && /unrepresented payload file EXTRA\.md/i.test(error.message),
+      && /owned payload fingerprint/i.test(error.message),
   );
 });
 
-test("fork provenance rejects an unrepresented modified helper", async () => {
+test("fork provenance detects an unreviewed snapshot helper change", async () => {
   const fixture = await forkDiffFixture();
   await writeFile(path.join(fixture.snapshotRoot, "HELPER.md"), "source helper\n");
   await writeFile(path.join(fixture.customizationRoot, "HELPER.md"), "modified helper\n");
@@ -374,7 +418,7 @@ test("fork provenance rejects an unrepresented modified helper", async () => {
     reconcileCustomization(fixture),
     (error) =>
       error.code === "INCOMPLETE_FORK_PROVENANCE"
-      && /does not match owned fork payload at HELPER\.md/i.test(error.message),
+      && /snapshot fingerprint/i.test(error.message),
   );
 });
 
@@ -437,13 +481,24 @@ test("fork provenance rejects a snapshot that does not match its review checkpoi
     id: "urn:skill-customization:fixture:review-fork-checkpoint",
     type: "fork",
     name: "review-fork",
-    fork: { snapshot: "provenance/source", diff: "provenance/source.diff" },
+    owned_payload: {
+      reviewed_fingerprint: await payloadFingerprint(customizationRoot),
+    },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      diff_fingerprint: await fingerprintFile(
+        path.join(customizationRoot, "provenance", "source.diff"),
+      ),
+    },
   };
   await assert.rejects(
     reconcileCustomization({ descriptor, customizationRoot }),
     (error) =>
       error.code === "INCOMPLETE_FORK_PROVENANCE"
-      && /checkpoint/i.test(error.message),
+      && /snapshot fingerprint/i.test(error.message),
   );
 });
 
@@ -465,12 +520,18 @@ test("fork provenance rejects empty and malformed diffs", async () => {
     name: "review-fork",
     source: {
       ...base.source,
-      review: {
-        ...base.source.review,
-        fingerprint: await fingerprintFile(snapshotEntrypoint),
-      },
+      effective_fingerprint: await fingerprintPath(snapshotRoot),
     },
-    fork: { snapshot: "provenance/source", diff: "provenance/source.diff" },
+    owned_payload: {
+      reviewed_fingerprint: await payloadFingerprint(customizationRoot),
+    },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint: await fingerprintPath(snapshotRoot),
+      diff_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    },
   };
 
   for (const invalidDiff of ["", "diff --git a/SKILL.md b/SKILL.md\n"]) {
@@ -500,7 +561,18 @@ test("fork provenance rejects symlinked external snapshots", async () => {
     id: "urn:skill-customization:fixture:review-fork-link",
     type: "fork",
     name: "review-fork",
-    fork: { snapshot: "provenance/source", diff: "provenance/source.diff" },
+    owned_payload: {
+      reviewed_fingerprint: await payloadFingerprint(customizationRoot),
+    },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      diff_fingerprint: await fingerprintFile(
+        path.join(customizationRoot, "provenance", "source.diff"),
+      ),
+    },
   };
   await assert.rejects(
     reconcileCustomization({ descriptor, customizationRoot }),

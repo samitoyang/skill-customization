@@ -525,3 +525,13 @@ test("active inventory deduplicates one physical source with multiple owners", (
   assert.equal(inventory.length, 1);
   assert.equal(inventory[0].realPath, "/source/review");
 });
+
+test("adjacent customization metadata is classified and malformed metadata is visible", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discovery-customization-metadata-"));
+  const malformed = await writeSkill(root, "managed-overlay");
+  await writeFile(path.join(malformed, "customization.json"), "{not-json\n");
+  await assert.rejects(
+    discoverSkills({ input: malformed, roots: [] }),
+    (error) => error.code === "MALFORMED_CUSTOMIZATION_METADATA",
+  );
+});
