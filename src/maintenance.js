@@ -52,6 +52,18 @@ export async function acceptMaintenanceUpdate({
     const descriptorMode = (await lstat(absoluteDescriptorPath)).mode & 0o777;
     const descriptor = structuredClone(await readDescriptor(absoluteDescriptorPath));
     const root = path.dirname(absoluteDescriptorPath);
+    const hasReviewInput = reviewedAt !== undefined || evidence !== undefined;
+    if ((reviewedAt === undefined) !== (evidence === undefined)) {
+      throw new TypeError("reviewedAt and evidence must be supplied together");
+    }
+    if (
+      hasReviewInput
+      && (descriptor.type !== "fork" || !descriptor.fork.materialization)
+    ) {
+      throw new TypeError(
+        "reviewedAt and evidence are only valid for fork materialization maintenance",
+      );
+    }
     if (
       sourceEffectiveFingerprint !== undefined
       && !FINGERPRINT.test(sourceEffectiveFingerprint)
@@ -104,8 +116,6 @@ export async function acceptMaintenanceUpdate({
         if (reviewedAt !== undefined) descriptor.fork.materialization.reviewed_at = reviewedAt;
         if (evidence !== undefined) descriptor.fork.materialization.evidence = evidence;
       }
-    } else if (reviewedAt !== undefined || evidence !== undefined) {
-      throw new TypeError("reviewedAt and evidence are only valid for fork materialization maintenance");
     }
     assertValidDescriptor(descriptor);
     await writeJsonAtomic(absoluteDescriptorPath, descriptor, {

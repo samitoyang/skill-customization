@@ -462,6 +462,39 @@ test("full-source fork snapshots must match the reviewed source checkpoint", asy
   }
 });
 
+test("fork reconstruction excludes clone-local VCS metadata", async () => {
+  const fixture = await forkDiffFixture();
+  await mkdir(path.join(fixture.snapshotRoot, ".GiT"), { recursive: true });
+  await writeFile(
+    path.join(fixture.snapshotRoot, ".GiT", "HEAD"),
+    "ref: refs/heads/main\n",
+  );
+  await mkdir(path.join(fixture.snapshotRoot, "helpers", ".Hg", "store"), {
+    recursive: true,
+  });
+  await writeFile(
+    path.join(fixture.snapshotRoot, "helpers", ".Hg", "store", "fncache"),
+    "clone-local cache\n",
+  );
+  await mkdir(path.join(fixture.customizationRoot, ".SVN"), {
+    recursive: true,
+  });
+  await writeFile(
+    path.join(fixture.customizationRoot, ".SVN", "wc.db"),
+    "clone-local working copy\n",
+  );
+  fixture.descriptor.fork.snapshot_fingerprint = await fingerprintPath(
+    fixture.snapshotRoot,
+  );
+  fixture.descriptor.source.effective_fingerprint =
+    fixture.descriptor.fork.snapshot_fingerprint;
+  fixture.descriptor.owned_payload.reviewed_fingerprint =
+    await payloadFingerprint(fixture.customizationRoot);
+
+  const result = await reconcileCustomization(fixture);
+  assert.equal(result.status, "fork-ready");
+});
+
 test("fork reconciliation rejects single-file snapshots", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "fork-file-snapshot-"));
   const customizationRoot = path.join(root, "review-fork");

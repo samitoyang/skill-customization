@@ -6,13 +6,13 @@ Contract 1 is the compatibility boundary between generated dispatchers, maintena
 | --- | --- |
 | `supports` | Report structured compatibility for one contract. |
 | `validate` | Validate descriptor v1, owned relative artifacts, and runtime selectors covered by the owned-payload fingerprint. |
-| `fingerprint` | Fingerprint exact files or symlink-free directory trees; a top-level alias resolves to its canonical target. |
-| `payload-fingerprint` | Fingerprint runtime-owned files, excluding descriptor and `provenance/`, while rejecting symlinks. |
+| `fingerprint` | Fingerprint exact files or symlink-free directory trees; a top-level alias resolves to its canonical target, and case-insensitive `.git`, `.hg`, and `.svn` metadata is excluded at any depth. |
+| `payload-fingerprint` | Fingerprint runtime-owned files, excluding descriptor, `provenance/`, and version-control metadata, while rejecting symlinks. |
 | `discover` | Search evidence-backed declared roots plus bounded ancestors and classify adjacent customizations. |
 | `bind` / `resolve` | Confirm or resolve context-local concrete source bindings. |
 | `reconcile` | Make one targeted overlay semantic or fork provenance decision. |
 | `preflight` | Flatten a checked recursive execution graph for one descriptor and context. |
-| `accept-maintenance` | Canonically contain its lock, then refresh the payload fingerprint, the source effective fingerprint only when explicitly supplied, and fork provenance atomically while preserving portable artifact modes; changed materializations require both fresh review time and evidence. |
+| `accept-maintenance` | Canonically contain its lock, then refresh the payload fingerprint, the source effective fingerprint only when explicitly supplied, and fork provenance atomically while preserving portable artifact modes; review time/evidence must be paired and are invalid without materialization, while changed materializations require both fresh review time and evidence. |
 
 Structured results go to standard output and diagnostics to standard error. Preflight exits `0` for `ready` and `ready-with-advisory`, `2` for `maintenance-required`, and `1` for malformed input or operational failure. A maintenance result contains no executable steps and exactly one actionable handler.
 

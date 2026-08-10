@@ -11,6 +11,7 @@ import {
   payloadFingerprint,
 } from "./fingerprint.js";
 import { generateLocalIdentity } from "./normalization.js";
+import { isVersionControlMetadataPath } from "./owned-payload.js";
 import { resolveOwnedPath } from "./paths.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
@@ -310,7 +311,10 @@ async function mapDirectoryPayload(
     for (const entry of entries) {
       const absolutePath = path.join(directory, entry.name);
       const relativePath = portableRelative(root, absolutePath);
-      if (isExcludedPayloadPath(relativePath, excludedPaths)) continue;
+      if (
+        isVersionControlMetadataPath(relativePath)
+        || isExcludedPayloadPath(relativePath, excludedPaths)
+      ) continue;
       const info = await lstat(absolutePath);
       if (info.isSymbolicLink()) {
         throw new Error(`${label} contains symbolic link at ${relativePath}`);

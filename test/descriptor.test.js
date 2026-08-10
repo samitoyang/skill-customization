@@ -68,6 +68,9 @@ test("runtime selectors cannot point into excluded owned-payload paths", () => {
       "provenance",
       "provenance/runtime.md",
       "Provenance/runtime.md",
+      ".git/runtime.md",
+      "helpers/.Hg/runtime.md",
+      "helpers/deep/.SVN/runtime.md",
     ]) {
       const errors = validateDescriptor(repositoryDescriptor({ [key]: value }));
       assert.ok(
@@ -267,6 +270,9 @@ test("JSON Schema and runtime share machine-path exclusions", async () => {
     "provenance",
     "provenance/run.md",
     "Provenance/run.md",
+    ".git/run.md",
+    "helpers/.Hg/run.md",
+    "helpers/deep/.SVN/run.md",
   ]) {
     assert.equal(runtimeExclusion.test(value), true);
   }

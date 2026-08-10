@@ -8,6 +8,11 @@
     "owned_payload": "sha256:4db0cb8724092be3e2d571ec11bec9a5f6e0d1229b387e68cd33a8afa360f768",
     "checkpoint_tree": "sha256:ac7f37d2ee68856608872b231f6481f0c8646f4f64fd5260ff86b03528f2eb1e"
   },
+  "fingerprint_exclusions": {
+    "names": [".git", ".hg", ".svn"],
+    "case_insensitive": true,
+    "scope": "any-depth"
+  },
   "supports": {
     "compatible": true,
     "requested_contract": "1",

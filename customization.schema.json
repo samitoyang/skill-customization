@@ -128,7 +128,7 @@
     "runtimePath": {
       "allOf": [
         { "$ref": "#/$defs/relativePath" },
-        { "not": { "pattern": "^(?:[Cc][Uu][Ss][Tt][Oo][Mm][Ii][Zz][Aa][Tt][Ii][Oo][Nn]\\.[Jj][Ss][Oo][Nn]|[Pp][Rr][Oo][Vv][Ee][Nn][Aa][Nn][Cc][Ee])(?:/|$)" } }
+        { "not": { "pattern": "(?:^(?:[Cc][Uu][Ss][Tt][Oo][Mm][Ii][Zz][Aa][Tt][Ii][Oo][Nn]\\.[Jj][Ss][Oo][Nn]|[Pp][Rr][Oo][Vv][Ee][Nn][Aa][Nn][Cc][Ee])(?:/|$)|(?:^|/)\\.(?:[Gg][Ii][Tt]|[Hh][Gg]|[Ss][Vv][Nn])(?:/|$))" } }
       ]
     },
     "ownedPayload": {

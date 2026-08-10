@@ -24,7 +24,7 @@ An installed compatible helper requires Node.js only. If unavailable or incompat
 
 ## Maintain a fork
 
-Use the preflight handler reason to focus provenance or owned-payload repair. Verify the complete workflow against its snapshot directory and diff. After acceptance, run `skill-customization accept-maintenance`; pass `--diff-file` when the reviewed diff changed, and pass both `--reviewed-at` and `--evidence` when either materialization fingerprint changes. Rerun preflight before activation.
+Use the preflight handler reason to focus provenance or owned-payload repair. Verify the complete workflow against its snapshot directory and diff. After acceptance, run `skill-customization accept-maintenance`; pass `--diff-file` when the reviewed diff changed, and pass both `--reviewed-at` and `--evidence` when either materialization fingerprint changes. Never pass the review flags for any fork without `materialization`. Rerun preflight before activation.
 
 An optional confirmed tracking binding is advisory only: absence is silent; drift and unavailability never block; unreadable or invalid optional tracking state remains advisory. Adoption and rebase are explicit maintenance requests.
 

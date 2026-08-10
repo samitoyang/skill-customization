@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { isOwnedPayloadExcludedPath } from "./owned-payload.js";
+import {
+  isOwnedPayloadExcludedPath,
+  isVersionControlMetadataPath,
+} from "./owned-payload.js";
 
 function digest(hash) {
   return `sha256:${hash.digest("hex")}`;
@@ -53,6 +56,7 @@ async function listTree(root, current = root) {
   for (const entry of entries) {
     const absolute = path.join(current, entry.name);
     const relative = path.relative(root, absolute).split(path.sep).join("/");
+    if (isVersionControlMetadataPath(relative)) continue;
     if (entry.isDirectory()) {
       result.push({ type: "directory", relative });
       result.push(...(await listTree(root, absolute)));

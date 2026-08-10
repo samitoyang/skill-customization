@@ -172,6 +172,8 @@ test("owned payload fingerprints every runtime file, excludes provenance, and re
   const first = await payloadFingerprint(root);
   await writeFile(path.join(root, "customization.json"), "changed descriptor\n");
   await writeFile(path.join(root, "provenance", "source.diff"), "changed provenance\n");
+  await mkdir(path.join(root, "helpers", ".GiT"));
+  await writeFile(path.join(root, "helpers", ".GiT", "HEAD"), "clone-local\n");
   assert.equal(await payloadFingerprint(root), first);
   await writeFile(path.join(root, "helpers", "run.js"), "export const changed = true;\n");
   assert.notEqual(await payloadFingerprint(root), first);
@@ -305,6 +307,31 @@ test("preflight rejects source-internal symlinks before returning executable ste
   assert.deepEqual(result.steps, []);
 });
 
+test("preflight excludes clone-local Git metadata from full-source checkpoints", async () => {
+  const item = await recursiveFixture();
+  const gitMetadata = path.join(item.base, ".GiT");
+  await mkdir(path.join(gitMetadata, "refs"), { recursive: true });
+  await writeFile(path.join(gitMetadata, "HEAD"), "ref: refs/heads/main\n");
+  await writeFile(path.join(gitMetadata, "index"), "clone-local index\n");
+
+  const first = await preflightCustomization({
+    descriptorPath: path.join(item.outer, "customization.json"),
+    context: "workspace:test",
+    statePath: item.statePath,
+    roots: item.roots,
+  });
+  await writeFile(path.join(gitMetadata, "HEAD"), "ref: refs/heads/other\n");
+  const second = await preflightCustomization({
+    descriptorPath: path.join(item.outer, "customization.json"),
+    context: "workspace:test",
+    statePath: item.statePath,
+    roots: item.roots,
+  });
+  assert.equal(first.status, "ready");
+  assert.equal(second.status, "ready");
+  assert.equal(second.effectiveFingerprint, first.effectiveFingerprint);
+});
+
 test("effective fingerprints bind the selected reviewed execution file", async () => {
   const item = await recursiveFixture({ alternateInner: true });
   item.innerDescriptor.customization = "ALTERNATE.md";
@@ -429,6 +456,13 @@ test("materialization fingerprint changes require fresh review evidence", async 
       sourceEffectiveFingerprint: changedSourceFingerprint,
     }),
     /reviewedAt and evidence are required/i,
+  );
+  await assert.rejects(
+    acceptMaintenanceUpdate({
+      descriptorPath,
+      reviewedAt: "2026-08-10T00:00:00Z",
+    }),
+    /reviewedAt and evidence must be supplied together/i,
   );
   assert.deepEqual(
     JSON.parse(await readFile(descriptorPath, "utf8")),
@@ -572,6 +606,14 @@ test("verified forks are runtime leaves and execute their complete independent w
     customizationId: descriptor.id,
   }]);
   assert.deepEqual(result.advisories, []);
+  await assert.rejects(
+    acceptMaintenanceUpdate({
+      descriptorPath: path.join(forkRoot, "customization.json"),
+      reviewedAt: "2026-08-10T00:00:00Z",
+      evidence: "This full-source fork has no materialization record.",
+    }),
+    /only valid for fork materialization maintenance/i,
+  );
 
   const trackedSkills = path.join(root, "tracked-skills");
   const trackedSource = path.join(trackedSkills, "review");

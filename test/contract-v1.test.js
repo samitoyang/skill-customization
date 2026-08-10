@@ -97,6 +97,33 @@ test("helper contract 1: descriptor v1 and fingerprint goldens remain stable", a
   assert.deepEqual(result, golden.compatible_output);
 });
 
+test("helper contract 1: directory fingerprints exclude VCS metadata", async () => {
+  const golden = await readJson(path.join(fixtureRoot, "golden.json"));
+  assert.deepEqual(golden.fingerprint_exclusions, {
+    names: [".git", ".hg", ".svn"],
+    case_insensitive: true,
+    scope: "any-depth",
+  });
+  const { sourceRoot } = await contractSourceCheckout("contract-vcs-fingerprint-");
+  await mkdir(path.join(sourceRoot, "helpers", "deep"), { recursive: true });
+  await writeFile(path.join(sourceRoot, "helpers", "keep.md"), "runtime helper\n");
+  await writeFile(
+    path.join(sourceRoot, "helpers", "deep", "keep.md"),
+    "nested runtime helper\n",
+  );
+  const expected = await fingerprintPath(sourceRoot);
+  for (const [relative, contents] of [
+    [".git/HEAD", "ref: refs/heads/main\n"],
+    ["helpers/.Hg/store/fncache", "clone-local cache\n"],
+    ["helpers/deep/.SVN/wc.db", "clone-local working copy\n"],
+  ]) {
+    const target = path.join(sourceRoot, relative);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, contents);
+  }
+  assert.equal(await fingerprintPath(sourceRoot), expected);
+});
+
 test("helper contract 1: binding and compatibility cache v1 remain readable", async () => {
   const bindingPath = path.join(fixtureRoot, "binding-store.json");
   const expectedBindingStore = await readJson(bindingPath);

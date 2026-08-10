@@ -320,7 +320,7 @@ export function validateDescriptor(descriptor) {
       issue(
         errors,
         `/${key}`,
-        "must select a runtime-owned path outside customization.json and provenance/",
+        "must select a runtime-owned path outside customization.json, provenance/, and version-control metadata",
       );
     }
   }
