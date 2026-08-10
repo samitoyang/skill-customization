@@ -19,8 +19,8 @@ async function writeDescriptor(root, descriptor) {
 
 test("replacement forks require a confirmed unambiguous context binding", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "preflight-replacement-fork-"));
-  const sourceRoot = path.join(root, "review");
-  const forkRoot = path.join(root, "review-fork");
+  const sourceRoot = path.join(root, "review-source");
+  const forkRoot = path.join(root, "review");
   const snapshotRoot = path.join(forkRoot, "provenance", "source");
   const statePath = path.join(root, "state", "bindings.json");
   const roots = [{ path: root, scope: "workspace", origin: "fixture" }];
