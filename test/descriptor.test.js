@@ -59,6 +59,25 @@ test("descriptor accepts a strict coexist repository overlay", () => {
   assert.deepEqual(validateDescriptor(repositoryDescriptor()), []);
 });
 
+test("runtime selectors cannot point into excluded owned-payload paths", () => {
+  for (const key of ["entrypoint", "customization"]) {
+    for (const value of [
+      "customization.json",
+      "customization.json/runtime.md",
+      "provenance",
+      "provenance/runtime.md",
+    ]) {
+      const errors = validateDescriptor(repositoryDescriptor({ [key]: value }));
+      assert.ok(
+        errors.some(
+          ({ path: pointer, message }) =>
+            pointer === `/${key}` && /runtime-owned path/i.test(message),
+        ),
+      );
+    }
+  }
+});
+
 test("descriptor keeps private repositories as repository sources and accepts opaque local IDs", () => {
   const privateRepository = repositoryDescriptor({
     source: {
@@ -169,6 +188,17 @@ test("JSON Schema and runtime share machine-path exclusions", async () => {
     ({ not }) => new RegExp(not.pattern),
   );
   const idPattern = new RegExp(schema.$defs.stableId.pattern);
+  assert.equal(schema.properties.entrypoint.$ref, "#/$defs/runtimePath");
+  assert.equal(schema.properties.customization.$ref, "#/$defs/runtimePath");
+  const runtimeExclusion = new RegExp(
+    schema.$defs.runtimePath.allOf.find(({ not }) => not)?.not.pattern,
+  );
+  for (const value of ["customization.json", "provenance", "provenance/run.md"]) {
+    assert.equal(runtimeExclusion.test(value), true);
+  }
+  for (const value of ["SKILL.md", "CUSTOMIZATION.md", "helpers/run.md"]) {
+    assert.equal(runtimeExclusion.test(value), false);
+  }
 
   for (const id of MACHINE_IDS) assert.equal(idPattern.test(id), false);
   for (const id of [

@@ -8,7 +8,7 @@ Accepted for descriptor v1 and helper contract 1 before the first public release
 
 Generated customization entrypoints are thin dispatchers. They negotiate helper contract 1 and run helper-owned preflight before any runtime instruction. Ready plans execute directly; stopped, unavailable, or incompatible helper states delegate to exactly one maintenance skill.
 
-Preflight owns recursive overlay traversal, cycle/depth protection, reviewed payload checks, context binding resolution, symlink-free effective source fingerprints, and base-to-inner-to-outer execution ordering. Reconciliation owns only targeted semantic and provenance decisions; maintenance locks are canonically contained in customization provenance.
+Preflight owns recursive overlay traversal, cycle/depth protection, reviewed payload and runtime-selector checks, context binding resolution, symlink-free effective source fingerprints, and base-to-inner-to-outer execution ordering. Reconciliation owns only targeted semantic and provenance decisions; local identity remains entrypoint-derived, and maintenance locks are canonically contained in customization provenance.
 
 Overlay `CUSTOMIZATION.md` is a semantic delta. Fork `CUSTOMIZATION.md` is the complete independent workflow; a fork is a runtime leaf with a directory-scoped snapshot. Concrete source paths remain local bindings. Fork tracking is optional and advisory. Forking an overlay chain requires reviewed materialization evidence before diffing.
 

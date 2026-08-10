@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
+import { isOwnedPayloadExcludedPath } from "./owned-payload.js";
+
 function digest(hash) {
   return `sha256:${hash.digest("hex")}`;
 }
@@ -70,7 +72,7 @@ async function listOwnedPayload(root, current = root) {
   for (const entry of entries) {
     const absolute = path.join(current, entry.name);
     const relative = path.relative(root, absolute).split(path.sep).join("/");
-    if (relative === "customization.json" || relative === "provenance") continue;
+    if (isOwnedPayloadExcludedPath(relative)) continue;
     if (entry.isSymbolicLink()) {
       const error = new TypeError(`owned payload contains a symbolic link: ${relative}`);
       error.code = "OWNED_PAYLOAD_SYMLINK";

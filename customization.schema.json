@@ -24,8 +24,8 @@
     "type": { "$ref": "#/$defs/customizationType" },
     "name": { "$ref": "#/$defs/skillName" },
     "license": { "$ref": "#/$defs/license" },
-    "entrypoint": { "$ref": "#/$defs/relativePath" },
-    "customization": { "$ref": "#/$defs/relativePath" },
+    "entrypoint": { "$ref": "#/$defs/runtimePath" },
+    "customization": { "$ref": "#/$defs/runtimePath" },
     "dependencies": {
       "type": "array",
       "uniqueItems": true,
@@ -113,6 +113,12 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "runtimePath": {
+      "allOf": [
+        { "$ref": "#/$defs/relativePath" },
+        { "not": { "pattern": "^(?:customization\\.json|provenance)(?:/|$)" } }
+      ]
     },
     "ownedPayload": {
       "type": "object",

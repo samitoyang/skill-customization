@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { DescriptorError } from "./errors.js";
 import { normalizeRepositoryUrl } from "./normalization.js";
+import { isOwnedPayloadExcludedPath } from "./owned-payload.js";
 import { isMachineAbsolutePath, resolveOwnedPath } from "./paths.js";
 
 const TOP_LEVEL = new Set([
@@ -300,7 +301,15 @@ export function validateDescriptor(descriptor) {
   checkName(errors, descriptor.name, "/name");
   checkPortableNonEmptyString(errors, descriptor.license, "/license", "license identifier");
   for (const key of ["entrypoint", "customization"]) {
-    if (!isPortableRelativePath(descriptor[key])) issue(errors, `/${key}`, "must be a portable relative path");
+    if (!isPortableRelativePath(descriptor[key])) {
+      issue(errors, `/${key}`, "must be a portable relative path");
+    } else if (isOwnedPayloadExcludedPath(descriptor[key])) {
+      issue(
+        errors,
+        `/${key}`,
+        "must select a runtime-owned path outside customization.json and provenance/",
+      );
+    }
   }
   if (!Array.isArray(descriptor.dependencies)) {
     issue(errors, "/dependencies", "must be an array");

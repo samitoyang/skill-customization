@@ -223,6 +223,7 @@ test("local overlay identity is its checkpoint and changed bytes stop for review
   });
   assert.equal(exact.status, "compatible");
   assert.equal(exact.checkpointMatch, true);
+  assert.equal(exact.sourceIdentity, fixture.descriptor.source.identity);
   await writeFile(path.join(fixture.sourceRoot, "SKILL.md"), "local drift\n");
   const drift = await reconcileCustomization({
     descriptor: fixture.descriptor,

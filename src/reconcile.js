@@ -52,18 +52,31 @@ async function sourceLocation(sourcePath) {
   return { entrypoint, root };
 }
 
-function sourceCheckpoint(descriptor, sourceFingerprint) {
+function sourceCheckpoint(
+  descriptor,
+  sourceFingerprint,
+  sourceIdentityFingerprint = sourceFingerprint,
+) {
   const sourceIdentity = generateLocalIdentity({
     skillName: descriptor.source.skill_name,
-    fingerprint: sourceFingerprint,
+    fingerprint: sourceIdentityFingerprint,
   });
   const expected = descriptor.source.effective_fingerprint;
   const actual = sourceFingerprint;
   return { expected, actual, sourceIdentity, match: actual === expected };
 }
 
-function baseResult(descriptor, sourceFingerprint, customizationFingerprint) {
-  const checkpoint = sourceCheckpoint(descriptor, sourceFingerprint);
+function baseResult(
+  descriptor,
+  sourceFingerprint,
+  customizationFingerprint,
+  sourceIdentityFingerprint,
+) {
+  const checkpoint = sourceCheckpoint(
+    descriptor,
+    sourceFingerprint,
+    sourceIdentityFingerprint,
+  );
   return {
     customization: descriptor.id,
     type: descriptor.type,
@@ -521,11 +534,15 @@ async function reconcileOverlay({
     );
   });
   const sourceFingerprint = await fingerprintPath(sourceRoot);
+  const sourceIdentityFingerprint = descriptor.source.kind === "local"
+    ? await fingerprintFile(entrypoint)
+    : undefined;
   const customizationFingerprint = await payloadFingerprint(customizationRoot);
   const base = baseResult(
     descriptor,
     sourceFingerprint,
     customizationFingerprint,
+    sourceIdentityFingerprint,
   );
   if (
     customizationFingerprint !== descriptor.owned_payload.reviewed_fingerprint
