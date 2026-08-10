@@ -121,6 +121,74 @@ test("discovery groups equivalent copies and exposes every path and owner", asyn
   assert.deepEqual(result.choices.at(-1), { kind: "custom-path" });
 });
 
+test("discovery isolates an invalid sibling candidate and reports its diagnostic", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-invalid-sibling-"));
+  await writeSkill(root, "review");
+  const invalid = await writeSkill(root, "invalid");
+  await symlink(path.join(invalid, "SKILL.md"), path.join(invalid, "LINK.md"));
+
+  const result = await discoverSkills({
+    input: "review",
+    roots: [{ path: root, owner: "codex", scope: "global" }],
+    managerRecords: [],
+  });
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].name, "review");
+  assert.deepEqual(result.candidateDiagnostics, [
+    {
+      path: invalid,
+      code: "FINGERPRINT_SYMLINK",
+      message: "directory fingerprint contains a symbolic link: LINK.md",
+    },
+  ]);
+});
+
+test("discovery isolates malformed embedded metadata in a sibling", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-malformed-sibling-"));
+  await writeSkill(root, "review");
+  const malformed = await writeSkill(root, "malformed");
+  await writeFile(path.join(malformed, ".skill-source.json"), "{not-json\n");
+
+  const result = await discoverSkills({
+    input: "review",
+    roots: [{ path: root, owner: "codex", scope: "global" }],
+    managerRecords: [],
+  });
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].name, "review");
+  assert.equal(result.candidateDiagnostics.length, 1);
+  assert.equal(result.candidateDiagnostics[0].path, malformed);
+  assert.equal(
+    result.candidateDiagnostics[0].code,
+    "MALFORMED_SOURCE_METADATA",
+  );
+  await assert.rejects(
+    discoverSkills({
+      input: malformed,
+      roots: [{ path: root, owner: "codex", scope: "global" }],
+      managerRecords: [],
+    }),
+    (error) => error.code === "MALFORMED_SOURCE_METADATA",
+  );
+});
+
+test("an explicit invalid alias preserves its specific candidate error", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-invalid-alias-"));
+  const invalid = await writeSkill(root, "invalid");
+  const alias = path.join(root, "installed-invalid");
+  await symlink(path.join(invalid, "SKILL.md"), path.join(invalid, "LINK.md"));
+  await symlink(invalid, alias);
+
+  await assert.rejects(
+    discoverSkills({
+      input: alias,
+      roots: [{ path: invalid, owner: "codex", scope: "global" }],
+      managerRecords: [],
+    }),
+    (error) => error.code === "FINGERPRINT_SYMLINK",
+  );
+});
+
 test("discovery scans an aliased physical root once and retains associated owners", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "physical-root-"));
   const physical = path.join(root, "physical");

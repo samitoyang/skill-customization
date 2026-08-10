@@ -121,6 +121,29 @@ test("helper contract 1: binding and compatibility cache v1 remain readable", as
   assert.equal(cached.status, "compatible");
   assert.equal(cached.cached, true);
   assert.equal(cached.evidence, "contract-v1 golden semantic review");
+  assert.equal(
+    cached.customizationFingerprint,
+    descriptor.owned_payload.reviewed_fingerprint,
+  );
+
+  const legacyCache = await readJson(
+    path.join(fixtureRoot, "compatibility-cache.json"),
+  );
+  const legacyEntry = legacyCache.compatibility[descriptor.id][
+    Object.keys(legacyCache.compatibility[descriptor.id])[0]
+  ];
+  delete legacyEntry.executionFingerprint;
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "contract-v1-legacy-cache-"));
+  const legacyCachePath = path.join(temporary, "compatibility.json");
+  await writeFile(legacyCachePath, JSON.stringify(legacyCache));
+  const legacyMiss = await reconcileCustomization({
+    descriptor,
+    customizationRoot,
+    sourcePath: liveRoot,
+    cachePath: legacyCachePath,
+  });
+  assert.equal(legacyMiss.status, "ambiguous-drift");
+  assert.equal(legacyMiss.cached, false);
 });
 
 test("helper contract 1: CLI output, diagnostics, and exit meanings remain stable", async () => {

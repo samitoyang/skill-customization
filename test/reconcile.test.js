@@ -170,6 +170,41 @@ test("drift stops as ambiguous unless semantic compatibility is cached by finger
   assert.equal(await readFile(path.join(fixture.sourceRoot, "SKILL.md"), "utf8"), before);
 });
 
+test("compatibility cache entries bind the selected delta path and role", async () => {
+  const fixture = await overlayFixture();
+  const cachePath = path.join(fixture.root, "state", "compatibility.json");
+  await writeFile(
+    path.join(fixture.customizationRoot, "ALTERNATE.md"),
+    "Apply a different reviewed delta.\n",
+  );
+  fixture.descriptor.owned_payload.reviewed_fingerprint = await payloadFingerprint(
+    fixture.customizationRoot,
+  );
+  await writeFile(path.join(fixture.sourceRoot, "SKILL.md"), "changed source\n");
+
+  const checked = await reconcileCustomization({
+    descriptor: fixture.descriptor,
+    customizationRoot: fixture.customizationRoot,
+    sourcePath: fixture.sourceRoot,
+    cachePath,
+    semanticReconciler: async () => ({
+      compatible: true,
+      evidence: "reviewed the default delta",
+    }),
+  });
+  assert.equal(checked.status, "compatible");
+
+  fixture.descriptor.customization = "ALTERNATE.md";
+  const changedSelector = await reconcileCustomization({
+    descriptor: fixture.descriptor,
+    customizationRoot: fixture.customizationRoot,
+    sourcePath: fixture.sourceRoot,
+    cachePath,
+  });
+  assert.equal(changedSelector.status, "ambiguous-drift");
+  assert.equal(changedSelector.cached, false);
+});
+
 test("concurrent compatibility reviews preserve distinct cache entries", async () => {
   const first = await overlayFixture();
   const second = await overlayFixture();

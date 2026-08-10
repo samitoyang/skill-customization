@@ -1,6 +1,6 @@
 # Discovery and bindings
 
-Discovery accepts a name, repository/subdirectory URL, local skill directory, or `SKILL.md`. Evidence order is explicit input, containing Git, manager metadata, embedded metadata, then confirmation. It scans declared roots and bounded workspace ancestors, never a broad home or sibling crawl, and keeps provenance conflicts and every physical copy visible.
+Discovery accepts a name, repository/subdirectory URL, local skill directory, or `SKILL.md`. Evidence order is explicit input, containing Git, manager metadata, embedded metadata, then confirmation. It scans declared roots and bounded workspace ancestors, never a broad home or sibling crawl, and keeps provenance conflicts and every physical copy visible. A malformed or unfingerprintable sibling is isolated in `candidateDiagnostics` instead of blocking valid candidates; an explicitly selected invalid candidate still fails with its specific error.
 
 Candidates with adjacent `customization.json` are classified as customizations. Malformed adjacent metadata is a visible `MALFORMED_CUSTOMIZATION_METADATA` error; it is never downgraded to an ordinary skill. A customization binding must match the portable stable ID, type, name, and license.
 

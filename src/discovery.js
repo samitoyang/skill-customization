@@ -313,7 +313,7 @@ async function scanRoot(rootInfo) {
   try {
     entries = await readdir(rootInfo.path, { withFileTypes: true });
   } catch {
-    return [];
+    return { candidates: [], failures: [] };
   }
   const directories = [];
   if (await exists(path.join(rootInfo.path, "SKILL.md"))) directories.push(rootInfo.path);
@@ -323,9 +323,18 @@ async function scanRoot(rootInfo) {
       if (await exists(path.join(directory, "SKILL.md"))) directories.push(directory);
     }
   }
-  return Promise.all(
+  const results = await Promise.allSettled(
     directories.map((directory) => candidateFromDirectory(directory, rootInfo)),
   );
+  return {
+    candidates: results
+      .filter(({ status }) => status === "fulfilled")
+      .map(({ value }) => value),
+    failures: results.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [{ directory: directories[index], error: result.reason }]
+        : []),
+  };
 }
 
 async function gitEvidence(directory) {
@@ -639,27 +648,71 @@ export async function discoverSkills({
     declaredRoots.push(root(explicitDirectory, "explicit", "custom", "custom-path"));
   }
   const normalizedRoots = await uniquePhysicalRoots(declaredRoots);
-  const candidates = (await Promise.all(normalizedRoots.map(scanRoot))).flat();
+  const scans = await Promise.all(normalizedRoots.map(scanRoot));
+  const candidates = scans.flatMap(({ candidates: rootCandidates }) =>
+    rootCandidates
+  );
+  const candidateFailures = scans.flatMap(({ failures }) => failures);
+  const explicitTarget = explicitDirectory
+    ? await realpath(explicitDirectory).catch(() => path.resolve(explicitDirectory))
+    : undefined;
   const deduped = new Map();
   for (const candidate of candidates) {
     const key = `${candidate.path}\0${candidate.owner}`;
     if (!deduped.has(key)) deduped.set(key, candidate);
   }
-  for (const candidate of deduped.values()) {
-    if (explicitDirectory && candidate.path === path.resolve(explicitDirectory)) {
-      candidate.evidence.push({ kind: "explicit", path: candidate.path });
+  const enrichmentCandidates = [...deduped.values()];
+  const enrichmentResults = await Promise.allSettled(
+    enrichmentCandidates.map(async (candidate) => {
+      if (
+        explicitDirectory
+        && path.resolve(candidate.realPath ?? candidate.path) === explicitTarget
+      ) {
+        candidate.evidence.push({
+          kind: "explicit",
+          path: path.resolve(explicitDirectory),
+        });
+      }
+      const git = await gitEvidence(candidate.path);
+      if (git) candidate.evidence.push(git);
+      candidate.evidence.push(...managerEvidenceFor(candidate, managerRecords));
+      const embedded = await embeddedEvidence(candidate.path);
+      if (embedded) candidate.evidence.push(embedded);
+      return candidate;
+    }),
+  );
+  const enrichedCandidates = [];
+  for (const [index, result] of enrichmentResults.entries()) {
+    if (result.status === "fulfilled") {
+      enrichedCandidates.push(result.value);
+    } else {
+      candidateFailures.push({
+        directory: enrichmentCandidates[index].path,
+        error: result.reason,
+      });
     }
-    const git = await gitEvidence(candidate.path);
-    if (git) candidate.evidence.push(git);
-    candidate.evidence.push(...managerEvidenceFor(candidate, managerRecords));
-    const embedded = await embeddedEvidence(candidate.path);
-    if (embedded) candidate.evidence.push(embedded);
   }
+  if (explicitDirectory) {
+    for (const failure of candidateFailures) {
+      const failureTarget = await realpath(failure.directory).catch(() =>
+        path.resolve(failure.directory)
+      );
+      if (failureTarget === explicitTarget) throw failure.error;
+    }
+  }
+  const candidateDiagnostics = candidateFailures.map(({ directory, error }) => ({
+    path: path.resolve(directory),
+    code: error?.code ?? "INVALID_DISCOVERY_CANDIDATE",
+    message: error?.message ?? String(error),
+  }));
 
-  let selected = [...deduped.values()];
+  let selected = enrichedCandidates;
   if (input) {
     if (explicitDirectory) {
-      selected = selected.filter(({ path: candidatePath }) => candidatePath === path.resolve(explicitDirectory));
+      selected = selected.filter(
+        (candidate) =>
+          path.resolve(candidate.realPath ?? candidate.path) === explicitTarget,
+      );
     } else if (repositoryInput) {
       const locator = normalizeRepositoryLocator(input);
       selected = selected.filter((candidate) =>
@@ -694,6 +747,7 @@ export async function discoverSkills({
       details: {
         input,
         metadataMatches,
+        candidateDiagnostics,
         action: "install, clone, create, or choose a custom path",
       },
     });
@@ -707,6 +761,7 @@ export async function discoverSkills({
     ],
     searchedRoots: normalizedRoots,
     managerDiagnostics,
+    candidateDiagnostics,
     unresolvedManagerRecords: managerRecords.filter(({ path: managerPath }) => !managerPath),
   };
 }

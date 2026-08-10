@@ -5,7 +5,8 @@
       "sha256:9bd09cbecea4d76855433d03563ab91e1578028bfd84dbcd904d7806a129a81c": {
         "status": "compatible",
         "evidence": "contract-v1 golden semantic review",
-        "customizationFingerprint": "sha256:4db0cb8724092be3e2d571ec11bec9a5f6e0d1229b387e68cd33a8afa360f768"
+        "customizationFingerprint": "sha256:4db0cb8724092be3e2d571ec11bec9a5f6e0d1229b387e68cd33a8afa360f768",
+        "executionFingerprint": "sha256:177a2364a07ab44f26315ffd6d768f114d75e9696b6dfdda38da7e1f3bab7713"
       }
     }
   }

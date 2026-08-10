@@ -7,6 +7,7 @@ import { ReconciliationError } from "./errors.js";
 import {
   fingerprintFile,
   fingerprintPath,
+  fingerprintValues,
   payloadFingerprint,
 } from "./fingerprint.js";
 import { generateLocalIdentity } from "./normalization.js";
@@ -464,13 +465,17 @@ async function readCompatibility(
   descriptorId,
   fingerprint,
   customizationFingerprint,
+  executionFingerprint,
 ) {
   if (!cachePath) return undefined;
   const cache = await readJsonState(cachePath, EMPTY_CACHE);
   assertCompatibilityCache(cache, cachePath);
   const cached = cache.compatibility[descriptorId]?.[fingerprint];
-  return cached?.customizationFingerprint === customizationFingerprint
-    ? cached
+  return (
+    cached?.customizationFingerprint === customizationFingerprint
+    && cached.executionFingerprint === executionFingerprint
+  )
+    ? { status: cached.status, evidence: cached.evidence }
     : undefined;
 }
 
@@ -492,6 +497,7 @@ async function cacheCompatibility(
   descriptorId,
   fingerprint,
   customizationFingerprint,
+  executionFingerprint,
   result,
 ) {
   if (!cachePath) return;
@@ -502,9 +508,17 @@ async function cacheCompatibility(
       status: result.status,
       evidence: result.evidence,
       customizationFingerprint,
+      executionFingerprint,
     };
     return cache;
   });
+}
+
+function overlayCompatibilityFingerprint(descriptor, ownedFingerprint) {
+  return fingerprintValues(
+    [descriptor.id, "delta", descriptor.customization, ownedFingerprint],
+    "skill-customization-overlay-compatibility-v1",
+  );
 }
 
 async function reconcileOverlay({
@@ -550,6 +564,10 @@ async function reconcileOverlay({
     ? await fingerprintFile(entrypoint)
     : undefined;
   const customizationFingerprint = await payloadFingerprint(customizationRoot);
+  const compatibilityFingerprint = overlayCompatibilityFingerprint(
+    descriptor,
+    customizationFingerprint,
+  );
   const base = baseResult(
     descriptor,
     sourceFingerprint,
@@ -573,6 +591,7 @@ async function reconcileOverlay({
     descriptor.id,
     sourceFingerprint,
     customizationFingerprint,
+    compatibilityFingerprint,
   );
   if (cached?.status === "compatible") {
     return { ...base, ...cached, cached: true };
@@ -594,6 +613,7 @@ async function reconcileOverlay({
       descriptor.id,
       sourceFingerprint,
       customizationFingerprint,
+      compatibilityFingerprint,
       result,
     );
   }
