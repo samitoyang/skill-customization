@@ -1,6 +1,6 @@
 # Fork intake
 
-Use this intake only for a new fork or an explicit material change. Existing execution starts with helper preflight; derive facts from the request, workspace, inventory, source graph, descriptor, complete `CUSTOMIZATION.md` workflow, snapshot, and diff before asking.
+Use this intake only for a new fork or an explicit material change. Existing execution starts with helper preflight; derive facts from the request, workspace, inventory, source graph, descriptor, complete `CUSTOMIZATION.md` workflow, snapshot directory, and diff before asking.
 
 ## Starting point
 
@@ -20,11 +20,11 @@ Resolve these fields:
 
 - **Source identity:** confirmed full source or verified customization, declared name, stable identity, type, license, expected effective fingerprint, and discovery evidence. Concrete paths belong only in an optional context tracking binding.
 - **Independent workflow:** context, complete desired workflow, preserved behavior, non-goals, and observable success. `CUSTOMIZATION.md` contains the whole runnable workflow, not a delta.
-- **Placement:** workspace or personal scope and exact destination.
+- **Placement:** Default a new workspace customization to `.agents/skills/<name>/`; use a compatible host-specific project or personal skill root when selected, and record the exact destination.
 - **Name and activation:** offer two or three collision-free `<source>-<outcome>` names and default to `coexist`. Record `replace` only after a separate confirmation of same-name intent and customization-first host precedence.
 - **Independence and distribution:** state that the fork is a runtime leaf, and record whether it is private, team-shared, or public so license and redistribution review match the intended audience.
-- **Materialization:** when the source is an overlay chain, review its checked base-plus-deltas result and record the chain effective fingerprint, concrete snapshot fingerprint, review time, and evidence before diffing to the independent workflow.
-- **Tracking:** ask whether to retain a confirmed advisory binding. No binding is silent; drift or unavailability never blocks; adoption and rebase are explicit.
+- **Materialization:** when the source is an overlay chain, review its checked base-plus-deltas result and record the chain effective fingerprint, concrete snapshot directory fingerprint, review time, and evidence before diffing to the independent workflow.
+- **Tracking:** ask whether to retain a confirmed advisory binding. No binding is silent; drift and unavailability never block; unreadable or invalid optional tracking state remains advisory; adoption and rebase are explicit.
 - **Dispatcher:** generate a thin `SKILL.md` that runs contract-1 preflight, follows only ready steps, and delegates unavailable, incompatible, or maintenance-required results to `skill-fork`.
 - **Helper fallback:** record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 1. The download may run only after brief confirmation.
 

@@ -10,7 +10,7 @@ Generated customization entrypoints are thin dispatchers. They negotiate helper 
 
 Preflight owns recursive overlay traversal, cycle/depth protection, reviewed payload checks, context binding resolution, effective fingerprints, and base-to-inner-to-outer execution ordering. Reconciliation owns only targeted semantic and provenance decisions.
 
-Overlay `CUSTOMIZATION.md` is a semantic delta. Fork `CUSTOMIZATION.md` is the complete independent workflow; a fork is a runtime leaf. Concrete source paths remain local bindings. Fork tracking is optional and advisory. Forking an overlay chain requires reviewed materialization evidence before diffing.
+Overlay `CUSTOMIZATION.md` is a semantic delta. Fork `CUSTOMIZATION.md` is the complete independent workflow; a fork is a runtime leaf with a directory-scoped snapshot. Concrete source paths remain local bindings. Fork tracking is optional and advisory. Forking an overlay chain requires reviewed materialization evidence before diffing.
 
 ## Consequences
 

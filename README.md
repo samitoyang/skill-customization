@@ -28,7 +28,7 @@ customizations/
 Full-copy forks become difficult to audit as they drift, lose provenance, or collide with the source skill's name or trigger.
 
 - **The fix:** Capture explicit provenance.
-- **Mechanism:** Store a reviewed source snapshot alongside an explicit diff file.
+- **Mechanism:** Store a reviewed source snapshot directory alongside an explicit diff file.
 
 ```text
 managed-skills/
@@ -41,7 +41,7 @@ customizations/
     ├── CUSTOMIZATION.md                 # Complete independent workflow
     ├── customization.json               # Descriptor: portable identity + provenance
     └── provenance/
-        ├── source/                      # Reviewed snapshot
+        ├── source/                      # Reviewed source snapshot directory
         └── source.diff                  # Snapshot → owned payload
 ```
 
@@ -226,7 +226,7 @@ A ready customization executes its checked runtime instructions directly without
 | Portable descriptor | Stable identity, own/source licenses, relative artifacts, reviewed fingerprints, and activation; no concrete source paths |
 | Local state | Context-scoped bindings and compatibility decisions written atomically under a cross-process lock |
 | Overlay | Live context binding, reviewed owned payload, and full-source or customization-source effective fingerprint |
-| Fork | Runtime leaf with complete workflow and owned, relative, symlink-free snapshot and diff |
+| Fork | Runtime leaf with complete workflow and owned, relative, symlink-free snapshot directory and diff |
 
 Published descriptors keep stable identity and provenance portable. Concrete source paths, credentials, bindings, and compatibility decisions remain local. The supporting Node.js package has no runtime dependencies.
 

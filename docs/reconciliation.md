@@ -4,6 +4,6 @@ Preflight owns recursive graph traversal. It checks the reviewed owned payload, 
 
 Reconciliation stays targeted to one semantic or provenance decision. Overlay source drift may be accepted, rejected, marked ambiguous, or identified as an absorbed delta. Source trees remain read-only. Direct overlay payload edits route to `skill-overlay`; accepted maintenance refreshes the reviewed fingerprints atomically before preflight reruns.
 
-A fork is a runtime leaf. Reconciliation verifies its reviewed owned payload, snapshot and diff fingerprints, rejects symlinks, applies the unified diff to the snapshot, and requires the result to reproduce the complete independent workflow payload. Fork payload or provenance drift routes to `skill-fork`.
+A fork is a runtime leaf. Reconciliation verifies its reviewed owned payload, snapshot-directory and diff fingerprints, rejects symlinks, applies the unified diff to the snapshot directory, and requires the result to reproduce the complete independent workflow payload. Fork payload or provenance drift routes to `skill-fork`.
 
 Fork tracking drift, unavailability, and invalid optional tracking state are advisory. Adoption or rebase is an explicit maintenance action. Forking an overlay chain first reviews a materialized base-plus-deltas snapshot and records both the chain effective fingerprint and concrete snapshot fingerprint. Changing either materialization fingerprint requires fresh review time and evidence.

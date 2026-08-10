@@ -59,7 +59,7 @@
     },
     {
       "id": 6,
-      "prompt": "Verify my existing incident-response-standalone fork; its descriptor, CUSTOMIZATION.md, snapshot, and diff already exist.",
+      "prompt": "Verify my existing incident-response-standalone fork; its descriptor, CUSTOMIZATION.md, snapshot directory, and diff already exist.",
       "expected_output": "Uses helper-first preflight and directly runs the fork's complete checked workflow without invoking maintenance when ready.",
       "files": [],
       "expectations": [
@@ -117,7 +117,7 @@
       "files": [],
       "expectations": [
         "The descriptor source variant records the customization stable ID, type, license, and effective fingerprint.",
-        "Materialization records the chain effective fingerprint, concrete snapshot fingerprint, review time, and evidence.",
+        "Materialization records the chain effective fingerprint, concrete snapshot directory fingerprint, review time, and evidence.",
         "The resulting fork is a runtime leaf with complete CUSTOMIZATION.md."
       ]
     },
@@ -128,7 +128,17 @@
       "files": [],
       "expectations": [
         "The changed owned-payload fingerprint produces maintenance-required with skill-fork as the handler.",
-        "After acceptance it updates payload, snapshot, and diff fingerprints atomically and reruns preflight."
+        "After acceptance it updates payload, snapshot, and diff fingerprints atomically, supplies both fresh review time and evidence for changed materialization, and reruns preflight."
+      ]
+    },
+    {
+      "id": 13,
+      "prompt": "Run incident-response-standalone. Its optional tracking state file is malformed, but the verified fork payload and provenance artifacts are unchanged.",
+      "expected_output": "Preflight reports an optional tracking advisory and runs the verified fork unchanged because tracking state is not authoritative runtime provenance.",
+      "files": [],
+      "expectations": [
+        "Unreadable or invalid optional tracking state produces ready-with-advisory rather than a maintenance stop.",
+        "The response runs the complete fork workflow and does not rewrite authoritative provenance from malformed tracking state."
       ]
     }
   ]

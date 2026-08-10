@@ -20,7 +20,7 @@ Resolve these fields:
 
 - **Source identity:** confirmed full source or verified customization, declared name, stable identity, type, license, expected effective fingerprint, and discovery evidence. Concrete paths belong only in the context binding.
 - **Delta:** context, desired behavior, preserved source behavior, non-goals, and observable success. `CUSTOMIZATION.md` contains only this semantic delta.
-- **Placement:** workspace or personal scope and exact destination.
+- **Placement:** Default a new workspace customization to `.agents/skills/<name>/`; use a compatible host-specific project or personal skill root when selected, and record the exact destination.
 - **Name and activation:** offer two or three collision-free `<source>-<outcome>` names and default to `coexist`. Record `replace` only after a separate confirmation of same-name intent and customization-first host precedence.
 - **Upstream relationship:** state that the live source remains required, what upstream continues to own, and how recursive preflight orders the base workflow followed by inner-to-outer deltas.
 - **Dispatcher:** generate a thin `SKILL.md` that runs contract-1 preflight, follows only ready steps, and delegates unavailable, incompatible, or maintenance-required results to `skill-overlay`.

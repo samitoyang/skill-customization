@@ -363,3 +363,33 @@ test("reader requires fork snapshot and diff to be owned, non-symlinked provenan
   );
   await assert.rejects(readDescriptor(descriptorPath), /not owned|symbolic link/i);
 });
+
+test("reader requires a fork snapshot directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "fork-snapshot-type-"));
+  const descriptorDir = path.join(root, "review-local-archive");
+  const provenance = path.join(descriptorDir, "provenance");
+  await mkdir(provenance, { recursive: true });
+  await writeFile(path.join(descriptorDir, "SKILL.md"), "fork\n");
+  await writeFile(path.join(descriptorDir, "CUSTOMIZATION.md"), "delta\n");
+  await writeFile(path.join(provenance, "source"), "source\n");
+  await writeFile(path.join(provenance, "source.diff"), "diff\n");
+  const descriptorPath = path.join(descriptorDir, "customization.json");
+  await writeFile(
+    descriptorPath,
+    JSON.stringify(
+      repositoryDescriptor({
+        type: "fork",
+        fork: {
+          snapshot: "provenance/source",
+          diff: "provenance/source.diff",
+          snapshot_fingerprint:
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          diff_fingerprint:
+            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        },
+      }),
+    ),
+  );
+
+  await assert.rejects(readDescriptor(descriptorPath), /snapshot.*directory/i);
+});

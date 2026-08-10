@@ -406,56 +406,57 @@ test("full-source fork snapshots must match the reviewed source checkpoint", asy
   }
 });
 
-test("single-file fork snapshots normalize repository entrypoint selectors", async () => {
-  for (const upstreamPath of ["skills/review", "skills/review/skill.md"]) {
-    const root = await mkdtemp(path.join(os.tmpdir(), "fork-file-snapshot-"));
-    const customizationRoot = path.join(root, "review-fork");
-    const provenance = path.join(customizationRoot, "provenance");
-    await mkdir(provenance, { recursive: true });
-    await writeFile(path.join(customizationRoot, "SKILL.md"), "fork\n");
-    await writeFile(path.join(customizationRoot, "CUSTOMIZATION.md"), "Fork rationale.\n");
-    const snapshot = path.join(provenance, "source");
-    await writeFile(snapshot, "snapshot\n");
-    const diffPath = path.join(provenance, "source.diff");
-    await writeFile(
-      diffPath,
-      "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-snapshot\n+fork\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+Fork rationale.\n",
-    );
-    const snapshotFingerprint = await fingerprintPath(snapshot);
-    const descriptor = {
-      schema_version: 1,
-      id: `urn:skill-customization:fixture:file-snapshot:${path.basename(upstreamPath)}`,
-      type: "fork",
-      name: "review-fork",
+test("fork reconciliation rejects single-file snapshots", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "fork-file-snapshot-"));
+  const customizationRoot = path.join(root, "review-fork");
+  const provenance = path.join(customizationRoot, "provenance");
+  await mkdir(provenance, { recursive: true });
+  await writeFile(path.join(customizationRoot, "SKILL.md"), "fork\n");
+  await writeFile(path.join(customizationRoot, "CUSTOMIZATION.md"), "Fork rationale.\n");
+  const snapshot = path.join(provenance, "source");
+  await writeFile(snapshot, "snapshot\n");
+  const diffPath = path.join(provenance, "source.diff");
+  await writeFile(
+    diffPath,
+    "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-snapshot\n+fork\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+Fork rationale.\n",
+  );
+  const snapshotFingerprint = await fingerprintPath(snapshot);
+  const descriptor = {
+    schema_version: 1,
+    id: "urn:skill-customization:fixture:file-snapshot",
+    type: "fork",
+    name: "review-fork",
+    license: "MIT",
+    entrypoint: "SKILL.md",
+    customization: "CUSTOMIZATION.md",
+    dependencies: [],
+    owned_payload: {
+      reviewed_fingerprint: await payloadFingerprint(customizationRoot),
+    },
+    source: {
+      skill_name: "review",
+      kind: "repository",
+      repository: "https://github.com/example/skills",
+      upstream_path: "skills/review/SKILL.md",
       license: "MIT",
-      entrypoint: "SKILL.md",
-      customization: "CUSTOMIZATION.md",
-      dependencies: [],
-      owned_payload: {
-        reviewed_fingerprint: await payloadFingerprint(customizationRoot),
-      },
-      source: {
-        skill_name: "review",
-        kind: "repository",
-        repository: "https://github.com/example/skills",
-        upstream_path: upstreamPath,
-        license: "MIT",
-        effective_fingerprint: snapshotFingerprint,
-        review: { revision: "abc" },
-      },
-      activation: { mode: "coexist" },
-      fork: {
-        snapshot: "provenance/source",
-        diff: "provenance/source.diff",
-        snapshot_fingerprint: snapshotFingerprint,
-        diff_fingerprint: await fingerprintFile(diffPath),
-      },
-    };
+      effective_fingerprint: snapshotFingerprint,
+      review: { revision: "abc" },
+    },
+    activation: { mode: "coexist" },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint: snapshotFingerprint,
+      diff_fingerprint: await fingerprintFile(diffPath),
+    },
+  };
 
-    const result = await reconcileCustomization({ descriptor, customizationRoot });
-    assert.equal(result.status, "fork-ready");
-    assert.deepEqual(result.provenance.diffTargets, ["SKILL.md", "CUSTOMIZATION.md"]);
-  }
+  await assert.rejects(
+    reconcileCustomization({ descriptor, customizationRoot }),
+    (error) =>
+      error.code === "INCOMPLETE_FORK_PROVENANCE"
+      && /snapshot must be a directory/i.test(error.message),
+  );
 });
 
 test("fork provenance accepts a helper-only diff that reconstructs the full payload", async () => {

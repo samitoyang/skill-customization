@@ -1,8 +1,8 @@
 ---
 name: skill-fork
-description: Create or maintain an independent skill that owns its complete workflow, provenance, license, snapshot, and diff. Use for natural-language or explicit fork requests, existing fork maintenance stops, and ambiguous customization requests that need routing among fork, overlay, replacement, and companion.
+description: Create or maintain an independent skill that owns its complete workflow, provenance, license, snapshot directory, and diff. Use for natural-language or explicit fork requests, existing fork maintenance stops, and ambiguous customization requests that need routing among fork, overlay, replacement, and companion.
 license: MIT
-compatibility: Requires Node.js 18+, npm access, and skill-customization helper contract 1 for deterministic operations.
+compatibility: Requires Node.js 18+ and skill-customization helper contract 1; npm only for the on-demand fallback.
 ---
 
 # Skill Fork
@@ -13,20 +13,20 @@ A fork is a runtime leaf whose `CUSTOMIZATION.md` is the complete independent wo
 
 1. Inventory installed skills and adjacent customization metadata. For an existing fork execution request, try the dispatcher fast path before intake. **Gate:** one descriptor and current host/workspace context are identified, or the request is classified as new maintenance work.
 2. Select one contract-1 helper, then run `skill-customization preflight <customization.json> --context <context>`. **Gate:** the result is checked and no runtime file has executed early.
-3. On `ready`, follow the workflow step. On `ready-with-advisory`, report optional tracking drift and run the fork unchanged; adoption or rebase remains explicit. If preflight names another maintenance handler, delegate to it. **Gate:** execution completes from the checked plan or stops at one handler.
+3. On `ready`, follow the workflow step. On `ready-with-advisory`, report the optional tracking advisory and run the fork unchanged; adoption or rebase remains explicit. If preflight names another maintenance handler, delegate to it. **Gate:** execution completes from the checked plan or stops at one handler.
 4. For `maintenance-required`, explicit maintenance, or creation, use the matching branch below. Treat the source as read-only and write only inside the fork or local state paths. **Gate:** accepted changes are recorded atomically and preflight reruns ready, or the result stops with one action.
 
 ## Select the helper
 
 Run `skill-customization supports 1`. Accept only exit `0` with JSON reporting `compatible: true`, `requested_contract: "1"`, `supported_contracts` containing `"1"`, and a non-empty `package_version`. Use that installed executable for this run.
 
-If unavailable or incompatible, explain that `npx` may download `skill-customization@latest` and reuse npm's cache, then obtain permission. After approval, run `npx --yes skill-customization@latest supports 1`; when compatible, use `npx --yes skill-customization@<package_version> <command>` for the remaining commands. If Node/npm is missing, permission is declined, output is malformed, or contract 1 is unsupported, stop with setup guidance. A dispatcher delegates here when installed preflight is unavailable or incompatible; it never runs unchecked.
+An installed compatible helper requires Node.js only. If unavailable or incompatible, explain that `npx` may download `skill-customization@latest` and reuse npm's cache, then obtain permission. After approval, run `npx --yes skill-customization@latest supports 1`; when compatible, use `npx --yes skill-customization@<package_version> <command>` for the remaining commands. Stop with setup guidance if Node.js is missing, if the fallback requires npm and npm is missing, if permission is declined, if output is malformed, or if contract 1 is unsupported. A dispatcher delegates here when installed preflight is unavailable or incompatible; it never runs unchecked.
 
 ## Maintain a fork
 
-Use the preflight handler reason to focus provenance or owned-payload repair. Verify the complete workflow against its snapshot and diff. After acceptance, run `skill-customization accept-maintenance`; pass `--diff-file` when the reviewed diff changed, and update materialization review evidence when the source was an overlay chain. Rerun preflight before activation.
+Use the preflight handler reason to focus provenance or owned-payload repair. Verify the complete workflow against its snapshot directory and diff. After acceptance, run `skill-customization accept-maintenance`; pass `--diff-file` when the reviewed diff changed, and pass both `--reviewed-at` and `--evidence` when either materialization fingerprint changes. Rerun preflight before activation.
 
-An optional confirmed tracking binding is advisory only: absence is silent, and drift or unavailability never blocks normal fork execution. Adoption and rebase are explicit maintenance requests.
+An optional confirmed tracking binding is advisory only: absence is silent; drift and unavailability never block; unreadable or invalid optional tracking state remains advisory. Adoption and rebase are explicit maintenance requests.
 
 ## Create a fork
 
@@ -34,7 +34,7 @@ Read [Fork intake](references/intake.md), confirm one brief, then create:
 
 - a thin `SKILL.md` dispatcher that negotiates contract 1, runs preflight, follows only ready steps, and delegates every stopped/unavailable-helper case to `skill-fork`;
 - `CUSTOMIZATION.md` containing the complete independent workflow;
-- a relative, symlink-free snapshot and unified diff that reconstruct every runtime-owned file;
+- a relative, symlink-free snapshot directory and unified diff that reconstruct every runtime-owned file;
 - a portable v1 descriptor with own/source licenses, reviewed owned-payload, snapshot, diff, and source effective fingerprints.
 
-When the source is an overlay chain, materialize its checked base-plus-deltas result and record the chain effective fingerprint, concrete snapshot fingerprint, review time, and review evidence before diffing. A verified fork may be the source of another customization. Route to `skill-overlay` for automatic upstream changes and to a companion when the source behavior remains unchanged.
+When the source is an overlay chain, materialize its checked base-plus-deltas result as a snapshot directory and record the chain effective fingerprint, concrete snapshot fingerprint, review time, and review evidence before diffing. A verified fork may be the source of another customization. Route to `skill-overlay` for automatic upstream changes and to a companion when the source behavior remains unchanged.

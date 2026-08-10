@@ -12,6 +12,8 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.match(markdown, new RegExp(`^---\\nname: ${skillName}\\n`));
     assert.match(markdown, /license: MIT/);
     assert.match(markdown, /compatibility: Requires Node\.js 18\+/);
+    assert.match(markdown, /npm only for the on-demand fallback/);
+    assert.doesNotMatch(markdown, /Node\.js 18\+, npm access/);
     assert.match(markdown, /helper contract 1/);
     assert.match(markdown, /thin dispatchers/);
     assert.match(markdown, /skill-customization preflight/);
@@ -32,6 +34,11 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
       /Treat the source as read-only and write only inside the (?:customization|fork) or local state paths\./,
     );
     const evals = JSON.parse(await read(`skills/${skillName}/evals/evals.json`));
+    const intake = await read(`skills/${skillName}/references/intake.md`);
+    assert.match(
+      intake,
+      /Default a new workspace customization to `\.agents\/skills\/<name>\/`/,
+    );
     assert.equal(evals.skill_name, skillName);
     assert.equal(new Set(evals.evals.map(({ id }) => id)).size, evals.evals.length);
     for (const item of evals.evals) {
@@ -86,10 +93,45 @@ test("skill helper policy covers installed, npx, declined, incompatible, and mis
     assert.match(markdown, /obtain permission\. After approval, run/);
     assert.match(markdown, /skill-customization@<package_version> <command>/);
     assert.match(markdown, /permission is declined/);
-    assert.match(markdown, /Node\/npm is missing/);
+    assert.match(markdown, /Node\.js is missing/);
+    assert.match(markdown, /fallback requires npm/);
     assert.match(markdown, /contract 1 is unsupported/);
     assert.doesNotMatch(markdown, /skill-customization@0\.1\.0/);
   }
+});
+
+test("fork maintenance guidance preserves reviewed materialization and advisory tracking", async () => {
+  const markdown = await read("skills/skill-fork/SKILL.md");
+  const intake = await read("skills/skill-fork/references/intake.md");
+  assert.match(
+    markdown,
+    /both `--reviewed-at` and `--evidence` when either materialization fingerprint changes/,
+  );
+  for (const document of [markdown, intake]) {
+    assert.match(document, /unreadable or invalid optional tracking state/);
+    assert.match(document, /snapshot directory/);
+  }
+});
+
+test("public maintenance references describe explicit fingerprint updates", async () => {
+  const [cli, library, contract, descriptor] = await Promise.all([
+    read("docs/cli.md"),
+    read("docs/library.md"),
+    read("docs/helper-contract-1.md"),
+    read("docs/descriptor-v1.md"),
+  ]);
+  for (const document of [cli, library, contract]) {
+    assert.match(document, /source effective fingerprint only when explicitly supplied/i);
+  }
+  for (const document of [cli, library]) {
+    assert.match(
+      document,
+      /both (?:`--reviewed-at` and `--evidence`|`reviewedAt` and `evidence`) are required when either materialization fingerprint changes/i,
+    );
+  }
+  assert.match(descriptor, /snapshot directory/);
+  assert.doesNotMatch(descriptor, /full-source snapshot (?:file|may be a file)/i);
+  assert.match(contract, /both fresh review time and evidence/i);
 });
 
 test("README combines public workflow design with contract-compatible helper behavior", async () => {
@@ -111,6 +153,7 @@ test("README combines public workflow design with contract-compatible helper beh
   assert.match(markdown, /customization\.json\s+# Descriptor: portable identity \+ provenance/);
   assert.match(markdown, /customization\.json\s+# Descriptor: portable source requirements/);
   assert.match(markdown, /CUSTOMIZATION\.md\s+# Complete independent workflow/);
+  assert.match(markdown, /source snapshot directory/);
   assert.match(markdown, /## 🎛️ Customization Models/);
   assert.match(markdown, /Customization models describe the runtime relationship between a skill and its source/);
   assert.match(markdown, /\| Model \| Source relationship \| Runtime behavior \|/);

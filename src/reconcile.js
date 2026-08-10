@@ -9,10 +9,7 @@ import {
   fingerprintPath,
   payloadFingerprint,
 } from "./fingerprint.js";
-import {
-  generateLocalIdentity,
-  normalizeUpstreamEntrypoint,
-} from "./normalization.js";
+import { generateLocalIdentity } from "./normalization.js";
 import { resolveOwnedPath } from "./paths.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
@@ -80,9 +77,8 @@ function baseResult(descriptor, sourceFingerprint, customizationFingerprint) {
 
 async function forkSnapshotEntrypoint(snapshot) {
   const info = await lstat(snapshot);
-  if (info.isFile()) return snapshot;
   if (!info.isDirectory()) {
-    throw new Error("fork snapshot must be a file or directory");
+    throw new Error("fork snapshot must be a directory");
   }
   const entrypoint = path.join(snapshot, "SKILL.md");
   const entrypointInfo = await lstat(entrypoint).catch(() => undefined);
@@ -313,16 +309,6 @@ async function mapDirectoryPayload(
   return payload;
 }
 
-async function mapSnapshotPayload(snapshot, snapshotInfo, snapshotFilePath) {
-  if (snapshotInfo.isFile()) {
-    return new Map([[snapshotFilePath, await readFile(snapshot)]]);
-  }
-  if (!snapshotInfo.isDirectory()) {
-    throw new Error("fork snapshot must be a file or directory");
-  }
-  return mapDirectoryPayload(snapshot, { label: "fork snapshot" });
-}
-
 function assertPayloadPathShape(payload, candidatePath) {
   for (const existingPath of payload.keys()) {
     if (
@@ -396,16 +382,12 @@ async function verifyForkDiff({
   contents,
   snapshot,
   customizationRoot,
-  snapshotFilePath,
   excludedPaths,
 }) {
   const patches = parseUnifiedDiff(contents);
-  const snapshotInfo = await lstat(snapshot);
-  const snapshotPayload = await mapSnapshotPayload(
-    snapshot,
-    snapshotInfo,
-    snapshotFilePath,
-  );
+  const snapshotPayload = await mapDirectoryPayload(snapshot, {
+    label: "fork snapshot",
+  });
   const reconstructed = applyPatchesToPayload(snapshotPayload, patches);
   const owned = await mapDirectoryPayload(customizationRoot, {
     excludedPaths,
@@ -621,11 +603,6 @@ async function reconcileFork({ descriptor, customizationRoot }) {
       contents: await readFile(diff, "utf8"),
       snapshot,
       customizationRoot,
-      snapshotFilePath: descriptor.source.kind === "repository"
-        ? path.posix.basename(
-            normalizeUpstreamEntrypoint(descriptor.source.upstream_path),
-          )
-        : "SKILL.md",
       excludedPaths: [
         "customization.json",
         "provenance",

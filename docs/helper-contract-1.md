@@ -12,7 +12,7 @@ Contract 1 is the compatibility boundary between generated dispatchers, maintena
 | `bind` / `resolve` | Confirm or resolve context-local concrete source bindings. |
 | `reconcile` | Make one targeted overlay semantic or fork provenance decision. |
 | `preflight` | Flatten a checked recursive execution graph for one descriptor and context. |
-| `accept-maintenance` | Atomically refresh explicitly accepted review fingerprints and optional fork diff. |
+| `accept-maintenance` | Refresh the payload fingerprint, the source effective fingerprint only when explicitly supplied, and fork provenance atomically; changed materializations require both fresh review time and evidence. |
 
 Structured results go to standard output and diagnostics to standard error. Preflight exits `0` for `ready` and `ready-with-advisory`, `2` for `maintenance-required`, and `1` for malformed input or operational failure. A maintenance result contains no executable steps and exactly one actionable handler.
 

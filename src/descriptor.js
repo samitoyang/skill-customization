@@ -365,7 +365,7 @@ export async function readDescriptor(descriptorPath, { inventory = [] } = {}) {
     { relative: descriptor.customization, rejectSymlinks: false, expectedType: "file" },
     ...(descriptor.type === "fork"
       ? [
-          { relative: descriptor.fork.snapshot, rejectSymlinks: true, expectedType: "snapshot" },
+          { relative: descriptor.fork.snapshot, rejectSymlinks: true, expectedType: "directory" },
           { relative: descriptor.fork.diff, rejectSymlinks: true, expectedType: "file" },
         ]
       : []),
@@ -375,13 +375,13 @@ export async function readDescriptor(descriptorPath, { inventory = [] } = {}) {
       throw new DescriptorError(`descriptor path is not owned: ${relative}: ${error.message}`);
     });
     const info = await lstat(owned);
-    const validType = expectedType === "snapshot"
-      ? info.isFile() || info.isDirectory()
+    const validType = expectedType === "directory"
+      ? info.isDirectory()
       : info.isFile();
     if (!validType) {
       throw new DescriptorError(
         `descriptor path has invalid artifact type: ${relative} must be ${
-          expectedType === "snapshot" ? "a file or directory" : "a regular file"
+          expectedType === "directory" ? "a snapshot directory" : "a regular file"
         }`,
       );
     }
