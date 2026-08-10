@@ -377,6 +377,87 @@ test("fork reconciliation is independent of a runtime source", async () => {
   assert.deepEqual(result.provenance.diffTargets, ["SKILL.md", "CUSTOMIZATION.md"]);
 });
 
+test("full-source fork snapshots must match the reviewed source checkpoint", async () => {
+  for (const kind of ["repository", "local"]) {
+    const fixture = await forkDiffFixture();
+    fixture.descriptor.source = kind === "repository"
+      ? {
+          ...fixture.descriptor.source,
+          effective_fingerprint:
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }
+      : {
+          skill_name: "review",
+          kind: "local",
+          license: "MIT",
+          effective_fingerprint:
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          identity:
+            "local:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        };
+
+    await assert.rejects(
+      reconcileCustomization(fixture),
+      (error) =>
+        error.code === "INCOMPLETE_FORK_PROVENANCE"
+        && /reviewed full-source effective fingerprint/i.test(error.message),
+      `${kind} fork should reject an unrelated reviewed source checkpoint`,
+    );
+  }
+});
+
+test("single-file fork snapshots normalize repository entrypoint selectors", async () => {
+  for (const upstreamPath of ["skills/review", "skills/review/skill.md"]) {
+    const root = await mkdtemp(path.join(os.tmpdir(), "fork-file-snapshot-"));
+    const customizationRoot = path.join(root, "review-fork");
+    const provenance = path.join(customizationRoot, "provenance");
+    await mkdir(provenance, { recursive: true });
+    await writeFile(path.join(customizationRoot, "SKILL.md"), "fork\n");
+    await writeFile(path.join(customizationRoot, "CUSTOMIZATION.md"), "Fork rationale.\n");
+    const snapshot = path.join(provenance, "source");
+    await writeFile(snapshot, "snapshot\n");
+    const diffPath = path.join(provenance, "source.diff");
+    await writeFile(
+      diffPath,
+      "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-snapshot\n+fork\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+Fork rationale.\n",
+    );
+    const snapshotFingerprint = await fingerprintPath(snapshot);
+    const descriptor = {
+      schema_version: 1,
+      id: `urn:skill-customization:fixture:file-snapshot:${path.basename(upstreamPath)}`,
+      type: "fork",
+      name: "review-fork",
+      license: "MIT",
+      entrypoint: "SKILL.md",
+      customization: "CUSTOMIZATION.md",
+      dependencies: [],
+      owned_payload: {
+        reviewed_fingerprint: await payloadFingerprint(customizationRoot),
+      },
+      source: {
+        skill_name: "review",
+        kind: "repository",
+        repository: "https://github.com/example/skills",
+        upstream_path: upstreamPath,
+        license: "MIT",
+        effective_fingerprint: snapshotFingerprint,
+        review: { revision: "abc" },
+      },
+      activation: { mode: "coexist" },
+      fork: {
+        snapshot: "provenance/source",
+        diff: "provenance/source.diff",
+        snapshot_fingerprint: snapshotFingerprint,
+        diff_fingerprint: await fingerprintFile(diffPath),
+      },
+    };
+
+    const result = await reconcileCustomization({ descriptor, customizationRoot });
+    assert.equal(result.status, "fork-ready");
+    assert.deepEqual(result.provenance.diffTargets, ["SKILL.md", "CUSTOMIZATION.md"]);
+  }
+});
+
 test("fork provenance accepts a helper-only diff that reconstructs the full payload", async () => {
   const fixture = await forkDiffFixture({
     forkEntrypoint: "snapshot\n",
@@ -387,6 +468,8 @@ test("fork provenance accepts a helper-only diff that reconstructs the full payl
   fixture.descriptor.fork.snapshot_fingerprint = await fingerprintPath(
     fixture.snapshotRoot,
   );
+  fixture.descriptor.source.effective_fingerprint =
+    fixture.descriptor.fork.snapshot_fingerprint;
   fixture.descriptor.owned_payload.reviewed_fingerprint = await payloadFingerprint(
     fixture.customizationRoot,
   );

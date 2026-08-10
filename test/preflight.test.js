@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   mkdtemp,
   mkdir,
+  readFile,
   realpath,
   symlink,
   writeFile,
@@ -54,7 +55,10 @@ async function writeDescriptor(root, descriptor) {
   );
 }
 
-async function recursiveFixture({ symlinkBase = false } = {}) {
+async function recursiveFixture({
+  symlinkBase = false,
+  alternateInner = false,
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "preflight-chain-"));
   const base = path.join(root, "review");
   const inner = path.join(root, "review-archive");
@@ -69,6 +73,12 @@ async function recursiveFixture({ symlinkBase = false } = {}) {
   if (symlinkBase) await symlink(base, baseSource);
 
   await writeRuntimeFiles(inner, "review-archive", "Apply the archive delta.");
+  if (alternateInner) {
+    await writeFile(
+      path.join(inner, "ALTERNATE.md"),
+      "Apply an alternate reviewed delta.\n",
+    );
+  }
   const innerOwned = await payloadFingerprint(inner);
   const innerDescriptor = overlayDescriptor({
     id: "urn:test:review-archive",
@@ -86,7 +96,13 @@ async function recursiveFixture({ symlinkBase = false } = {}) {
   });
   await writeDescriptor(inner, innerDescriptor);
   const innerEffective = fingerprintValues(
-    [innerDescriptor.id, baseFingerprint, innerOwned],
+    [
+      innerDescriptor.id,
+      "delta",
+      innerDescriptor.customization,
+      baseFingerprint,
+      innerOwned,
+    ],
     "skill-customization-overlay-effective-v1",
   );
 
@@ -127,7 +143,16 @@ async function recursiveFixture({ symlinkBase = false } = {}) {
     interactive: true,
     confirm: async () => true,
   });
-  return { root, base, inner, outer, statePath, roots, innerEffective };
+  return {
+    root,
+    base,
+    inner,
+    outer,
+    statePath,
+    roots,
+    innerDescriptor,
+    innerEffective,
+  };
 }
 
 test("owned payload fingerprints every runtime file, excludes provenance, and rejects symlinks", async () => {
@@ -179,6 +204,23 @@ test("preflight flattens recursive overlays from base workflow through inner and
   assert.equal(result.maintenanceHandler, null);
 });
 
+test("effective fingerprints bind the selected reviewed execution file", async () => {
+  const item = await recursiveFixture({ alternateInner: true });
+  item.innerDescriptor.customization = "ALTERNATE.md";
+  await writeDescriptor(item.inner, item.innerDescriptor);
+
+  const result = await preflightCustomization({
+    descriptorPath: path.join(item.outer, "customization.json"),
+    context: "workspace:test",
+    statePath: item.statePath,
+    roots: item.roots,
+  });
+
+  assert.equal(result.status, "maintenance-required");
+  assert.equal(result.maintenanceHandler.reason, "source-drift");
+  assert.equal(result.maintenanceHandler.customizationId, "urn:test:review-archive-notify");
+});
+
 test("preflight propagates an inner owned-payload stop with one maintenance handler", async () => {
   const item = await recursiveFixture();
   await writeFile(path.join(item.inner, "CUSTOMIZATION.md"), "Unreviewed direct edit.\n");
@@ -212,6 +254,82 @@ test("an accepted maintenance update refreshes reviewed fingerprints before pref
     roots: item.roots,
   });
   assert.equal(result.status, "ready");
+});
+
+test("materialization fingerprint changes require fresh review evidence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "materialization-maintenance-"));
+  const forkRoot = path.join(root, "review-standalone");
+  const snapshot = path.join(forkRoot, "provenance", "source");
+  await mkdir(snapshot, { recursive: true });
+  await writeFile(path.join(snapshot, "SKILL.md"), "materialized workflow\n");
+  await writeFile(path.join(forkRoot, "SKILL.md"), "dispatcher\n");
+  await writeFile(path.join(forkRoot, "CUSTOMIZATION.md"), "independent workflow\n");
+  const diffPath = path.join(forkRoot, "provenance", "source.diff");
+  await writeFile(diffPath, "reviewed materialization diff\n");
+  const sourceFingerprint =
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const snapshotFingerprint = await fingerprintPath(snapshot);
+  const descriptor = {
+    schema_version: 1,
+    id: "urn:test:review-standalone-materialized",
+    type: "fork",
+    name: "review-standalone",
+    license: "MIT",
+    entrypoint: "SKILL.md",
+    customization: "CUSTOMIZATION.md",
+    dependencies: [],
+    owned_payload: { reviewed_fingerprint: await payloadFingerprint(forkRoot) },
+    source: {
+      skill_name: "review-archive",
+      kind: "customization",
+      id: "urn:test:review-archive",
+      type: "semantic-overlay",
+      license: "MIT",
+      effective_fingerprint: sourceFingerprint,
+    },
+    activation: { mode: "coexist" },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint: snapshotFingerprint,
+      diff_fingerprint: await fingerprintFile(diffPath),
+      materialization: {
+        source_effective_fingerprint: sourceFingerprint,
+        snapshot_fingerprint: snapshotFingerprint,
+        reviewed_at: "2026-08-09T00:00:00Z",
+        evidence: "Reviewed the original materialization.",
+      },
+    },
+  };
+  const descriptorPath = path.join(forkRoot, "customization.json");
+  await writeDescriptor(forkRoot, descriptor);
+  const changedSourceFingerprint =
+    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  await assert.rejects(
+    acceptMaintenanceUpdate({
+      descriptorPath,
+      sourceEffectiveFingerprint: changedSourceFingerprint,
+    }),
+    /reviewedAt and evidence are required/i,
+  );
+  assert.deepEqual(
+    JSON.parse(await readFile(descriptorPath, "utf8")),
+    descriptor,
+  );
+
+  const accepted = await acceptMaintenanceUpdate({
+    descriptorPath,
+    sourceEffectiveFingerprint: changedSourceFingerprint,
+    reviewedAt: "2026-08-10T00:00:00Z",
+    evidence: "Reviewed the updated materialization.",
+  });
+  assert.deepEqual(accepted.descriptor.fork.materialization, {
+    source_effective_fingerprint: changedSourceFingerprint,
+    snapshot_fingerprint: snapshotFingerprint,
+    reviewed_at: "2026-08-10T00:00:00Z",
+    evidence: "Reviewed the updated materialization.",
+  });
 });
 
 test("preflight detects recursive customization cycles by stable ID and canonical path", async () => {
@@ -364,4 +482,14 @@ test("verified forks are runtime leaves and execute their complete independent w
   assert.equal(advisory.status, "ready-with-advisory");
   assert.equal(advisory.advisories[0].code, "tracking-source-drift");
   assert.deepEqual(advisory.steps, result.steps);
+
+  await writeFile(trackingState, "{\n");
+  const invalidTrackingState = await preflightCustomization({
+    descriptorPath: path.join(forkRoot, "customization.json"),
+    context: "workspace:tracked",
+    statePath: trackingState,
+  });
+  assert.equal(invalidTrackingState.status, "ready-with-advisory");
+  assert.equal(invalidTrackingState.advisories[0].code, "tracking-state-invalid");
+  assert.deepEqual(invalidTrackingState.steps, result.steps);
 });

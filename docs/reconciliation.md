@@ -6,4 +6,4 @@ Reconciliation stays targeted to one semantic or provenance decision. Overlay so
 
 A fork is a runtime leaf. Reconciliation verifies its reviewed owned payload, snapshot and diff fingerprints, rejects symlinks, applies the unified diff to the snapshot, and requires the result to reproduce the complete independent workflow payload. Fork payload or provenance drift routes to `skill-fork`.
 
-Fork tracking drift and unavailability are advisory. Adoption or rebase is an explicit maintenance action. Forking an overlay chain first reviews a materialized base-plus-deltas snapshot and records both the chain effective fingerprint and concrete snapshot fingerprint.
+Fork tracking drift, unavailability, and invalid optional tracking state are advisory. Adoption or rebase is an explicit maintenance action. Forking an overlay chain first reviews a materialized base-plus-deltas snapshot and records both the chain effective fingerprint and concrete snapshot fingerprint. Changing either materialization fingerprint requires fresh review time and evidence.

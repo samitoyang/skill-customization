@@ -6,6 +6,6 @@ Candidates with adjacent `customization.json` are classified as customizations. 
 
 Bindings live under `$XDG_STATE_HOME/skill-customization/bindings.json` or `~/.agents/skill-customization/bindings.json`. Keys combine customization ID with host/workspace context. They alone contain concrete source paths. Symlink bindings record alias and canonical target, and retargeting invalidates them.
 
-An overlay requires a confirmed live binding for each context. A fork needs no runtime binding; an optional confirmed tracking binding only produces advisories when the source drifts or disappears. No tracking binding is silent.
+An overlay requires a confirmed live binding for each context. A fork needs no runtime binding; an optional confirmed tracking binding only produces advisories when the source drifts, disappears, or its state is unreadable or invalid. No tracking binding is silent.
 
 State updates use atomic replacement and a cross-process owner lock. A live lock is never stolen; abandoned ownership fails closed for explicit recovery.

@@ -9,7 +9,10 @@ import {
   fingerprintPath,
   payloadFingerprint,
 } from "./fingerprint.js";
-import { generateLocalIdentity } from "./normalization.js";
+import {
+  generateLocalIdentity,
+  normalizeUpstreamEntrypoint,
+} from "./normalization.js";
 import { resolveOwnedPath } from "./paths.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
@@ -602,6 +605,12 @@ async function reconcileFork({ descriptor, customizationRoot }) {
     if (snapshotFingerprint !== descriptor.fork.snapshot_fingerprint) {
       throw new Error("fork snapshot fingerprint does not match its reviewed descriptor fingerprint");
     }
+    if (
+      descriptor.source.kind !== "customization"
+      && snapshotFingerprint !== descriptor.source.effective_fingerprint
+    ) {
+      throw new Error("fork snapshot fingerprint does not match the reviewed full-source effective fingerprint");
+    }
     if (diffFingerprint !== descriptor.fork.diff_fingerprint) {
       throw new Error("fork diff fingerprint does not match its reviewed descriptor fingerprint");
     }
@@ -613,7 +622,9 @@ async function reconcileFork({ descriptor, customizationRoot }) {
       snapshot,
       customizationRoot,
       snapshotFilePath: descriptor.source.kind === "repository"
-        ? path.posix.basename(descriptor.source.upstream_path)
+        ? path.posix.basename(
+            normalizeUpstreamEntrypoint(descriptor.source.upstream_path),
+          )
         : "SKILL.md",
       excludedPaths: [
         "customization.json",

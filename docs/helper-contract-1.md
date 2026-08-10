@@ -16,6 +16,6 @@ Contract 1 is the compatibility boundary between generated dispatchers, maintena
 
 Structured results go to standard output and diagnostics to standard error. Preflight exits `0` for `ready` and `ready-with-advisory`, `2` for `maintenance-required`, and `1` for malformed input or operational failure. A maintenance result contains no executable steps and exactly one actionable handler.
 
-Preflight preserves these invariants: full-source effective fingerprints; customization-source stable identity; base/fork workflow then inner-to-outer deltas; cycle checks by stable ID and canonical path; depth limit 32; fork runtime-leaf behavior; and advisory-only optional fork tracking.
+Preflight preserves these invariants: full-source effective fingerprints; customization-source stable identity; effective fingerprints that bind the selected execution file and role; base/fork workflow then inner-to-outer deltas; cycle checks by stable ID and canonical path; depth limit 32; fork runtime-leaf behavior; and advisory-only optional fork tracking.
 
 Binding stores and compatibility caches retain `version: 1`. Fingerprints use lowercase `sha256:` values. Portable descriptors never contain concrete source paths. The named `helper contract 1:` tests and `test/fixtures/contract-v1` goldens enforce the public surface.

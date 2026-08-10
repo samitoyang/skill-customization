@@ -40,14 +40,16 @@ function maintenance(descriptor, root, reason, detail) {
 }
 
 function effectiveFingerprint(descriptor, ownedFingerprint, sourceFingerprint) {
+  const executionRole = descriptor.type === "fork" ? "workflow" : "delta";
+  const executionSelector = [executionRole, descriptor.customization];
   if (descriptor.type === "fork") {
     return fingerprintValues(
-      [descriptor.id, ownedFingerprint],
+      [descriptor.id, ...executionSelector, ownedFingerprint],
       "skill-customization-fork-effective-v1",
     );
   }
   return fingerprintValues(
-    [descriptor.id, sourceFingerprint, ownedFingerprint],
+    [descriptor.id, ...executionSelector, sourceFingerprint, ownedFingerprint],
     "skill-customization-overlay-effective-v1",
   );
 }
@@ -60,7 +62,16 @@ async function sourceRoot(binding) {
 }
 
 async function forkTrackingAdvisory(descriptor, context, statePath) {
-  const store = await readBindingStore(statePath);
+  let store;
+  try {
+    store = await readBindingStore(statePath);
+  } catch (error) {
+    return {
+      code: "tracking-state-invalid",
+      message: "The optional fork tracking state is unreadable or invalid; fork execution is unaffected.",
+      detail: error.message,
+    };
+  }
   const binding = store.bindings[bindingKey(descriptor.id, context)];
   if (!binding) return undefined;
   const lookup = binding.source?.alias ?? binding.source?.path;

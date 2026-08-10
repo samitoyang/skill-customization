@@ -69,6 +69,19 @@ export async function acceptMaintenanceUpdate({
       descriptor.fork.snapshot_fingerprint = await fingerprintPath(snapshotPath);
       descriptor.fork.diff_fingerprint = await fingerprintFile(diffPath);
       if (descriptor.fork.materialization) {
+        const materializationChanged =
+          descriptor.fork.materialization.source_effective_fingerprint
+            !== descriptor.source.effective_fingerprint
+          || descriptor.fork.materialization.snapshot_fingerprint
+            !== descriptor.fork.snapshot_fingerprint;
+        if (
+          materializationChanged
+          && (reviewedAt === undefined || evidence === undefined)
+        ) {
+          throw new TypeError(
+            "reviewedAt and evidence are required when fork materialization fingerprints change",
+          );
+        }
         descriptor.fork.materialization.source_effective_fingerprint =
           descriptor.source.effective_fingerprint;
         descriptor.fork.materialization.snapshot_fingerprint =
