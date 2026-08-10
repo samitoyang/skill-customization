@@ -4,7 +4,7 @@ import path from "node:path";
 
 import {
   isOwnedPayloadExcludedPath,
-  isVersionControlMetadataPath,
+  isSourceFingerprintExcludedPath,
 } from "./owned-payload.js";
 
 function digest(hash) {
@@ -56,7 +56,7 @@ async function listTree(root, current = root) {
   for (const entry of entries) {
     const absolute = path.join(current, entry.name);
     const relative = path.relative(root, absolute).split(path.sep).join("/");
-    if (isVersionControlMetadataPath(relative)) continue;
+    if (isSourceFingerprintExcludedPath(relative)) continue;
     if (entry.isDirectory()) {
       result.push({ type: "directory", relative });
       result.push(...(await listTree(root, absolute)));
