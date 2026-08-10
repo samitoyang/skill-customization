@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -73,4 +73,21 @@ test("fingerprints exact file bytes and directory trees deterministically", asyn
   assert.equal(first, second);
   await writeFile(path.join(root, "b.txt"), "changed\n");
   assert.notEqual(await fingerprintPath(root), first);
+});
+
+test("directory fingerprints follow a root alias but reject internal symlinks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "fingerprint-symlink-"));
+  const external = await mkdtemp(path.join(os.tmpdir(), "fingerprint-external-"));
+  const alias = `${root}-alias`;
+  await writeFile(path.join(root, "SKILL.md"), "workflow\n");
+  await writeFile(path.join(external, "shared.md"), "shared workflow\n");
+  await symlink(root, alias, "dir");
+
+  assert.equal(await fingerprintPath(alias), await fingerprintPath(root));
+
+  await symlink(
+    path.join(external, "shared.md"),
+    path.join(root, "HELPER.md"),
+  );
+  await assert.rejects(fingerprintPath(root), /symbolic link.*HELPER\.md/i);
 });

@@ -132,6 +132,11 @@ test("public maintenance references describe explicit fingerprint updates", asyn
   assert.match(descriptor, /snapshot directory/);
   assert.doesNotMatch(descriptor, /full-source snapshot (?:file|may be a file)/i);
   assert.match(contract, /both fresh review time and evidence/i);
+  for (const document of [cli, library, contract, descriptor]) {
+    assert.match(document, /symlink/i);
+  }
+  assert.match(cli, /maintenance lock is canonically contained/i);
+  assert.match(contract, /canonically contain its lock/i);
 });
 
 test("README combines public workflow design with contract-compatible helper behavior", async () => {
@@ -154,6 +159,8 @@ test("README combines public workflow design with contract-compatible helper beh
   assert.match(markdown, /customization\.json\s+# Descriptor: portable source requirements/);
   assert.match(markdown, /CUSTOMIZATION\.md\s+# Complete independent workflow/);
   assert.match(markdown, /source snapshot directory/);
+  assert.match(markdown, /symlink-free fingerprinted target tree/);
+  assert.match(markdown, /maintenance locks are canonically contained/);
   assert.match(markdown, /## 🎛️ Customization Models/);
   assert.match(markdown, /Customization models describe the runtime relationship between a skill and its source/);
   assert.match(markdown, /\| Model \| Source relationship \| Runtime behavior \|/);

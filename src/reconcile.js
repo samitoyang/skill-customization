@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -21,30 +21,35 @@ export function compatibilityCachePath({ env = process.env, home = os.homedir() 
     : path.join(home, ".agents", "skill-customization", "compatibility.json");
 }
 
-async function sourceEntrypoint(sourcePath) {
+async function sourceLocation(sourcePath) {
   if (!sourcePath) {
     throw new ReconciliationError("semantic overlays require a live source", {
       code: "LIVE_SOURCE_REQUIRED",
     });
   }
+  let resolved;
   let info;
   try {
-    info = await stat(sourcePath);
+    resolved = await realpath(sourcePath);
+    info = await lstat(resolved);
   } catch {
     throw new ReconciliationError(`live source is unavailable: ${sourcePath}`, {
       code: "LIVE_SOURCE_REQUIRED",
     });
   }
-  const entrypoint = info.isDirectory() ? path.join(sourcePath, "SKILL.md") : sourcePath;
+  const root = info.isDirectory() ? resolved : path.dirname(resolved);
+  const entrypoint = info.isDirectory() ? path.join(root, "SKILL.md") : resolved;
   try {
-    const entrypointInfo = await stat(entrypoint);
+    const entrypointInfo = await lstat(entrypoint);
+    if (entrypointInfo.isSymbolicLink()) throw new Error("symbolic link");
     if (!entrypointInfo.isFile()) throw new Error("not a regular file");
-  } catch {
-    throw new ReconciliationError(`live source entrypoint is unavailable: ${entrypoint}`, {
-      code: "LIVE_SOURCE_REQUIRED",
-    });
+  } catch (error) {
+    throw new ReconciliationError(
+      `live source entrypoint is unavailable: ${entrypoint}: ${error.message}`,
+      { code: "LIVE_SOURCE_REQUIRED" },
+    );
   }
-  return realpath(entrypoint);
+  return { entrypoint, root };
 }
 
 function sourceCheckpoint(descriptor, sourceFingerprint) {
@@ -496,7 +501,7 @@ async function reconcileOverlay({
   cachePath = compatibilityCachePath(),
   semanticReconciler,
 }) {
-  const entrypoint = await sourceEntrypoint(sourcePath);
+  const { entrypoint, root: sourceRoot } = await sourceLocation(sourcePath);
   const customizationEntrypoint = await resolveOwnedPath(
     customizationRoot,
     descriptor.entrypoint,
@@ -515,7 +520,7 @@ async function reconcileOverlay({
       { code: "CUSTOMIZATION_PATH_NOT_OWNED" },
     );
   });
-  const sourceFingerprint = await fingerprintPath(path.dirname(entrypoint));
+  const sourceFingerprint = await fingerprintPath(sourceRoot);
   const customizationFingerprint = await payloadFingerprint(customizationRoot);
   const base = baseResult(
     descriptor,

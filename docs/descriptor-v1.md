@@ -4,7 +4,7 @@
 
 Required top-level fields are `schema_version`, stable URI `id`, `type`, `name`, own `license`, `entrypoint`, `customization`, `dependencies`, `owned_payload`, `source`, and `activation`. `owned_payload.reviewed_fingerprint` covers every runtime-owned file except `customization.json` and reserved `provenance/` and rejects symlinks.
 
-Full sources use the repository or local variant and record a license plus the reviewed full-directory `effective_fingerprint`. Repository sources also record canonical repository, upstream entrypoint, and review revision. A customization source records stable ID, type, name, license, and effective fingerprint; its concrete directory comes only from the current context binding. A verified fork may be a source.
+Full sources use the repository or local variant and record a license plus the reviewed, symlink-free full-directory `effective_fingerprint`. Repository sources also record canonical repository, upstream entrypoint, and review revision. A customization source records stable ID, type, name, license, and effective fingerprint; its concrete directory comes only from the current context binding. A verified fork may be a source.
 
 `coexist` requires a name different from `source.skill_name`. `replace` requires the source name and `customization-first` precedence plus separate binding confirmation.
 

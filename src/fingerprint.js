@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, readdir, readlink } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
 function digest(hash) {
@@ -12,6 +12,14 @@ function frame(hash, value) {
   hash.update(":");
   hash.update(bytes);
   hash.update(";");
+}
+
+function symbolicLinkError(relative) {
+  const error = new TypeError(
+    `directory fingerprint contains a symbolic link: ${relative}`,
+  );
+  error.code = "FINGERPRINT_SYMLINK";
+  return error;
 }
 
 export function fingerprintValues(values, domain = "skill-customization-values-v1") {
@@ -47,7 +55,7 @@ async function listTree(root, current = root) {
       result.push({ type: "directory", relative });
       result.push(...(await listTree(root, absolute)));
     } else if (entry.isSymbolicLink()) {
-      result.push({ type: "symlink", relative, target: await readlink(absolute) });
+      throw symbolicLinkError(relative);
     } else if (entry.isFile()) {
       result.push({ type: "file", relative, bytes: await readFile(absolute) });
     }
@@ -95,10 +103,7 @@ export async function fingerprintPath(targetPath) {
   const info = await lstat(targetPath);
   if (info.isFile()) return fingerprintFile(targetPath);
   if (info.isSymbolicLink()) {
-    const hash = createHash("sha256");
-    frame(hash, "symlink");
-    frame(hash, await readlink(targetPath));
-    return digest(hash);
+    return fingerprintPath(await realpath(targetPath));
   }
   if (!info.isDirectory()) throw new TypeError("only files, directories, and symlinks can be fingerprinted");
   const hash = createHash("sha256");
@@ -107,7 +112,6 @@ export async function fingerprintPath(targetPath) {
     frame(hash, entry.type);
     frame(hash, entry.relative);
     if (entry.bytes) frame(hash, entry.bytes);
-    if (entry.target) frame(hash, entry.target);
   }
   return digest(hash);
 }

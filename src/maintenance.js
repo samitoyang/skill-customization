@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile } from "node:fs/promises";
 
 import {
   assertValidDescriptor,
@@ -19,6 +19,22 @@ import {
 
 const FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
 
+async function maintenanceLockPath(descriptorPath) {
+  const root = path.dirname(descriptorPath);
+  const provenancePath = path.join(root, "provenance");
+  await mkdir(provenancePath).catch((error) => {
+    if (error.code !== "EEXIST") throw error;
+  });
+  const ownedProvenance = await resolveOwnedPath(root, "provenance", {
+    rejectSymlinks: true,
+  });
+  const info = await lstat(ownedProvenance);
+  if (!info.isDirectory()) {
+    throw new TypeError("provenance must be an owned directory");
+  }
+  return path.join(ownedProvenance, "maintenance-state");
+}
+
 export async function acceptMaintenanceUpdate({
   descriptorPath,
   sourceEffectiveFingerprint,
@@ -27,11 +43,7 @@ export async function acceptMaintenanceUpdate({
   evidence,
 }) {
   const absoluteDescriptorPath = path.resolve(descriptorPath);
-  const maintenanceLock = path.join(
-    path.dirname(absoluteDescriptorPath),
-    "provenance",
-    "maintenance-state",
-  );
+  const maintenanceLock = await maintenanceLockPath(absoluteDescriptorPath);
   const release = await acquireStateLock(maintenanceLock);
   let changedDiffPath;
   let previousDiffContents;

@@ -2,7 +2,7 @@
 
 Preflight owns recursive graph traversal. It checks the reviewed owned payload, resolves each overlay binding, detects stable-ID and canonical-path cycles, enforces depth 32, and flattens execution as the base or fork workflow followed by semantic deltas from inner to outer. Inner maintenance stops propagate unchanged.
 
-Reconciliation stays targeted to one semantic or provenance decision. Overlay source drift may be accepted, rejected, marked ambiguous, or identified as an absorbed delta. Source trees remain read-only. Direct overlay payload edits route to `skill-overlay`; accepted maintenance refreshes the reviewed fingerprints atomically before preflight reruns.
+Reconciliation stays targeted to one semantic or provenance decision. Overlay source drift may be accepted, rejected, marked ambiguous, or identified as an absorbed delta. Source trees remain read-only; top-level aliases resolve to their canonical root, while source-internal symlinks are rejected. Direct overlay payload edits route to `skill-overlay`; accepted maintenance refreshes the reviewed fingerprints atomically before preflight reruns.
 
 A fork is a runtime leaf. Reconciliation verifies its reviewed owned payload, snapshot-directory and diff fingerprints, rejects symlinks, applies the unified diff to the snapshot directory, and requires the result to reproduce the complete independent workflow payload. Fork payload or provenance drift routes to `skill-fork`.
 

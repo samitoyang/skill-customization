@@ -102,6 +102,26 @@ test("overlay follows an installed symlink to a live source directory", async ()
   assert.equal(result.checkpointMatch, true);
 });
 
+test("overlay reconciliation rejects a source-internal entrypoint symlink", async () => {
+  const fixture = await overlayFixture();
+  const externalRoot = await mkdtemp(path.join(os.tmpdir(), "reconcile-external-"));
+  const external = path.join(externalRoot, "workflow.md");
+  await writeFile(external, "unreviewed workflow\n");
+  await unlink(path.join(fixture.sourceRoot, "SKILL.md"));
+  await symlink(external, path.join(fixture.sourceRoot, "SKILL.md"));
+
+  await assert.rejects(
+    reconcileCustomization({
+      descriptor: fixture.descriptor,
+      customizationRoot: fixture.customizationRoot,
+      sourcePath: fixture.sourceRoot,
+    }),
+    (error) =>
+      error.code === "LIVE_SOURCE_REQUIRED"
+      && /entrypoint.*symbolic link/i.test(error.message),
+  );
+});
+
 test("drift stops as ambiguous unless semantic compatibility is cached by fingerprint", async () => {
   const fixture = await overlayFixture();
   const cachePath = path.join(fixture.root, "state", "compatibility.json");

@@ -222,9 +222,9 @@ A ready customization executes its checked runtime instructions directly without
 
 | Boundary | Guarantee |
 | --- | --- |
-| Resolved source | Read-only input; customization writes stay outside it |
+| Resolved source | Read-only input with a symlink-free fingerprinted target tree; top-level installation aliases resolve to their canonical target |
 | Portable descriptor | Stable identity, own/source licenses, relative artifacts, reviewed fingerprints, and activation; no concrete source paths |
-| Local state | Context-scoped bindings and compatibility decisions written atomically under a cross-process lock |
+| Local state | Context-scoped bindings and compatibility decisions written atomically; maintenance locks are canonically contained before writes |
 | Overlay | Live context binding, reviewed owned payload, and full-source or customization-source effective fingerprint |
 | Fork | Runtime leaf with complete workflow and owned, relative, symlink-free snapshot directory and diff |
 

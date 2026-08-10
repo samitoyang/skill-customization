@@ -5,6 +5,7 @@ import {
   readFile,
   realpath,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -204,6 +205,26 @@ test("preflight flattens recursive overlays from base workflow through inner and
   assert.equal(result.maintenanceHandler, null);
 });
 
+test("preflight rejects source-internal symlinks before returning executable steps", async () => {
+  const item = await recursiveFixture();
+  const external = path.join(item.root, "shared-workflow.md");
+  await writeFile(external, "---\nname: review\n---\nunreviewed shared workflow\n");
+  await unlink(path.join(item.base, "SKILL.md"));
+  await symlink(external, path.join(item.base, "SKILL.md"));
+
+  const result = await preflightCustomization({
+    descriptorPath: path.join(item.outer, "customization.json"),
+    context: "workspace:test",
+    statePath: item.statePath,
+    roots: item.roots,
+  });
+
+  assert.equal(result.status, "maintenance-required");
+  assert.equal(result.maintenanceHandler.reason, "binding-maintenance");
+  assert.match(result.maintenanceHandler.detail, /symbolic link.*SKILL\.md/i);
+  assert.deepEqual(result.steps, []);
+});
+
 test("effective fingerprints bind the selected reviewed execution file", async () => {
   const item = await recursiveFixture({ alternateInner: true });
   item.innerDescriptor.customization = "ALTERNATE.md";
@@ -254,6 +275,20 @@ test("an accepted maintenance update refreshes reviewed fingerprints before pref
     roots: item.roots,
   });
   assert.equal(result.status, "ready");
+});
+
+test("maintenance rejects a provenance symlink before acquiring its lock", async () => {
+  const item = await recursiveFixture();
+  const external = path.join(item.root, "external-provenance");
+  await mkdir(external);
+  await symlink(external, path.join(item.outer, "provenance"));
+
+  await assert.rejects(
+    acceptMaintenanceUpdate({
+      descriptorPath: path.join(item.outer, "customization.json"),
+    }),
+    /symbolic link.*provenance|provenance.*outside/i,
+  );
 });
 
 test("materialization fingerprint changes require fresh review evidence", async () => {
