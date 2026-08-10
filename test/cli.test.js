@@ -248,7 +248,7 @@ test("CLI validation rejects a runtime selector symlink into reserved provenance
 
   const result = await run(["validate", item.descriptorPath]);
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /symbolic link/i);
+  assert.match(result.stderr, /excluded owned-payload path/i);
 });
 
 test("CLI discovery loads bounded Claude additionalDirectories", async () => {

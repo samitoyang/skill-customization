@@ -411,11 +411,11 @@ test("reader requires entrypoint and customization artifacts to be files", async
 test("reader rejects runtime selectors that traverse symlinks", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-runtime-symlink-"));
   const descriptorDir = path.join(root, "review-local-archive");
-  await mkdir(path.join(descriptorDir, "provenance"), { recursive: true });
+  await mkdir(path.join(descriptorDir, "helpers"), { recursive: true });
   await writeFile(path.join(descriptorDir, "SKILL.md"), "# Skill\n");
   await writeFile(path.join(descriptorDir, "CUSTOMIZATION.md"), "# Delta\n");
-  await writeFile(path.join(descriptorDir, "provenance", "runtime.md"), "unchecked\n");
-  await symlink("provenance", path.join(descriptorDir, "runtime"));
+  await writeFile(path.join(descriptorDir, "helpers", "runtime.md"), "checked\n");
+  await symlink("helpers", path.join(descriptorDir, "runtime"));
   const descriptorPath = path.join(descriptorDir, "customization.json");
   await writeFile(
     descriptorPath,
@@ -423,6 +423,23 @@ test("reader rejects runtime selectors that traverse symlinks", async () => {
   );
 
   await assert.rejects(readDescriptor(descriptorPath), /symbolic link/i);
+});
+
+test("reader rejects runtime selectors whose canonical targets are excluded", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-runtime-alias-"));
+  const descriptorDir = path.join(root, "review-local-archive");
+  await mkdir(path.join(descriptorDir, "provenance"), { recursive: true });
+  await writeFile(path.join(descriptorDir, "SKILL.md"), "# Skill\n");
+  await writeFile(path.join(descriptorDir, "CUSTOMIZATION.md"), "# Delta\n");
+  await writeFile(path.join(descriptorDir, "provenance", "runtime.md"), "unchecked\n");
+  await symlink("provenance", path.join(descriptorDir, "runtime-alias"));
+  const descriptorPath = path.join(descriptorDir, "customization.json");
+  await writeFile(
+    descriptorPath,
+    JSON.stringify(repositoryDescriptor({ entrypoint: "runtime-alias/runtime.md" })),
+  );
+
+  await assert.rejects(readDescriptor(descriptorPath), /excluded owned-payload path/i);
 });
 
 test("reader requires fork snapshot and diff to be owned, non-symlinked provenance", async () => {

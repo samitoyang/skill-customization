@@ -372,8 +372,18 @@ export async function readDescriptor(descriptorPath, { inventory = [] } = {}) {
   assertInventoryAvailable(descriptor, inventory);
   const root = path.dirname(path.resolve(descriptorPath));
   const referenced = [
-    { relative: descriptor.entrypoint, rejectSymlinks: true, expectedType: "file" },
-    { relative: descriptor.customization, rejectSymlinks: true, expectedType: "file" },
+    {
+      relative: descriptor.entrypoint,
+      rejectExcludedRoots: true,
+      rejectSymlinks: true,
+      expectedType: "file",
+    },
+    {
+      relative: descriptor.customization,
+      rejectExcludedRoots: true,
+      rejectSymlinks: true,
+      expectedType: "file",
+    },
     ...(descriptor.type === "fork"
       ? [
           { relative: descriptor.fork.snapshot, rejectSymlinks: true, expectedType: "directory" },
@@ -381,8 +391,11 @@ export async function readDescriptor(descriptorPath, { inventory = [] } = {}) {
         ]
       : []),
   ];
-  for (const { relative, rejectSymlinks, expectedType } of referenced) {
-    const owned = await resolveOwnedPath(root, relative, { rejectSymlinks }).catch((error) => {
+  for (const { relative, rejectExcludedRoots, rejectSymlinks, expectedType } of referenced) {
+    const owned = await resolveOwnedPath(root, relative, {
+      rejectExcludedRoots,
+      rejectSymlinks,
+    }).catch((error) => {
       throw new DescriptorError(`descriptor path is not owned: ${relative}: ${error.message}`);
     });
     const info = await lstat(owned);
