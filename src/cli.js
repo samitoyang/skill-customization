@@ -450,6 +450,7 @@ async function commandReconcile(descriptorPath, options, io) {
   }
   let sourcePath;
   let sourceEffectiveFingerprint;
+  let sourceExecutionPlan;
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
     const { activeSkills } = await discoverInventory(context);
@@ -481,6 +482,7 @@ async function commandReconcile(descriptorPath, options, io) {
         );
       }
       sourceEffectiveFingerprint = nested.effectiveFingerprint;
+      sourceExecutionPlan = nested.steps;
     }
   }
   const decision = options.decision;
@@ -510,6 +512,7 @@ async function commandReconcile(descriptorPath, options, io) {
     customizationRoot: path.dirname(resolvedDescriptorPath),
     sourcePath,
     sourceEffectiveFingerprint,
+    sourceExecutionPlan,
     cachePath: options.cache,
     semanticReconciler,
   });

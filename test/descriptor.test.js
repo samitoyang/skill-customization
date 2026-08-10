@@ -204,17 +204,45 @@ test("descriptor rejects machine-local identifiers and schema locators", () => {
   }
 });
 
+test("descriptor rejects whitespace-only portable review strings", () => {
+  const descriptor = repositoryDescriptor();
+  descriptor.license = " \t ";
+  descriptor.source.license = "\n";
+  descriptor.source.review.revision = "   ";
+  const errors = validateDescriptor(descriptor);
+  assert.ok(errors.some(({ path: pointer }) => pointer === "/license"));
+  assert.ok(errors.some(({ path: pointer }) => pointer === "/source/license"));
+  assert.ok(
+    errors.some(({ path: pointer }) => pointer === "/source/review/revision"),
+  );
+});
+
 test("JSON Schema and runtime share machine-path exclusions", async () => {
   const schema = JSON.parse(
     await readFile(new URL("../customization.schema.json", import.meta.url), "utf8"),
   );
   const reference = "#/$defs/nonMachinePathString";
+  const nonBlankReference = "#/$defs/nonBlankPortableString";
   assert.equal(schema.properties.$schema.$ref, reference);
-  assert.equal(schema.$defs.license.$ref, reference);
+  assert.equal(schema.$defs.license.$ref, nonBlankReference);
   assert.equal(
     schema.$defs.repositorySource.properties.review.properties.revision.$ref,
-    reference,
+    nonBlankReference,
   );
+  assert.equal(
+    schema.$defs.materialization.properties.reviewed_at.$ref,
+    nonBlankReference,
+  );
+  assert.equal(
+    schema.$defs.materialization.properties.evidence.$ref,
+    nonBlankReference,
+  );
+  const nonBlank = new RegExp(
+    schema.$defs.nonBlankPortableString.allOf.find(({ pattern }) => pattern)
+      .pattern,
+  );
+  assert.equal(nonBlank.test(" \t\n "), false);
+  assert.equal(nonBlank.test("reviewed"), true);
   const exclusions = schema.$defs.nonMachinePathString.allOf.map(
     ({ not }) => new RegExp(not.pattern),
   );
@@ -397,6 +425,15 @@ test("descriptor supports recursive customization sources and requires reviewed 
     },
   });
   assert.deepEqual(validateDescriptor(valid), []);
+  for (const key of ["reviewed_at", "evidence"]) {
+    const whitespace = structuredClone(valid);
+    whitespace.fork.materialization[key] = "   ";
+    assert.ok(
+      validateDescriptor(whitespace).some(
+        ({ path: pointer }) => pointer === `/fork/materialization/${key}`,
+      ),
+    );
+  }
   assert.deepEqual(
     validateDescriptor(repositoryDescriptor({
       type: "fork",

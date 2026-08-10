@@ -91,6 +91,12 @@
         { "not": { "pattern": "^~[^\\\\/]*(?:[\\\\/]|$)" } }
       ]
     },
+    "nonBlankPortableString": {
+      "allOf": [
+        { "$ref": "#/$defs/nonMachinePathString" },
+        { "pattern": "\\S" }
+      ]
+    },
     "stableId": {
       "type": "string",
       "pattern": "^(?![Ff][Ii][Ll][Ee]:)(?![A-Za-z]:[\\\\/])[a-z][a-z0-9+.-]*:[^\\s]+$"
@@ -102,8 +108,7 @@
     },
     "customizationType": { "enum": ["semantic-overlay", "fork"] },
     "license": {
-      "$ref": "#/$defs/nonMachinePathString",
-      "minLength": 1
+      "$ref": "#/$defs/nonBlankPortableString"
     },
     "fingerprint": {
       "type": "string",
@@ -162,8 +167,7 @@
           "required": ["revision"],
           "properties": {
             "revision": {
-              "$ref": "#/$defs/nonMachinePathString",
-              "minLength": 1
+              "$ref": "#/$defs/nonBlankPortableString"
             }
           }
         }
@@ -232,12 +236,10 @@
         "source_effective_fingerprint": { "$ref": "#/$defs/fingerprint" },
         "snapshot_fingerprint": { "$ref": "#/$defs/fingerprint" },
         "reviewed_at": {
-          "$ref": "#/$defs/nonMachinePathString",
-          "minLength": 1
+          "$ref": "#/$defs/nonBlankPortableString"
         },
         "evidence": {
-          "$ref": "#/$defs/nonMachinePathString",
-          "minLength": 1
+          "$ref": "#/$defs/nonBlankPortableString"
         }
       }
     },

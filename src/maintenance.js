@@ -47,7 +47,9 @@ export async function acceptMaintenanceUpdate({
   const release = await acquireStateLock(maintenanceLock);
   let changedDiffPath;
   let previousDiffContents;
+  let previousDiffMode;
   try {
+    const descriptorMode = (await lstat(absoluteDescriptorPath)).mode & 0o777;
     const descriptor = structuredClone(await readDescriptor(absoluteDescriptorPath));
     const root = path.dirname(absoluteDescriptorPath);
     if (
@@ -67,8 +69,9 @@ export async function acceptMaintenanceUpdate({
         rejectSymlinks: true,
       });
       changedDiffPath = diffPath;
+      previousDiffMode = (await lstat(diffPath)).mode & 0o777;
       previousDiffContents = await readFile(diffPath);
-      await writeFileAtomic(diffPath, diffContents);
+      await writeFileAtomic(diffPath, diffContents, { mode: previousDiffMode });
     }
     descriptor.owned_payload.reviewed_fingerprint = await payloadFingerprint(root);
     if (descriptor.type === "fork") {
@@ -105,7 +108,9 @@ export async function acceptMaintenanceUpdate({
       throw new TypeError("reviewedAt and evidence are only valid for fork materialization maintenance");
     }
     assertValidDescriptor(descriptor);
-    await writeJsonAtomic(absoluteDescriptorPath, descriptor);
+    await writeJsonAtomic(absoluteDescriptorPath, descriptor, {
+      mode: descriptorMode,
+    });
     return {
       descriptor,
       ownedPayloadFingerprint: descriptor.owned_payload.reviewed_fingerprint,
@@ -119,7 +124,9 @@ export async function acceptMaintenanceUpdate({
     };
   } catch (error) {
     if (changedDiffPath && previousDiffContents) {
-      await writeFileAtomic(changedDiffPath, previousDiffContents).catch(() => {});
+      await writeFileAtomic(changedDiffPath, previousDiffContents, {
+        mode: previousDiffMode,
+      }).catch(() => {});
     }
     throw error;
   } finally {

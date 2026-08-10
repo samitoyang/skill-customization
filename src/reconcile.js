@@ -521,11 +521,37 @@ function overlayCompatibilityFingerprint(descriptor, ownedFingerprint) {
   );
 }
 
+function checkedCustomizationSourcePlan(sourceExecutionPlan) {
+  if (
+    !Array.isArray(sourceExecutionPlan)
+    || sourceExecutionPlan.length === 0
+    || sourceExecutionPlan.some((step, index) => (
+      !step
+      || typeof step !== "object"
+      || step.role !== (index === 0 ? "workflow" : "delta")
+      || typeof step.path !== "string"
+      || !path.isAbsolute(step.path)
+      || typeof step.root !== "string"
+      || !path.isAbsolute(step.root)
+      || (index === 0
+        ? step.customizationId !== null && typeof step.customizationId !== "string"
+        : typeof step.customizationId !== "string" || !step.customizationId)
+    ))
+  ) {
+    throw new ReconciliationError(
+      "semantic review of a customization source requires its checked execution plan",
+      { code: "CUSTOMIZATION_SOURCE_EXECUTION_PLAN_REQUIRED" },
+    );
+  }
+  return structuredClone(sourceExecutionPlan);
+}
+
 async function reconcileOverlay({
   descriptor,
   customizationRoot,
   sourcePath,
   sourceEffectiveFingerprint,
+  sourceExecutionPlan,
   cachePath = compatibilityCachePath(),
   semanticReconciler,
 }) {
@@ -599,10 +625,16 @@ async function reconcileOverlay({
   if (typeof semanticReconciler !== "function") {
     return reconcileOutcome(base, { ambiguous: true });
   }
+  const checkedSourcePlan = descriptor.source.kind === "customization"
+    ? checkedCustomizationSourcePlan(sourceExecutionPlan)
+    : undefined;
   const outcome = await semanticReconciler({
     descriptor,
-    sourceEntrypoint: entrypoint,
+    sourceEntrypoint: checkedSourcePlan?.[0].path ?? entrypoint,
     sourceFingerprint,
+    ...(checkedSourcePlan
+      ? { sourceExecutionPlan: checkedSourcePlan }
+      : {}),
     customizationEntrypoint,
     customizationInstructions,
   });

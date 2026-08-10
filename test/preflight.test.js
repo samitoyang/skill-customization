@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import {
+  chmod,
   mkdtemp,
   mkdir,
   readFile,
   realpath,
   symlink,
+  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -233,6 +235,56 @@ test("reconciliation uses a nested customization's checked effective fingerprint
   assert.equal(result.checkpointMatch, true);
 });
 
+test("semantic reconciliation receives the checked nested execution plan", async () => {
+  const item = await recursiveFixture();
+  const nested = await preflightCustomization({
+    descriptorPath: path.join(item.inner, "customization.json"),
+    context: "workspace:test",
+    statePath: item.statePath,
+    roots: item.roots,
+  });
+  assert.equal(nested.status, "ready");
+
+  const descriptor = structuredClone(item.outerDescriptor);
+  descriptor.source.effective_fingerprint =
+    "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+  const options = {
+    descriptor,
+    customizationRoot: item.outer,
+    sourcePath: item.inner,
+    sourceEffectiveFingerprint: nested.effectiveFingerprint,
+    cachePath: null,
+    semanticReconciler: async () => ({
+      compatible: true,
+      evidence: "Reviewed the checked nested execution plan.",
+    }),
+  };
+  await assert.rejects(
+    reconcileCustomization(options),
+    (error) => error.code === "CUSTOMIZATION_SOURCE_EXECUTION_PLAN_REQUIRED",
+  );
+
+  let received;
+  const result = await reconcileCustomization({
+    ...options,
+    sourceExecutionPlan: nested.steps,
+    semanticReconciler: async (input) => {
+      received = input;
+      return {
+        compatible: true,
+        evidence: "Reviewed the checked nested execution plan.",
+      };
+    },
+  });
+  assert.equal(result.status, "compatible");
+  assert.equal(received.sourceEntrypoint, nested.steps[0].path);
+  assert.deepEqual(received.sourceExecutionPlan, nested.steps);
+  assert.deepEqual(
+    received.sourceExecutionPlan.map(({ role }) => role),
+    ["workflow", "delta"],
+  );
+});
+
 test("preflight rejects source-internal symlinks before returning executable steps", async () => {
   const item = await recursiveFixture();
   const external = path.join(item.root, "shared-workflow.md");
@@ -366,6 +418,8 @@ test("materialization fingerprint changes require fresh review evidence", async 
   };
   const descriptorPath = path.join(forkRoot, "customization.json");
   await writeDescriptor(forkRoot, descriptor);
+  await chmod(descriptorPath, 0o644);
+  await chmod(diffPath, 0o640);
   const changedSourceFingerprint =
     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
@@ -384,6 +438,7 @@ test("materialization fingerprint changes require fresh review evidence", async 
   const accepted = await acceptMaintenanceUpdate({
     descriptorPath,
     sourceEffectiveFingerprint: changedSourceFingerprint,
+    diffContents: await readFile(diffPath),
     reviewedAt: "2026-08-10T00:00:00Z",
     evidence: "Reviewed the updated materialization.",
   });
@@ -393,6 +448,8 @@ test("materialization fingerprint changes require fresh review evidence", async 
     reviewed_at: "2026-08-10T00:00:00Z",
     evidence: "Reviewed the updated materialization.",
   });
+  assert.equal((await stat(descriptorPath)).mode & 0o777, 0o644);
+  assert.equal((await stat(diffPath)).mode & 0o777, 0o640);
 });
 
 test("preflight detects recursive customization cycles by stable ID and canonical path", async () => {

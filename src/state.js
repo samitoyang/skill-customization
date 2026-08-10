@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  chmod,
   mkdir,
   open,
   readFile,
@@ -102,8 +103,12 @@ export async function readJsonState(filePath, fallback) {
   }
 }
 
-export async function writeJsonAtomic(filePath, value) {
-  return writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
+export async function writeJsonAtomic(filePath, value, options) {
+  return writeFileAtomic(
+    filePath,
+    `${JSON.stringify(value, null, 2)}\n`,
+    options,
+  );
 }
 
 export async function writeFileAtomic(filePath, contents, { mode = 0o600 } = {}) {
@@ -115,6 +120,7 @@ export async function writeFileAtomic(filePath, contents, { mode = 0o600 } = {})
   );
   try {
     await writeFile(temporary, contents, { mode });
+    await chmod(temporary, mode);
     await rename(temporary, filePath);
   } catch (error) {
     await unlink(temporary).catch(() => {});

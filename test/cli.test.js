@@ -379,6 +379,29 @@ test("CLI reconciliation preflights a nested customization source", async () => 
   ]);
   assert.equal(result.code, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).sourceFingerprint, nestedEffective);
+
+  outerDescriptor.source.effective_fingerprint =
+    "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+  await writeFile(outerDescriptorPath, JSON.stringify(outerDescriptor));
+  const reviewed = await run([
+    "reconcile",
+    outerDescriptorPath,
+    "--context",
+    "workspace:test",
+    "--state",
+    statePath,
+    "--root",
+    root,
+    "--cache",
+    path.join(root, "state", "compatibility.json"),
+    "--decision",
+    "compatible",
+    "--evidence",
+    "Reviewed the checked nested workflow plan.",
+  ]);
+  assert.equal(reviewed.code, 0, reviewed.stderr);
+  assert.equal(JSON.parse(reviewed.stdout).status, "compatible");
+  assert.equal(JSON.parse(reviewed.stdout).sourceFingerprint, nestedEffective);
 });
 
 test("CLI discovery loads bounded Claude additionalDirectories", async () => {
