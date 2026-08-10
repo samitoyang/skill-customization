@@ -9,7 +9,9 @@ import test from "node:test";
 
 import { bindCustomization } from "../src/bindings.js";
 import {
+  fingerprintFile,
   fingerprintPath,
+  fingerprintValues,
   payloadFingerprint,
 } from "../src/fingerprint.js";
 import { main } from "../src/cli.js";
@@ -249,6 +251,132 @@ test("CLI validation rejects a runtime selector symlink into reserved provenance
   const result = await run(["validate", item.descriptorPath]);
   assert.equal(result.code, 1);
   assert.match(result.stderr, /excluded owned-payload path/i);
+});
+
+test("CLI reconciliation preflights a nested customization source", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cli-nested-reconcile-"));
+  const nested = path.join(root, "review-fork");
+  const snapshot = path.join(nested, "provenance", "source");
+  const outer = path.join(root, "review-fork-notify");
+  await mkdir(snapshot, { recursive: true });
+  await mkdir(outer);
+  await writeFile(
+    path.join(nested, "SKILL.md"),
+    "---\nname: review-fork\n---\nfork\n",
+  );
+  await writeFile(path.join(nested, "CUSTOMIZATION.md"), "Fork rationale.\n");
+  await writeFile(
+    path.join(snapshot, "SKILL.md"),
+    "---\nname: review-fork\n---\nsnapshot\n",
+  );
+  const diffPath = path.join(nested, "provenance", "source.diff");
+  await writeFile(
+    diffPath,
+    [
+      "--- a/SKILL.md",
+      "+++ b/SKILL.md",
+      "@@ -1,4 +1,4 @@",
+      " ---",
+      " name: review-fork",
+      " ---",
+      "-snapshot",
+      "+fork",
+      "--- /dev/null",
+      "+++ b/CUSTOMIZATION.md",
+      "@@ -0,0 +1 @@",
+      "+Fork rationale.",
+      "",
+    ].join("\n"),
+  );
+  const snapshotFingerprint = await fingerprintPath(snapshot);
+  const nestedOwned = await payloadFingerprint(nested);
+  const nestedDescriptor = {
+    schema_version: 1,
+    id: "urn:skill-customization:fixture:review-fork",
+    type: "fork",
+    name: "review-fork",
+    license: "MIT",
+    entrypoint: "SKILL.md",
+    customization: "CUSTOMIZATION.md",
+    dependencies: [],
+    owned_payload: { reviewed_fingerprint: nestedOwned },
+    source: {
+      skill_name: "review",
+      kind: "repository",
+      repository: "https://github.com/example/skills",
+      upstream_path: "skills/review/SKILL.md",
+      license: "MIT",
+      effective_fingerprint: snapshotFingerprint,
+      review: { revision: "reviewed" },
+    },
+    activation: { mode: "coexist" },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint: snapshotFingerprint,
+      diff_fingerprint: await fingerprintFile(diffPath),
+    },
+  };
+  await writeFile(
+    path.join(nested, "customization.json"),
+    JSON.stringify(nestedDescriptor),
+  );
+  const nestedEffective = fingerprintValues(
+    [nestedDescriptor.id, "workflow", nestedDescriptor.customization, nestedOwned],
+    "skill-customization-fork-effective-v1",
+  );
+
+  await writeFile(
+    path.join(outer, "SKILL.md"),
+    "---\nname: review-fork-notify\n---\ndispatch\n",
+  );
+  await writeFile(path.join(outer, "CUSTOMIZATION.md"), "Notify after review.\n");
+  const outerDescriptor = {
+    schema_version: 1,
+    id: "urn:skill-customization:fixture:review-fork-notify",
+    type: "semantic-overlay",
+    name: "review-fork-notify",
+    license: "MIT",
+    entrypoint: "SKILL.md",
+    customization: "CUSTOMIZATION.md",
+    dependencies: [],
+    owned_payload: { reviewed_fingerprint: await payloadFingerprint(outer) },
+    source: {
+      skill_name: nestedDescriptor.name,
+      kind: "customization",
+      id: nestedDescriptor.id,
+      type: nestedDescriptor.type,
+      license: nestedDescriptor.license,
+      effective_fingerprint: nestedEffective,
+    },
+    activation: { mode: "coexist" },
+  };
+  const outerDescriptorPath = path.join(outer, "customization.json");
+  await writeFile(outerDescriptorPath, JSON.stringify(outerDescriptor));
+  const statePath = path.join(root, "state", "bindings.json");
+  const roots = [{ path: root, scope: "workspace", origin: "fixture" }];
+  await bindCustomization({
+    descriptor: outerDescriptor,
+    sourcePath: nested,
+    context: "workspace:test",
+    statePath,
+    roots,
+    interactive: true,
+    confirm: async () => true,
+  });
+
+  const result = await run([
+    "reconcile",
+    outerDescriptorPath,
+    "--context",
+    "workspace:test",
+    "--state",
+    statePath,
+    "--root",
+    root,
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).sourceFingerprint, nestedEffective);
 });
 
 test("CLI discovery loads bounded Claude additionalDirectories", async () => {

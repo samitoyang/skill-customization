@@ -20,6 +20,7 @@ import {
   payloadFingerprint,
 } from "../src/fingerprint.js";
 import { preflightCustomization } from "../src/preflight.js";
+import { reconcileCustomization } from "../src/reconcile.js";
 import { acceptMaintenanceUpdate } from "../src/maintenance.js";
 
 const repository = "https://github.com/example/skills";
@@ -153,6 +154,7 @@ async function recursiveFixture({
     roots,
     innerDescriptor,
     innerEffective,
+    outerDescriptor,
   };
 }
 
@@ -203,6 +205,32 @@ test("preflight flattens recursive overlays from base workflow through inner and
     ],
   );
   assert.equal(result.maintenanceHandler, null);
+});
+
+test("reconciliation uses a nested customization's checked effective fingerprint", async () => {
+  const item = await recursiveFixture();
+  assert.notEqual(await fingerprintPath(item.inner), item.innerEffective);
+
+  await assert.rejects(
+    reconcileCustomization({
+      descriptor: item.outerDescriptor,
+      customizationRoot: item.outer,
+      sourcePath: item.inner,
+      cachePath: null,
+    }),
+    (error) => error.code === "CUSTOMIZATION_SOURCE_EFFECTIVE_FINGERPRINT_REQUIRED",
+  );
+
+  const result = await reconcileCustomization({
+    descriptor: item.outerDescriptor,
+    customizationRoot: item.outer,
+    sourcePath: item.inner,
+    sourceEffectiveFingerprint: item.innerEffective,
+    cachePath: null,
+  });
+  assert.equal(result.status, "compatible");
+  assert.equal(result.sourceFingerprint, item.innerEffective);
+  assert.equal(result.checkpointMatch, true);
 });
 
 test("preflight rejects source-internal symlinks before returning executable steps", async () => {

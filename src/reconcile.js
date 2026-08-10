@@ -511,6 +511,7 @@ async function reconcileOverlay({
   descriptor,
   customizationRoot,
   sourcePath,
+  sourceEffectiveFingerprint,
   cachePath = compatibilityCachePath(),
   semanticReconciler,
 }) {
@@ -533,7 +534,18 @@ async function reconcileOverlay({
       { code: "CUSTOMIZATION_PATH_NOT_OWNED" },
     );
   });
-  const sourceFingerprint = await fingerprintPath(sourceRoot);
+  if (
+    descriptor.source.kind === "customization"
+    && !/^sha256:[0-9a-f]{64}$/.test(sourceEffectiveFingerprint ?? "")
+  ) {
+    throw new ReconciliationError(
+      "customization sources require their checked effective fingerprint",
+      { code: "CUSTOMIZATION_SOURCE_EFFECTIVE_FINGERPRINT_REQUIRED" },
+    );
+  }
+  const sourceFingerprint = descriptor.source.kind === "customization"
+    ? sourceEffectiveFingerprint
+    : await fingerprintPath(sourceRoot);
   const sourceIdentityFingerprint = descriptor.source.kind === "local"
     ? await fingerprintFile(entrypoint)
     : undefined;

@@ -551,6 +551,56 @@ test("resolution rechecks repository provenance and invalidates a changed source
   assert.equal(Object.keys((await readBindingStore(statePath)).bindings).length, 0);
 });
 
+test("resolution invalidates a source that can no longer be fingerprinted", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-revalidate-symlink-"));
+  const source = path.join(root, "review");
+  const replacement = path.join(root, "replacement", "review");
+  const external = path.join(root, "external.md");
+  const statePath = path.join(root, "bindings.json");
+  await mkdir(source);
+  await mkdir(replacement, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  await writeFile(path.join(replacement, "SKILL.md"), "---\nname: review\n---\nreplacement\n");
+  await writeFile(external, "external\n");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots,
+    interactive: true,
+    confirm: async () => true,
+  });
+  await symlink(external, path.join(source, "helper.md"));
+
+  await assert.rejects(
+    resolveBinding({
+      descriptor: descriptor(),
+      context: "global",
+      statePath,
+      roots,
+    }),
+    (error) => error.code === "BINDING_SOURCE_INVALID",
+  );
+  assert.equal(Object.keys((await readBindingStore(statePath)).bindings).length, 0);
+
+  const rebound = await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: replacement,
+    context: "global",
+    statePath,
+    roots: [{
+      path: path.dirname(replacement),
+      scope: "global",
+      origin: "personal",
+    }],
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.equal(rebound.source.path, replacement);
+});
+
 test("resolution preserves a confirmed local binding across content drift", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-revalidate-local-"));
   const source = path.join(root, "review");

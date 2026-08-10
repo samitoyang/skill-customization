@@ -316,8 +316,16 @@ async function inspectBindingSource({
       code: "BINDING_SOURCE_KIND_MISMATCH",
     });
   }
-  const fingerprint = await fingerprintPath(sourceRoot);
-  const entrypointFingerprint = await fingerprintFile(entrypoint);
+  let fingerprint;
+  let entrypointFingerprint;
+  try {
+    fingerprint = await fingerprintPath(sourceRoot);
+    entrypointFingerprint = await fingerprintFile(entrypoint);
+  } catch (error) {
+    throw new BindingError(`binding source cannot be fingerprinted: ${error.message}`, {
+      code: "BINDING_SOURCE_INVALID",
+    });
+  }
   const localIdentity = generateLocalIdentity({
     skillName: descriptor.source.skill_name,
     fingerprint: entrypointFingerprint,

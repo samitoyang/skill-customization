@@ -8,6 +8,7 @@ All notable changes to this project are documented here.
 - Add recursive overlay flattening with cycle/depth protection, fork runtime-leaf execution, advisory tracking bindings, reviewed overlay-chain materialization, and targeted maintenance handlers.
 - Add `payload-fingerprint`, `preflight`, and `accept-maintenance` CLI/library behavior with atomic accepted-review updates and public-behavior tests.
 - Require directory-scoped fork snapshots, fresh evidence for changed materializations, advisory handling for invalid optional tracking state, symlink-free fingerprinted source trees, canonically contained maintenance locks, and canonical, symlink-free runtime selectors covered by the owned-payload fingerprint.
+- Reconcile recursive customization sources by their checked effective fingerprint, align schema/runtime portable paths, and invalidate bindings whose sources become unfingerprintable.
 - Add helper contract 1 and the public `skill-customization supports <contract>` compatibility check.
 - Freeze the redesigned contract-1 descriptors, state readability, fingerprints, discovery/binding semantics, CLI outputs and exits with named regression tests and golden fixtures.
 - Replace exact helper-version coupling in both published skills with confirmed intake, contract negotiation, and an exact-version on-demand run after compatibility succeeds.

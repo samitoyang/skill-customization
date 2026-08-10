@@ -449,21 +449,39 @@ async function commandReconcile(descriptorPath, options, io) {
     );
   }
   let sourcePath;
+  let sourceEffectiveFingerprint;
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
     const { activeSkills } = await discoverInventory(context);
+    const bindingContext = requireValue(
+      options.context,
+      "--context is required for semantic overlay reconciliation",
+    );
     const binding = await resolveBinding({
       descriptor,
-      context: requireValue(
-        options.context,
-        "--context is required for semantic overlay reconciliation",
-      ),
+      context: bindingContext,
       statePath: options.state,
       roots: context.roots,
       managerRecords: context.managerRecords,
       activeSkills,
     });
     sourcePath = binding.source.alias ?? binding.source.path;
+    if (descriptor.source.kind === "customization") {
+      const nested = await preflightCustomization({
+        descriptorPath: path.join(sourcePath, "customization.json"),
+        context: bindingContext,
+        statePath: options.state,
+        roots: context.roots,
+        managerRecords: context.managerRecords,
+        activeSkills,
+      });
+      if (nested.status === "maintenance-required") {
+        throw new TypeError(
+          `nested customization is not ready: ${nested.maintenanceHandler?.reason ?? "unknown"}`,
+        );
+      }
+      sourceEffectiveFingerprint = nested.effectiveFingerprint;
+    }
   }
   const decision = options.decision;
   if (decision && !["compatible", "absorbed", "incompatible", "ambiguous"].includes(decision)) {
@@ -491,6 +509,7 @@ async function commandReconcile(descriptorPath, options, io) {
     descriptor,
     customizationRoot: path.dirname(resolvedDescriptorPath),
     sourcePath,
+    sourceEffectiveFingerprint,
     cachePath: options.cache,
     semanticReconciler,
   });
