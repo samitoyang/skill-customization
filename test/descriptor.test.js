@@ -80,9 +80,17 @@ test("runtime selectors cannot point into excluded owned-payload paths", () => {
   }
 });
 
-test("portable relative paths reject dot segments", () => {
+test("portable relative paths reject non-canonical segments", () => {
   for (const key of ["entrypoint", "customization"]) {
-    for (const value of ["./customization.json", "./provenance/runtime.md", "helpers/./run.md"]) {
+    for (const value of [
+      "./customization.json",
+      "./provenance/runtime.md",
+      "helpers/./run.md",
+      "customization.json.",
+      "provenance./runtime.md",
+      "provenance /runtime.md",
+      "customization.json:stream",
+    ]) {
       const errors = validateDescriptor(repositoryDescriptor({ [key]: value }));
       assert.ok(
         errors.some(
@@ -222,7 +230,15 @@ test("JSON Schema and runtime share machine-path exclusions", async () => {
   for (const value of ["SKILL.md", "CUSTOMIZATION.md", "helpers/run.md"]) {
     assert.equal(runtimeExclusion.test(value), false);
   }
-  for (const value of ["./customization.json", "./provenance/run.md", "helpers/./run.md"]) {
+  for (const value of [
+    "./customization.json",
+    "./provenance/run.md",
+    "helpers/./run.md",
+    "customization.json.",
+    "provenance./run.md",
+    "provenance /run.md",
+    "customization.json:stream",
+  ]) {
     assert.equal(relativePath.test(value), false);
   }
   for (const value of ["SKILL.md", "helpers/run.md"]) {
@@ -390,6 +406,23 @@ test("reader requires entrypoint and customization artifacts to be files", async
   const descriptorPath = path.join(descriptorDir, "customization.json");
   await writeFile(descriptorPath, JSON.stringify(repositoryDescriptor()));
   await assert.rejects(readDescriptor(descriptorPath), /regular file/i);
+});
+
+test("reader rejects runtime selectors that traverse symlinks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-runtime-symlink-"));
+  const descriptorDir = path.join(root, "review-local-archive");
+  await mkdir(path.join(descriptorDir, "provenance"), { recursive: true });
+  await writeFile(path.join(descriptorDir, "SKILL.md"), "# Skill\n");
+  await writeFile(path.join(descriptorDir, "CUSTOMIZATION.md"), "# Delta\n");
+  await writeFile(path.join(descriptorDir, "provenance", "runtime.md"), "unchecked\n");
+  await symlink("provenance", path.join(descriptorDir, "runtime"));
+  const descriptorPath = path.join(descriptorDir, "customization.json");
+  await writeFile(
+    descriptorPath,
+    JSON.stringify(repositoryDescriptor({ entrypoint: "runtime/runtime.md" })),
+  );
+
+  await assert.rejects(readDescriptor(descriptorPath), /symbolic link/i);
 });
 
 test("reader requires fork snapshot and diff to be owned, non-symlinked provenance", async () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
 import os from "node:os";
@@ -236,6 +236,19 @@ test("CLI validates, fingerprints, discovers, binds, resolves, and reconciles", 
   ]);
   assert.equal(cached.code, 0, cached.stderr);
   assert.equal(JSON.parse(cached.stdout).cached, true);
+});
+
+test("CLI validation rejects a runtime selector symlink into reserved provenance", async () => {
+  const item = await fixture();
+  await mkdir(path.join(item.custom, "provenance"));
+  await writeFile(path.join(item.custom, "provenance", "runtime.md"), "unchecked\n");
+  await symlink("provenance/runtime.md", path.join(item.custom, "RUN.md"));
+  item.descriptor.entrypoint = "RUN.md";
+  await writeFile(item.descriptorPath, JSON.stringify(item.descriptor));
+
+  const result = await run(["validate", item.descriptorPath]);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /symbolic link/i);
 });
 
 test("CLI discovery loads bounded Claude additionalDirectories", async () => {

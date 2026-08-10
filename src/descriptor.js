@@ -113,10 +113,12 @@ function checkPortableNonEmptyString(errors, value, pointer, label) {
 
 export function isPortableRelativePath(value) {
   if (typeof value !== "string" || value.length === 0) return false;
-  if (value.includes("\\") || value.includes("\0")) return false;
+  if (value.includes("\\") || value.includes("\0") || value.includes(":")) return false;
   if (path.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value)) return false;
   const parts = value.split("/");
-  return !parts.some((part) => part === "" || part === "." || part === "..");
+  return !parts.some(
+    (part) => part === "" || part === "." || part === ".." || /[. ]$/.test(part),
+  );
 }
 
 function validateSource(source, errors) {
@@ -370,8 +372,8 @@ export async function readDescriptor(descriptorPath, { inventory = [] } = {}) {
   assertInventoryAvailable(descriptor, inventory);
   const root = path.dirname(path.resolve(descriptorPath));
   const referenced = [
-    { relative: descriptor.entrypoint, rejectSymlinks: false, expectedType: "file" },
-    { relative: descriptor.customization, rejectSymlinks: false, expectedType: "file" },
+    { relative: descriptor.entrypoint, rejectSymlinks: true, expectedType: "file" },
+    { relative: descriptor.customization, rejectSymlinks: true, expectedType: "file" },
     ...(descriptor.type === "fork"
       ? [
           { relative: descriptor.fork.snapshot, rejectSymlinks: true, expectedType: "directory" },

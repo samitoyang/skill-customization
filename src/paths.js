@@ -25,6 +25,17 @@ async function assertNoSymlinks(target) {
   }
 }
 
+async function assertNoSymlinkSegments(root, relativePath) {
+  let current = root;
+  for (const segment of relativePath.split("/")) {
+    current = path.join(current, segment);
+    const info = await lstat(current);
+    if (info.isSymbolicLink()) {
+      throw new Error(`symbolic link is not owned provenance: ${current}`);
+    }
+  }
+}
+
 export async function resolveOwnedPath(root, relativePath, { rejectSymlinks = false } = {}) {
   const canonicalRoot = await realpath(root);
   const unresolved = path.join(root, relativePath);
@@ -32,6 +43,9 @@ export async function resolveOwnedPath(root, relativePath, { rejectSymlinks = fa
   if (!contains(canonicalRoot, canonicalTarget)) {
     throw new Error(`${relativePath} resolves outside its customization folder`);
   }
-  if (rejectSymlinks) await assertNoSymlinks(unresolved);
+  if (rejectSymlinks) {
+    await assertNoSymlinkSegments(root, relativePath);
+    await assertNoSymlinks(unresolved);
+  }
   return canonicalTarget;
 }
