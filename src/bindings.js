@@ -188,6 +188,9 @@ async function inspectBindingSource({
       code: "BINDING_SOURCE_INVALID",
     });
   }
+  const sourceRoot = await realpath(
+    info.isDirectory() ? resolved : path.dirname(entrypoint),
+  );
   const declaredName = await readSkillName(entrypoint).catch(() => undefined);
   if (declaredName !== descriptor.source.skill_name) {
     throw new BindingError(
@@ -198,7 +201,7 @@ async function inspectBindingSource({
   let discovery;
   try {
     discovery = await discoverSkills({
-      input: resolved,
+      input: descriptor.source.kind === "customization" ? sourceRoot : resolved,
       roots,
       managerRecords,
     });
@@ -217,7 +220,9 @@ async function inspectBindingSource({
   const selection = confirmedSelectionFor(
     group,
     confirmedSelection,
-    path.dirname(entrypoint),
+    descriptor.source.kind === "customization"
+      ? sourceRoot
+      : path.dirname(entrypoint),
   );
   let repository;
   let upstreamPath;
@@ -275,9 +280,6 @@ async function inspectBindingSource({
       }
     }
   }
-  const sourceRoot = await realpath(
-    info.isDirectory() ? resolved : path.dirname(entrypoint),
-  );
   let customization;
   if (descriptor.source.kind === "customization") {
     if (!info.isDirectory()) {

@@ -468,7 +468,7 @@ async function commandReconcile(descriptorPath, options, io) {
     sourcePath = binding.source.alias ?? binding.source.path;
     if (descriptor.source.kind === "customization") {
       const nested = await preflightCustomization({
-        descriptorPath: path.join(sourcePath, "customization.json"),
+        descriptorPath: path.join(binding.source.target, "customization.json"),
         context: bindingContext,
         statePath: options.state,
         roots: context.roots,

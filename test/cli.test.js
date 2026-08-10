@@ -256,6 +256,7 @@ test("CLI validation rejects a runtime selector symlink into reserved provenance
 test("CLI reconciliation preflights a nested customization source", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cli-nested-reconcile-"));
   const nested = path.join(root, "review-fork");
+  const nestedAlias = path.join(root, "installed-review-fork");
   const snapshot = path.join(nested, "provenance", "source");
   const outer = path.join(root, "review-fork-notify");
   await mkdir(snapshot, { recursive: true });
@@ -321,6 +322,7 @@ test("CLI reconciliation preflights a nested customization source", async () => 
     path.join(nested, "customization.json"),
     JSON.stringify(nestedDescriptor),
   );
+  await symlink(nested, nestedAlias);
   const nestedEffective = fingerprintValues(
     [nestedDescriptor.id, "workflow", nestedDescriptor.customization, nestedOwned],
     "skill-customization-fork-effective-v1",
@@ -357,7 +359,7 @@ test("CLI reconciliation preflights a nested customization source", async () => 
   const roots = [{ path: root, scope: "workspace", origin: "fixture" }];
   await bindCustomization({
     descriptor: outerDescriptor,
-    sourcePath: nested,
+    sourcePath: nestedAlias,
     context: "workspace:test",
     statePath,
     roots,

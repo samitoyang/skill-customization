@@ -93,6 +93,10 @@ test("portable relative paths reject non-canonical segments", () => {
       "helpers//run.md",
       "helpers/",
       "helpers/\0run.md",
+      "helpers\n/run.md",
+      "helpers\r/run:stream",
+      "helpers\u2028/../run.md",
+      "helpers\u2029/run\\file.md",
     ]) {
       const errors = validateDescriptor(repositoryDescriptor({ [key]: value }));
       assert.ok(
@@ -244,6 +248,10 @@ test("JSON Schema and runtime share machine-path exclusions", async () => {
     "helpers//run.md",
     "helpers/",
     "helpers/\0run.md",
+    "helpers\n/run.md",
+    "helpers\r/run:stream",
+    "helpers\u2028/../run.md",
+    "helpers\u2029/run\\file.md",
   ]) {
     assert.equal(relativePath.test(value), false);
   }

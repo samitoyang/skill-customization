@@ -113,7 +113,12 @@ function checkPortableNonEmptyString(errors, value, pointer, label) {
 
 export function isPortableRelativePath(value) {
   if (typeof value !== "string" || value.length === 0) return false;
-  if (value.includes("\\") || value.includes("\0") || value.includes(":")) return false;
+  if (
+    value.includes("\\")
+    || value.includes("\0")
+    || value.includes(":")
+    || /[\r\n\u2028\u2029]/.test(value)
+  ) return false;
   if (path.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value)) return false;
   const parts = value.split("/");
   return !parts.some(
