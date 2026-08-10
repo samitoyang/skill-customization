@@ -112,12 +112,12 @@
     "relativePath": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+$"
     },
     "runtimePath": {
       "allOf": [
         { "$ref": "#/$defs/relativePath" },
-        { "not": { "pattern": "^(?:customization\\.json|provenance)(?:/|$)" } }
+        { "not": { "pattern": "^(?:[Cc][Uu][Ss][Tt][Oo][Mm][Ii][Zz][Aa][Tt][Ii][Oo][Nn]\\.[Jj][Ss][Oo][Nn]|[Pp][Rr][Oo][Vv][Ee][Nn][Aa][Nn][Cc][Ee])(?:/|$)" } }
       ]
     },
     "ownedPayload": {

@@ -64,14 +64,30 @@ test("runtime selectors cannot point into excluded owned-payload paths", () => {
     for (const value of [
       "customization.json",
       "customization.json/runtime.md",
+      "CUSTOMIZATION.JSON",
       "provenance",
       "provenance/runtime.md",
+      "Provenance/runtime.md",
     ]) {
       const errors = validateDescriptor(repositoryDescriptor({ [key]: value }));
       assert.ok(
         errors.some(
           ({ path: pointer, message }) =>
             pointer === `/${key}` && /runtime-owned path/i.test(message),
+        ),
+      );
+    }
+  }
+});
+
+test("portable relative paths reject dot segments", () => {
+  for (const key of ["entrypoint", "customization"]) {
+    for (const value of ["./customization.json", "./provenance/runtime.md", "helpers/./run.md"]) {
+      const errors = validateDescriptor(repositoryDescriptor({ [key]: value }));
+      assert.ok(
+        errors.some(
+          ({ path: pointer, message }) =>
+            pointer === `/${key}` && /portable relative path/i.test(message),
         ),
       );
     }
@@ -193,11 +209,24 @@ test("JSON Schema and runtime share machine-path exclusions", async () => {
   const runtimeExclusion = new RegExp(
     schema.$defs.runtimePath.allOf.find(({ not }) => not)?.not.pattern,
   );
-  for (const value of ["customization.json", "provenance", "provenance/run.md"]) {
+  const relativePath = new RegExp(schema.$defs.relativePath.pattern);
+  for (const value of [
+    "customization.json",
+    "CUSTOMIZATION.JSON",
+    "provenance",
+    "provenance/run.md",
+    "Provenance/run.md",
+  ]) {
     assert.equal(runtimeExclusion.test(value), true);
   }
   for (const value of ["SKILL.md", "CUSTOMIZATION.md", "helpers/run.md"]) {
     assert.equal(runtimeExclusion.test(value), false);
+  }
+  for (const value of ["./customization.json", "./provenance/run.md", "helpers/./run.md"]) {
+    assert.equal(relativePath.test(value), false);
+  }
+  for (const value of ["SKILL.md", "helpers/run.md"]) {
+    assert.equal(relativePath.test(value), true);
   }
 
   for (const id of MACHINE_IDS) assert.equal(idPattern.test(id), false);

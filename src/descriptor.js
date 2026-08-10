@@ -116,7 +116,7 @@ export function isPortableRelativePath(value) {
   if (value.includes("\\") || value.includes("\0")) return false;
   if (path.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value)) return false;
   const parts = value.split("/");
-  return !parts.includes("..") && !parts.includes("") && value !== ".";
+  return !parts.some((part) => part === "" || part === "." || part === "..");
 }
 
 function validateSource(source, errors) {
