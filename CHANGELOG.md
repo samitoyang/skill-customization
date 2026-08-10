@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 ## Unreleased
 
 - Redesign unpublished descriptor v1 and helper contract 1 around thin dispatchers, reviewed owned payloads, full-source/customization-source effective fingerprints, and helper-first preflight.
-- Add recursive overlay flattening with cycle/depth protection, fork runtime-leaf execution, advisory tracking bindings, reviewed overlay-chain materialization, and targeted maintenance handlers.
+- Add recursive overlay flattening with cycle/depth protection, fork runtime-leaf execution, advisory coexistence tracking bindings, separately confirmed and unambiguous context bindings for replacement forks, reviewed overlay-chain materialization, and targeted maintenance handlers.
 - Add `payload-fingerprint`, `preflight`, and `accept-maintenance` CLI/library behavior with atomic accepted-review updates and public-behavior tests.
 - Require provenance-contained directory fork snapshots and diffs, fresh evidence for changed materializations, advisory handling for invalid optional tracking state, symlink-free fingerprinted source trees, canonically contained maintenance locks, and canonical, symlink-free runtime selectors covered by the owned-payload fingerprint.
 - Pass recursively checked execution plans into customization-source semantic review, preserve portable descriptor/diff modes during maintenance, and keep schema validation aligned with runtime non-blank string requirements.

@@ -203,6 +203,20 @@ async function visit({
   }
 
   if (descriptor.type === "fork") {
+    if (descriptor.activation.mode === "replace") {
+      try {
+        await resolveBinding({
+          descriptor,
+          context,
+          statePath,
+          roots,
+          managerRecords,
+          activeSkills,
+        });
+      } catch (error) {
+        return maintenance(descriptor, root, "binding-maintenance", error.message);
+      }
+    }
     try {
       await reconcileCustomization({ descriptor, customizationRoot: root });
     } catch (error) {
