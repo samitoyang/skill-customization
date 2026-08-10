@@ -43,6 +43,7 @@ export async function acceptMaintenanceUpdate({
   evidence,
 }) {
   const absoluteDescriptorPath = path.resolve(descriptorPath);
+  await readDescriptor(absoluteDescriptorPath);
   const maintenanceLock = await maintenanceLockPath(absoluteDescriptorPath);
   const release = await acquireStateLock(maintenanceLock);
   let changedDiffPath;
