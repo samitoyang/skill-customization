@@ -11,7 +11,10 @@ import {
   payloadFingerprint,
 } from "./fingerprint.js";
 import { generateLocalIdentity } from "./normalization.js";
-import { isVersionControlMetadataPath } from "./owned-payload.js";
+import {
+  isSourceFingerprintExcludedPath,
+  isVersionControlMetadataPath,
+} from "./owned-payload.js";
 import { resolveOwnedPath } from "./paths.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
@@ -228,7 +231,10 @@ function parseUnifiedDiff(contents) {
       }
       patch.hunks.push({ ...header, operations });
     }
-    if (patch.hunks.length === 0 || !hasChange) {
+    const headerOnlyStructuralChange =
+      patch.hunks.length === 0
+      && (patch.oldPath === null || patch.newPath === null);
+    if (!headerOnlyStructuralChange && (patch.hunks.length === 0 || !hasChange)) {
       throw new Error("fork diff file must contain a hunk with changed lines");
     }
     patches.push(patch);
@@ -303,7 +309,11 @@ function isExcludedPayloadPath(relativePath, excludedPaths) {
 
 async function mapDirectoryPayload(
   root,
-  { excludedPaths = [], label = "fork payload" } = {},
+  {
+    excludedPaths = [],
+    label = "fork payload",
+    excludeSourceMetadata = false,
+  } = {},
 ) {
   const payload = new Map();
   async function visit(directory) {
@@ -311,8 +321,11 @@ async function mapDirectoryPayload(
     for (const entry of entries) {
       const absolutePath = path.join(directory, entry.name);
       const relativePath = portableRelative(root, absolutePath);
+      const metadataExcluded = excludeSourceMetadata
+        ? isSourceFingerprintExcludedPath(relativePath)
+        : isVersionControlMetadataPath(relativePath);
       if (
-        isVersionControlMetadataPath(relativePath)
+        metadataExcluded
         || isExcludedPayloadPath(relativePath, excludedPaths)
       ) continue;
       const info = await lstat(absolutePath);
@@ -410,6 +423,7 @@ async function verifyForkDiff({
   const patches = parseUnifiedDiff(contents);
   const snapshotPayload = await mapDirectoryPayload(snapshot, {
     label: "fork snapshot",
+    excludeSourceMetadata: true,
   });
   const reconstructed = applyPatchesToPayload(snapshotPayload, patches);
   const owned = await mapDirectoryPayload(customizationRoot, {
