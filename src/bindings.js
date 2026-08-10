@@ -119,7 +119,7 @@ async function confirmOrFail(callback, payload, code, message) {
   }
 }
 
-function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
+async function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
   if (!confirmedSelection) {
     if (group.conflict) {
       throw new BindingError("binding source provenance is ambiguous", {
@@ -129,13 +129,21 @@ function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
     }
     return undefined;
   }
+  let confirmedTarget;
+  let sourceTarget;
+  try {
+    [confirmedTarget, sourceTarget] = await Promise.all([
+      realpath(confirmedSelection.copy?.path),
+      realpath(sourceDirectory),
+    ]);
+  } catch {
+    confirmedTarget = undefined;
+    sourceTarget = undefined;
+  }
   const copy = group.copies.find(
     (candidate) =>
-      candidate.path === confirmedSelection.copy?.path
-      && (candidate.owners ?? [candidate.owner]).includes(
-        confirmedSelection.copy?.owner,
-      )
-      && candidate.path === path.resolve(sourceDirectory),
+      path.resolve(candidate.realPath ?? candidate.path) === confirmedTarget
+      && confirmedTarget === sourceTarget,
   );
   const confirmation = confirmedSelection.confirmation
     ?? [...(confirmedSelection.evidence ?? [])]
@@ -145,9 +153,12 @@ function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
     confirmedSelection.name === group.name
     && copy
     && typeof confirmedSelection.provenance === "string"
+    && confirmedSelection.copy?.provenance?.includes(
+      confirmedSelection.provenance,
+    )
     && copy.provenance.includes(confirmedSelection.provenance)
     && confirmation?.kind === "confirmation"
-    && confirmation.path === copy.path;
+    && confirmation.path === confirmedSelection.copy?.path;
   if (!valid) {
     throw new BindingError(
       "confirmed source selection does not match current discovery evidence",
@@ -159,7 +170,7 @@ function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
   }
   return {
     name: group.name,
-    copy,
+    copy: structuredClone(confirmedSelection.copy),
     provenance: confirmedSelection.provenance,
     confirmation: structuredClone(confirmation),
   };
@@ -217,7 +228,7 @@ async function inspectBindingSource({
       code: "BINDING_SOURCE_INVALID",
     });
   }
-  const selection = confirmedSelectionFor(
+  const selection = await confirmedSelectionFor(
     group,
     confirmedSelection,
     descriptor.source.kind === "customization"
