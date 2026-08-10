@@ -34,7 +34,7 @@ Read [Fork intake](references/intake.md), confirm one brief, then create:
 
 - a thin `SKILL.md` dispatcher that negotiates contract 1, runs preflight, follows only ready steps, and delegates every stopped/unavailable-helper case to `skill-fork`;
 - `CUSTOMIZATION.md` containing the complete independent workflow;
-- a relative, symlink-free snapshot directory and unified diff that reconstruct every runtime-owned file;
+- a relative, symlink-free snapshot directory and unified diff beneath reserved `provenance/` that reconstruct every runtime-owned file;
 - a portable v1 descriptor with own/source licenses, reviewed owned-payload, snapshot, diff, and source effective fingerprints.
 
 When the source is an overlay chain, materialize its checked base-plus-deltas result as a snapshot directory and record the chain effective fingerprint, concrete snapshot fingerprint, review time, and review evidence before diffing. A verified fork may be the source of another customization. Route to `skill-overlay` for automatic upstream changes and to a companion when the source behavior remains unchanged.

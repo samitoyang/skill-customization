@@ -114,6 +114,12 @@
       "minLength": 1,
       "pattern": "^(?![A-Za-z]:[\\\\/])(?![\\s\\S]*[\\r\\n\\u2028\\u2029])(?![\\s\\S]*:)(?![\\s\\S]*(?:^|/)\\.{1,2}(?:/|$))(?![\\s\\S]*[. ](?:/|$))(?![\\s\\S]*\\\\)(?![\\s\\S]*\\u0000)[^/]+(?:/[^/]+)*$"
     },
+    "provenancePath": {
+      "allOf": [
+        { "$ref": "#/$defs/relativePath" },
+        { "pattern": "^provenance/[^/]+(?:/[^/]+)*$" }
+      ]
+    },
     "runtimePath": {
       "allOf": [
         { "$ref": "#/$defs/relativePath" },
@@ -245,8 +251,8 @@
         "diff_fingerprint"
       ],
       "properties": {
-        "snapshot": { "$ref": "#/$defs/relativePath" },
-        "diff": { "$ref": "#/$defs/relativePath" },
+        "snapshot": { "$ref": "#/$defs/provenancePath" },
+        "diff": { "$ref": "#/$defs/provenancePath" },
         "snapshot_fingerprint": { "$ref": "#/$defs/fingerprint" },
         "diff_fingerprint": { "$ref": "#/$defs/fingerprint" },
         "materialization": { "$ref": "#/$defs/materialization" }

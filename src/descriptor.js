@@ -238,6 +238,12 @@ function validateFork(descriptor, errors) {
   for (const key of ["snapshot", "diff"]) {
     if (!isPortableRelativePath(descriptor.fork[key])) {
       issue(errors, `/fork/${key}`, "must be a portable relative path");
+    } else if (!descriptor.fork[key].startsWith("provenance/")) {
+      issue(
+        errors,
+        `/fork/${key}`,
+        "must be stored beneath the reserved provenance/ directory",
+      );
     }
   }
   checkFingerprint(errors, descriptor.fork.snapshot_fingerprint, "/fork/snapshot_fingerprint");

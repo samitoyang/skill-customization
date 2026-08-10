@@ -225,6 +225,14 @@ test("JSON Schema and runtime share machine-path exclusions", async () => {
     schema.$defs.runtimePath.allOf.find(({ not }) => not)?.not.pattern,
   );
   const relativePath = new RegExp(schema.$defs.relativePath.pattern);
+  const provenancePath = new RegExp(
+    schema.$defs.provenancePath.allOf.find(({ pattern }) => pattern).pattern,
+  );
+  assert.equal(
+    schema.$defs.fork.properties.snapshot.$ref,
+    "#/$defs/provenancePath",
+  );
+  assert.equal(schema.$defs.fork.properties.diff.$ref, "#/$defs/provenancePath");
   for (const value of [
     "customization.json",
     "CUSTOMIZATION.JSON",
@@ -257,6 +265,12 @@ test("JSON Schema and runtime share machine-path exclusions", async () => {
   }
   for (const value of ["SKILL.md", "helpers/run.md"]) {
     assert.equal(relativePath.test(value), true);
+  }
+  for (const value of ["provenance/source", "provenance/reviews/source.diff"]) {
+    assert.equal(provenancePath.test(value), true);
+  }
+  for (const value of ["provenance", "source", "source.diff", "Provenance/source"]) {
+    assert.equal(provenancePath.test(value), false);
   }
 
   for (const id of MACHINE_IDS) assert.equal(idPattern.test(id), false);
@@ -322,6 +336,24 @@ test("fork requires relative snapshot and diff provenance", () => {
   });
   const errors = validateDescriptor(invalid);
   assert.equal(errors.filter(({ path }) => path.startsWith("/fork/")).length, 2);
+
+  const outsideProvenance = repositoryDescriptor({
+    type: "fork",
+    fork: {
+      snapshot: "source",
+      diff: "source.diff",
+      snapshot_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      diff_fingerprint:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    },
+  });
+  assert.deepEqual(
+    validateDescriptor(outsideProvenance)
+      .filter(({ path: issuePath }) => issuePath.startsWith("/fork/"))
+      .map(({ path: issuePath }) => issuePath),
+    ["/fork/snapshot", "/fork/diff"],
+  );
 });
 
 test("descriptor supports recursive customization sources and requires reviewed overlay materialization for forks", () => {

@@ -226,7 +226,7 @@ A ready customization executes its checked runtime instructions directly without
 | Portable descriptor | Stable identity, own/source licenses, relative artifacts, reviewed fingerprints, and activation; runtime selectors stay inside the reviewed owned payload and no concrete source paths are stored |
 | Local state | Context-scoped bindings and compatibility decisions written atomically; maintenance locks are canonically contained before writes |
 | Overlay | Live context binding, reviewed owned payload, and full-source or customization-source effective fingerprint |
-| Fork | Runtime leaf with complete workflow and owned, relative, symlink-free snapshot directory and diff |
+| Fork | Runtime leaf with complete workflow and a relative, symlink-free snapshot directory and diff beneath reserved `provenance/` |
 
 Published descriptors keep stable identity and provenance portable. Concrete source paths, credentials, bindings, and compatibility decisions remain local. The supporting Node.js package has no runtime dependencies.
 
