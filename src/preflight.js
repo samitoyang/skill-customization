@@ -61,7 +61,16 @@ async function sourceRoot(binding) {
   return info.isDirectory() ? target : path.dirname(target);
 }
 
-async function forkTrackingAdvisory(descriptor, context, statePath) {
+async function forkTrackingAdvisory(descriptor, {
+  context,
+  statePath,
+  roots,
+  managerRecords,
+  activeSkills,
+  depth,
+  activeIds,
+  activePaths,
+}) {
   let store;
   try {
     store = await readBindingStore(statePath);
@@ -85,10 +94,41 @@ async function forkTrackingAdvisory(descriptor, context, statePath) {
     const target = await realpath(lookup);
     const info = await lstat(target);
     const root = info.isDirectory() ? target : path.dirname(target);
-    const current = await fingerprintPath(root);
-    const expected = descriptor.source.kind === "customization"
-      ? binding.source.fingerprint
-      : descriptor.source.effective_fingerprint;
+    const expected = descriptor.source.effective_fingerprint;
+    let current;
+    if (descriptor.source.kind === "customization") {
+      const nestedDescriptorPath = path.join(root, "customization.json");
+      const nestedDescriptor = await readDescriptor(nestedDescriptorPath);
+      if (!matchesCustomizationSource(descriptor.source, nestedDescriptor)) {
+        return {
+          code: "tracking-binding-invalid",
+          message: "The optional fork tracking binding does not match the reviewed customization identity; fork execution is unaffected.",
+        };
+      }
+      const tracked = await visit({
+        descriptorPath: nestedDescriptorPath,
+        context,
+        statePath,
+        roots,
+        managerRecords,
+        activeSkills,
+        depth: depth + 1,
+        activeIds,
+        activePaths,
+      });
+      if (tracked.status === "maintenance-required") {
+        return {
+          code: "tracking-source-drift",
+          message: "The optional tracked customization no longer has the reviewed effective execution graph; adoption or rebase remains explicit.",
+          expectedFingerprint: expected,
+          detail: tracked.maintenanceHandler?.detail
+            ?? tracked.maintenanceHandler?.reason,
+        };
+      }
+      current = tracked.effectiveFingerprint;
+    } else {
+      current = await fingerprintPath(root);
+    }
     if (current !== expected) {
       return {
         code: "tracking-source-drift",
@@ -168,7 +208,16 @@ async function visit({
     } catch (error) {
       return maintenance(descriptor, root, "fork-payload-or-provenance-drift", error.message);
     }
-    const advisory = await forkTrackingAdvisory(descriptor, context, statePath);
+    const advisory = await forkTrackingAdvisory(descriptor, {
+      context,
+      statePath,
+      roots,
+      managerRecords,
+      activeSkills,
+      depth,
+      activeIds: nextIds,
+      activePaths: nextPaths,
+    });
     const advisories = advisory ? [advisory] : [];
     return {
       status: advisories.length > 0 ? "ready-with-advisory" : "ready",
