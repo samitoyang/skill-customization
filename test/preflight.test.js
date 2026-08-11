@@ -592,8 +592,9 @@ test("verified forks are runtime leaves and execute their complete independent w
     },
   };
   await writeDescriptor(forkRoot, descriptor);
+  const descriptorPath = path.join(forkRoot, "customization.json");
   const result = await preflightCustomization({
-    descriptorPath: path.join(forkRoot, "customization.json"),
+    descriptorPath,
     context: "workspace:test",
     statePath: path.join(root, "state", "bindings.json"),
   });
@@ -606,9 +607,19 @@ test("verified forks are runtime leaves and execute their complete independent w
     customizationId: descriptor.id,
   }]);
   assert.deepEqual(result.advisories, []);
+  const changedSourceFingerprint =
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   await assert.rejects(
     acceptMaintenanceUpdate({
-      descriptorPath: path.join(forkRoot, "customization.json"),
+      descriptorPath,
+      sourceEffectiveFingerprint: changedSourceFingerprint,
+    }),
+    /full-source snapshot.*source checkpoint/i,
+  );
+  assert.deepEqual(JSON.parse(await readFile(descriptorPath, "utf8")), descriptor);
+  await assert.rejects(
+    acceptMaintenanceUpdate({
+      descriptorPath,
       reviewedAt: "2026-08-10T00:00:00Z",
       evidence: "This full-source fork has no materialization record.",
     }),

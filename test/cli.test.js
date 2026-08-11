@@ -37,6 +37,7 @@ async function runInteractive(args, answers) {
   stdin.isTTY = true;
   let stdout = "";
   let stderr = "";
+  let answerIndex = 0;
   const sink = (append) =>
     new Writable({
       write(chunk, _encoding, callback) {
@@ -44,16 +45,24 @@ async function runInteractive(args, answers) {
         callback();
       },
     });
+  const stderrSink = sink((value) => {
+    stderr += value;
+    if (value.includes("[y/N]") && answerIndex < answers.length) {
+      const answer = answers[answerIndex];
+      answerIndex += 1;
+      setImmediate(() => stdin.write(`${answer}\n`));
+    }
+  });
   const result = main(args, {
     stdin,
     stdout: sink((value) => (stdout += value)),
-    stderr: sink((value) => (stderr += value)),
+    stderr: stderrSink,
   });
-  const timers = answers.map((answer, index) =>
-    setTimeout(() => stdin.write(`${answer}\n`), 20 + (index * 80)));
   const code = await result;
-  timers.forEach(clearTimeout);
   stdin.end();
+  if (answerIndex !== answers.length) {
+    throw new Error(`interactive CLI consumed ${answerIndex} of ${answers.length} answers`);
+  }
   return { code, stdout, stderr };
 }
 

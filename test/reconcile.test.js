@@ -633,6 +633,30 @@ test("fork provenance rejects a diff that does not apply to its snapshot", async
   );
 });
 
+test("fork provenance rejects a renamed diff target that already exists", async () => {
+  const fixture = await forkDiffFixture({
+    diff: "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-snapshot\n+fork\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+Fork rationale.\n--- a/a.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-old a\n+new b\n",
+  });
+  await writeFile(path.join(fixture.snapshotRoot, "a.txt"), "old a\n");
+  await writeFile(path.join(fixture.snapshotRoot, "b.txt"), "old b\n");
+  await writeFile(path.join(fixture.customizationRoot, "b.txt"), "new b\n");
+  fixture.descriptor.fork.snapshot_fingerprint = await fingerprintPath(
+    fixture.snapshotRoot,
+  );
+  fixture.descriptor.source.effective_fingerprint =
+    fixture.descriptor.fork.snapshot_fingerprint;
+  fixture.descriptor.owned_payload.reviewed_fingerprint = await payloadFingerprint(
+    fixture.customizationRoot,
+  );
+
+  await assert.rejects(
+    reconcileCustomization(fixture),
+    (error) =>
+      error.code === "INCOMPLETE_FORK_PROVENANCE"
+      && /destination.*already exists.*b\.txt/i.test(error.message),
+  );
+});
+
 test("fork provenance rejects a snapshot that does not match its review checkpoint", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "fork-checkpoint-"));
   const customizationRoot = path.join(root, "review-fork");

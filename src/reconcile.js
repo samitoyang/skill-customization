@@ -381,6 +381,15 @@ function applyPatchesToPayload(payload, patches) {
         );
       }
       source = decodePatchSource(sourceBuffer, patch.oldPath);
+      if (
+        patch.newPath
+        && patch.newPath !== patch.oldPath
+        && reconstructed.has(patch.newPath)
+      ) {
+        throw new Error(
+          `fork diff rename destination already exists in snapshot: ${patch.newPath}`,
+        );
+      }
     } else if (reconstructed.has(patch.newPath)) {
       throw new Error(`fork diff new file already exists in snapshot: ${patch.newPath}`);
     }

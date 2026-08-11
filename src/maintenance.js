@@ -96,6 +96,15 @@ export async function acceptMaintenanceUpdate({
       });
       descriptor.fork.snapshot_fingerprint = await fingerprintPath(snapshotPath);
       descriptor.fork.diff_fingerprint = await fingerprintFile(diffPath);
+      if (
+        ["repository", "local"].includes(descriptor.source.kind)
+        && descriptor.fork.snapshot_fingerprint
+          !== descriptor.source.effective_fingerprint
+      ) {
+        throw new TypeError(
+          "full-source snapshot fingerprint must match the reviewed source checkpoint",
+        );
+      }
       if (descriptor.fork.materialization) {
         const materializationChanged =
           descriptor.fork.materialization.source_effective_fingerprint
