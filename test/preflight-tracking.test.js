@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, symlink, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -35,6 +35,8 @@ test("fork tracking compares a customization source by checked effective fingerp
   const root = await mkdtemp(path.join(os.tmpdir(), "preflight-tracking-customization-"));
   const base = path.join(root, "review");
   const inner = path.join(root, "review-archive");
+  const innerAlias = path.join(root, "installed-review-archive");
+  const replacementInner = path.join(root, "replacement", "review-archive");
   const forkRoot = path.join(root, "review-archive-standalone");
   const snapshot = path.join(forkRoot, "provenance", "source");
   const statePath = path.join(root, "state", "bindings.json");
@@ -71,6 +73,7 @@ test("fork tracking compares a customization source by checked effective fingerp
     activation: { mode: "coexist" },
   };
   await writeDescriptor(inner, innerDescriptor);
+  await symlink(inner, innerAlias, "dir");
   const innerEffective = fingerprintValues(
     [
       innerDescriptor.id,
@@ -140,7 +143,7 @@ test("fork tracking compares a customization source by checked effective fingerp
   });
   await bindCustomization({
     descriptor: forkDescriptor,
-    sourcePath: inner,
+    sourcePath: innerAlias,
     context: "workspace:test",
     statePath,
     roots,
@@ -174,6 +177,23 @@ test("fork tracking compares a customization source by checked effective fingerp
   assert.equal(after.advisories.length, 1);
   assert.equal(after.advisories[0].code, "tracking-source-drift");
   assert.equal(after.advisories[0].expectedFingerprint, innerEffective);
+
+  await writeFile(
+    path.join(base, "SKILL.md"),
+    "---\nname: review\n---\nBase workflow.\n",
+  );
+  await cp(inner, replacementInner, { recursive: true });
+  await unlink(innerAlias);
+  await symlink(replacementInner, innerAlias, "dir");
+  const retargeted = await preflightCustomization({
+    descriptorPath: path.join(forkRoot, "customization.json"),
+    context: "workspace:test",
+    statePath,
+    roots,
+  });
+  assert.equal(retargeted.status, "ready-with-advisory");
+  assert.equal(retargeted.advisories[0].code, "tracking-binding-invalid");
+  assert.match(retargeted.advisories[0].detail, /retargeted/i);
 });
 
 test("fork tracking validates repository binding canonical targets before drift comparison", async () => {

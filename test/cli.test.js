@@ -32,6 +32,31 @@ function run(args, { env = process.env } = {}) {
   });
 }
 
+async function runInteractive(args, answers) {
+  const stdin = new PassThrough();
+  stdin.isTTY = true;
+  let stdout = "";
+  let stderr = "";
+  const sink = (append) =>
+    new Writable({
+      write(chunk, _encoding, callback) {
+        append(String(chunk));
+        callback();
+      },
+    });
+  const result = main(args, {
+    stdin,
+    stdout: sink((value) => (stdout += value)),
+    stderr: sink((value) => (stderr += value)),
+  });
+  const timers = answers.map((answer, index) =>
+    setTimeout(() => stdin.write(`${answer}\n`), 20 + (index * 80)));
+  const code = await result;
+  timers.forEach(clearTimeout);
+  stdin.end();
+  return { code, stdout, stderr };
+}
+
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "cli-"));
   const custom = path.join(root, "review-local-archive");
@@ -238,6 +263,73 @@ test("CLI validates, fingerprints, discovers, binds, resolves, and reconciles", 
   ]);
   assert.equal(cached.code, 0, cached.stderr);
   assert.equal(JSON.parse(cached.stdout).cached, true);
+});
+
+test("CLI binding commands exclude the active replacement customization", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cli-replacement-inventory-"));
+  const sourceParent = path.join(root, "sources");
+  const customizationParent = path.join(root, "customizations");
+  const source = path.join(sourceParent, "review");
+  const customization = path.join(customizationParent, "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nSource.\n");
+  await mkdir(customization, { recursive: true });
+  await writeFile(
+    path.join(customization, "SKILL.md"),
+    "---\nname: review\n---\nDispatcher.\n",
+  );
+  await writeFile(path.join(customization, "CUSTOMIZATION.md"), "Replacement delta.\n");
+  const descriptor = {
+    schema_version: 1,
+    id: "urn:test:cli-replacement-review",
+    type: "semantic-overlay",
+    name: "review",
+    license: "MIT",
+    entrypoint: "SKILL.md",
+    customization: "CUSTOMIZATION.md",
+    dependencies: [],
+    owned_payload: { reviewed_fingerprint: await payloadFingerprint(customization) },
+    source: {
+      skill_name: "review",
+      kind: "repository",
+      repository: "https://github.com/example/skills",
+      upstream_path: "skills/review/SKILL.md",
+      license: "MIT",
+      effective_fingerprint: await fingerprintPath(source),
+      review: { revision: "cli-replacement-review" },
+    },
+    activation: { mode: "replace", precedence: "customization-first" },
+  };
+  const descriptorPath = path.join(customization, "customization.json");
+  await writeFile(descriptorPath, JSON.stringify(descriptor));
+  const common = [
+    "--context",
+    "workspace:test",
+    "--state",
+    statePath,
+    "--root",
+    sourceParent,
+    "--root",
+    customizationParent,
+  ];
+
+  const bound = await runInteractive([
+    "bind",
+    descriptorPath,
+    "--source",
+    source,
+    "--scope",
+    "workspace",
+    ...common,
+  ], ["yes", "yes"]);
+  assert.equal(bound.code, 0, bound.stderr);
+
+  const resolved = await run(["resolve", descriptorPath, ...common]);
+  assert.equal(resolved.code, 0, resolved.stderr);
+  const reconciled = await run(["reconcile", descriptorPath, ...common]);
+  assert.equal(reconciled.code, 0, reconciled.stderr);
+  assert.equal(JSON.parse(reconciled.stdout).status, "compatible");
 });
 
 test("CLI validation rejects a runtime selector symlink into reserved provenance", async () => {

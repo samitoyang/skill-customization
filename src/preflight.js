@@ -9,6 +9,7 @@ import {
   validateBinding,
 } from "./bindings.js";
 import { readDescriptor } from "./descriptor.js";
+import { excludeSkillRootFromInventory } from "./discovery.js";
 import {
   fingerprintPath,
   fingerprintValues,
@@ -38,20 +39,6 @@ function maintenance(descriptor, root, reason, detail) {
     advisories: [],
     maintenanceHandler: handlerFor(descriptor, root, reason, detail),
   };
-}
-
-async function excludeCurrentCustomization(activeSkills, root) {
-  if (!Array.isArray(activeSkills)) return activeSkills;
-  const included = await Promise.all(activeSkills.map(async (skill) => {
-    const candidate = skill.realPath ?? skill.path;
-    if (typeof candidate !== "string") return skill;
-    try {
-      return await realpath(candidate) === root ? null : skill;
-    } catch {
-      return path.resolve(candidate) === root ? null : skill;
-    }
-  }));
-  return included.filter(Boolean);
 }
 
 function effectiveFingerprint(descriptor, ownedFingerprint, sourceFingerprint) {
@@ -108,26 +95,24 @@ async function forkTrackingAdvisory(descriptor, {
   }
   try {
     let validated;
-    if (descriptor.source.kind === "repository" || descriptor.source.kind === "local") {
-      try {
-        const trackingInventory = await excludeCurrentCustomization(
-          activeSkills,
-          customizationRoot,
-        );
-        validated = await validateBinding({
-          descriptor,
-          binding,
-          roots,
-          managerRecords,
-          activeSkills: trackingInventory,
-        });
-      } catch (error) {
-        return {
-          code: "tracking-binding-invalid",
-          message: "The optional fork tracking binding is invalid; fork execution is unaffected.",
-          detail: error.message,
-        };
-      }
+    try {
+      const trackingInventory = await excludeSkillRootFromInventory(
+        activeSkills,
+        customizationRoot,
+      );
+      validated = await validateBinding({
+        descriptor,
+        binding,
+        roots,
+        managerRecords,
+        activeSkills: trackingInventory,
+      });
+    } catch (error) {
+      return {
+        code: "tracking-binding-invalid",
+        message: "The optional fork tracking binding is invalid; fork execution is unaffected.",
+        detail: error.message,
+      };
     }
     const target = await realpath(lookup);
     const info = await lstat(target);
@@ -243,7 +228,7 @@ async function visit({
   let bindingInventory;
   try {
     bindingInventory = descriptor.activation.mode === "replace"
-      ? await excludeCurrentCustomization(activeSkills, root)
+      ? await excludeSkillRootFromInventory(activeSkills, root)
       : activeSkills;
   } catch (error) {
     return maintenance(descriptor, root, "binding-maintenance", error.message);

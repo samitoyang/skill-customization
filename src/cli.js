@@ -17,6 +17,7 @@ import {
   confirmDiscoverySelection,
   configuredHostSkillRoots,
   discoverSkills,
+  excludeSkillRootFromInventory,
 } from "./discovery.js";
 import { DiscoveryError } from "./errors.js";
 import { fingerprintPath, payloadFingerprint } from "./fingerprint.js";
@@ -224,6 +225,15 @@ async function discoverInventory(context) {
   return { discovery, activeSkills: activeSkillInventory(discovery) };
 }
 
+async function discoverBindingInventory(context, descriptorPath, descriptor) {
+  const { activeSkills } = await discoverInventory(context);
+  if (descriptor.activation.mode !== "replace") return activeSkills;
+  return excludeSkillRootFromInventory(
+    activeSkills,
+    path.dirname(path.resolve(descriptorPath)),
+  );
+}
+
 async function selectionFromPrompt({
   discovery,
   group,
@@ -354,11 +364,18 @@ async function commandDiscover(input, options, io) {
 }
 
 async function commandBind(descriptorPath, options, io) {
-  const descriptor = await readDescriptor(requireValue(descriptorPath, "descriptor path is required"));
+  const resolvedDescriptorPath = path.resolve(
+    requireValue(descriptorPath, "descriptor path is required"),
+  );
+  const descriptor = await readDescriptor(resolvedDescriptorPath);
   const sourcePath = requireValue(options.source, "--source is required");
   const bindingContext = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const { activeSkills } = await discoverInventory(context);
+  const activeSkills = await discoverBindingInventory(
+    context,
+    resolvedDescriptorPath,
+    descriptor,
+  );
   let confirmedSelection;
   if (io.stdin.isTTY) {
     const sourceDiscovery = await discoverSkills({
@@ -422,9 +439,16 @@ async function commandBind(descriptorPath, options, io) {
 }
 
 async function commandResolve(descriptorPath, options, io) {
-  const descriptor = await readDescriptor(requireValue(descriptorPath, "descriptor path is required"));
+  const resolvedDescriptorPath = path.resolve(
+    requireValue(descriptorPath, "descriptor path is required"),
+  );
+  const descriptor = await readDescriptor(resolvedDescriptorPath);
   const context = await discoveryContext(options);
-  const { activeSkills } = await discoverInventory(context);
+  const activeSkills = await discoverBindingInventory(
+    context,
+    resolvedDescriptorPath,
+    descriptor,
+  );
   outputJson(
     io,
     await resolveBinding({
@@ -453,7 +477,11 @@ async function commandReconcile(descriptorPath, options, io) {
   let sourceExecutionPlan;
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
-    const { activeSkills } = await discoverInventory(context);
+    const activeSkills = await discoverBindingInventory(
+      context,
+      resolvedDescriptorPath,
+      descriptor,
+    );
     const bindingContext = requireValue(
       options.context,
       "--context is required for semantic overlay reconciliation",

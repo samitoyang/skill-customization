@@ -871,3 +871,23 @@ export function activeSkillInventory(discovery) {
   }
   return [...skills.values()];
 }
+
+export async function excludeSkillRootFromInventory(activeSkills, skillRoot) {
+  if (!Array.isArray(activeSkills)) return activeSkills;
+  let excludedRoot;
+  try {
+    excludedRoot = await realpath(skillRoot);
+  } catch {
+    excludedRoot = path.resolve(skillRoot);
+  }
+  const included = await Promise.all(activeSkills.map(async (skill) => {
+    const candidate = skill.realPath ?? skill.path;
+    if (typeof candidate !== "string") return skill;
+    try {
+      return await realpath(candidate) === excludedRoot ? null : skill;
+    } catch {
+      return path.resolve(candidate) === excludedRoot ? null : skill;
+    }
+  }));
+  return included.filter(Boolean);
+}
