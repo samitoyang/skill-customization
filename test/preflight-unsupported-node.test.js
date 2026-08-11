@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
-import { payloadFingerprint } from "../src/fingerprint.js";
+import { fingerprintPath, payloadFingerprint } from "../src/fingerprint.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,6 +20,20 @@ test("owned payload rejects unsupported filesystem nodes", {
   await assert.rejects(
     payloadFingerprint(root),
     (error) => error.code === "OWNED_PAYLOAD_UNSUPPORTED_NODE"
+      && /runtime-input/.test(error.message),
+  );
+});
+
+test("source fingerprints reject unsupported filesystem nodes", {
+  skip: process.platform === "win32" ? "FIFO fixtures require POSIX" : false,
+}, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "source-unsupported-node-"));
+  await writeFile(path.join(root, "SKILL.md"), "source workflow\n");
+  await execFileAsync("mkfifo", [path.join(root, "runtime-input")]);
+
+  await assert.rejects(
+    fingerprintPath(root),
+    (error) => error.code === "FINGERPRINT_UNSUPPORTED_NODE"
       && /runtime-input/.test(error.message),
   );
 });

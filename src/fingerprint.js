@@ -27,6 +27,14 @@ function symbolicLinkError(relative) {
   return error;
 }
 
+function unsupportedFingerprintNodeError(relative) {
+  const error = new TypeError(
+    `directory fingerprint contains an unsupported filesystem node: ${relative}`,
+  );
+  error.code = "FINGERPRINT_UNSUPPORTED_NODE";
+  return error;
+}
+
 function unsupportedOwnedPayloadNodeError(relative) {
   const error = new TypeError(
     `owned payload contains an unsupported filesystem node: ${relative}`,
@@ -72,6 +80,8 @@ async function listTree(root, current = root) {
       throw symbolicLinkError(relative);
     } else if (entry.isFile()) {
       result.push({ type: "file", relative, bytes: await readFile(absolute) });
+    } else {
+      throw unsupportedFingerprintNodeError(relative);
     }
   }
   return result;
