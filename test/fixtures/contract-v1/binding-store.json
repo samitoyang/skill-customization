@@ -16,7 +16,7 @@
         "kind": "repository",
         "repository": "https://github.com/example/skills",
         "upstreamPath": "skills/review/SKILL.md",
-        "fingerprint": "sha256:b4943bc08230564d6d54ade4976dacb10e961b43051099496cc8a89a7eeff953",
+        "fingerprint": "sha256:9bd09cbecea4d76855433d03563ab91e1578028bfd84dbcd904d7806a129a81c",
         "provenance": [],
         "confirmation": "user-confirmed"
       },

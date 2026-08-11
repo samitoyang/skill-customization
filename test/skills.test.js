@@ -12,9 +12,17 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.match(markdown, new RegExp(`^---\\nname: ${skillName}\\n`));
     assert.match(markdown, /license: MIT/);
     assert.match(markdown, /compatibility: Requires Node\.js 18\+/);
+    assert.match(markdown, /npm only for the on-demand fallback/);
+    assert.doesNotMatch(markdown, /Node\.js 18\+, npm access/);
     assert.match(markdown, /helper contract 1/);
+    assert.match(markdown, /thin dispatchers/);
+    assert.match(markdown, /skill-customization preflight/);
+    assert.match(markdown, /ready-with-advisory/);
+    assert.match(markdown, /accept-maintenance/);
+    assert.match(markdown, /never runs unchecked/);
     assert.match(markdown, /description: Create or maintain/);
-    assert.match(markdown, /natural-language or explicit/);
+    assert.match(markdown, /natural-language (?:overlay|fork) requests/);
+    assert.doesNotMatch(markdown, /natural-language or explicit/);
     assert.match(markdown, /existing/);
     assert.match(markdown, /ambiguous/);
     assert.doesNotMatch(markdown, /disable-(?:model|user)-invocation/);
@@ -26,7 +34,13 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
       markdown,
       /Treat the source as read-only and write only inside the (?:customization|fork) or local state paths\./,
     );
+    assert.match(markdown, /preflight reruns `ready` or `ready-with-advisory`/);
     const evals = JSON.parse(await read(`skills/${skillName}/evals/evals.json`));
+    const intake = await read(`skills/${skillName}/references/intake.md`);
+    assert.match(
+      intake,
+      /Default a new workspace customization to `\.agents\/skills\/<name>\/`/,
+    );
     assert.equal(evals.skill_name, skillName);
     assert.equal(new Set(evals.evals.map(({ id }) => id)).size, evals.evals.length);
     for (const item of evals.evals) {
@@ -81,32 +95,129 @@ test("skill helper policy covers installed, npx, declined, incompatible, and mis
     assert.match(markdown, /obtain permission\. After approval, run/);
     assert.match(markdown, /skill-customization@<package_version> <command>/);
     assert.match(markdown, /permission is declined/);
-    assert.match(markdown, /Node\/npm is missing/);
+    assert.match(markdown, /Node\.js is missing/);
+    assert.match(markdown, /fallback requires npm/);
     assert.match(markdown, /contract 1 is unsupported/);
     assert.doesNotMatch(markdown, /skill-customization@0\.1\.0/);
   }
 });
 
+test("fork maintenance guidance preserves reviewed materialization and advisory tracking", async () => {
+  const markdown = await read("skills/skill-fork/SKILL.md");
+  const intake = await read("skills/skill-fork/references/intake.md");
+  assert.match(
+    markdown,
+    /both `--reviewed-at` and `--evidence` when either materialization fingerprint changes/,
+  );
+  for (const document of [markdown, intake]) {
+    assert.match(document, /unreadable or invalid optional tracking state/);
+    assert.match(document, /snapshot directory/);
+  }
+  assert.doesNotMatch(intake, /proposed delta/);
+  const evals = JSON.parse(await read("skills/skill-fork/evals/evals.json"));
+  assert.equal(evals.evals.find(({ id }) => id === 6)?.prompt.startsWith("Run "), true);
+  assert.match(
+    evals.evals.find(({ id }) => id === 14)?.expected_output ?? "",
+    /without overlay-chain materialization/,
+  );
+});
+
+test("contract fixture dispatcher negotiates the helper and stops safely", async () => {
+  const dispatcher = await read(
+    "test/fixtures/contract-v1/review-local-archive/SKILL.md",
+  );
+  assert.match(dispatcher, /description: Review work and archive the result locally\./);
+  assert.doesNotMatch(dispatcher, /description:.*preflight/);
+  assert.match(dispatcher, /skill-customization supports 1/);
+  assert.match(dispatcher, /unavailable, incompatible, or malformed/);
+  assert.match(dispatcher, /delegate to `skill-overlay` and do not execute/);
+  assert.match(dispatcher, /`ready` or `ready-with-advisory`/);
+  assert.match(dispatcher, /delegate `maintenance-required` to its maintenance handler/);
+});
+
+test("public maintenance references describe explicit fingerprint updates", async () => {
+  const [cli, library, contract, descriptor] = await Promise.all([
+    read("docs/cli.md"),
+    read("docs/library.md"),
+    read("docs/helper-contract-1.md"),
+    read("docs/descriptor-v1.md"),
+  ]);
+  for (const document of [cli, library, contract]) {
+    assert.match(document, /source effective fingerprint only when explicitly supplied/i);
+  }
+  for (const document of [cli, library]) {
+    assert.match(
+      document,
+      /both (?:`--reviewed-at` and `--evidence`|`reviewedAt` and `evidence`) are required when either materialization fingerprint changes/i,
+    );
+  }
+  assert.match(descriptor, /snapshot directory/);
+  assert.match(descriptor, /runtime selectors must name files inside that reviewed payload/i);
+  assert.doesNotMatch(descriptor, /full-source snapshot (?:file|may be a file)/i);
+  assert.match(contract, /both fresh review time and evidence/i);
+  assert.match(contract, /local identities derived from `SKILL\.md` bytes/i);
+  for (const document of [cli, library, contract, descriptor]) {
+    assert.match(document, /symlink/i);
+  }
+  assert.match(cli, /maintenance lock is canonically contained/i);
+  assert.match(contract, /canonically contain its lock/i);
+});
+
 test("README combines public workflow design with contract-compatible helper behavior", async () => {
   const markdown = await read("README.md");
   assert.match(markdown, /^# 🛠️ Skill Customization/);
-  assert.match(markdown, /provides a rock-solid, production-grade layer/);
+  const introduction = markdown.split("\n\n")[1];
+  assert.match(introduction, /^Skill Customization provides/);
+  assert.match(introduction, /keeping custom workflows aligned with improvements from their original sources/);
+  assert.match(introduction, /tracks where each skill came from/);
+  assert.match(introduction, /prevents future updates from silently overwriting or breaking customized behavior/);
+  assert.doesNotMatch(introduction, /(?:provenance|overlay|fork|:)/i);
+  assert.doesNotMatch(markdown, /\b(?:you|your)\b/i);
   assert.match(markdown, /## ⚠️ Core Problems/);
   assert.match(markdown, /Update-managed source skills can overwrite direct tweaks/);
   assert.match(markdown, /read-only sources cannot be edited in place/);
+  assert.match(markdown, /portable descriptor state the expected source identity and fingerprint/);
+  assert.match(markdown, /bindings\.json\s+# Confirmed path for this context/);
+  assert.match(markdown, /customization\.json\s+# Descriptor: portable identity \+ review/);
+  assert.match(markdown, /customization\.json\s+# Descriptor: portable identity \+ provenance/);
+  assert.match(markdown, /customization\.json\s+# Descriptor: portable source requirements/);
+  assert.match(markdown, /CUSTOMIZATION\.md\s+# Complete independent workflow/);
+  assert.match(markdown, /source snapshot directory/);
+  assert.match(markdown, /symlink-free fingerprinted target tree/);
+  assert.match(markdown, /maintenance locks are canonically contained/);
+  assert.match(markdown, /runtime selectors stay inside the reviewed owned payload/);
   assert.match(markdown, /## 🎛️ Customization Models/);
-  assert.match(markdown, /\| Model \| Desired outcome \| Architectural behavior \|/);
+  assert.match(markdown, /Customization models describe the runtime relationship between a skill and its source/);
+  assert.match(markdown, /\| Model \| Source relationship \| Runtime behavior \|/);
+  assert.match(markdown, /verified overlay, or verified fork/);
+  assert.match(markdown, /no live runtime source required/);
   assert.match(markdown, /\| Mode \| Naming \| Behavior \|/);
   assert.match(markdown, /npx skills@latest add samitoyang\/skill-customization\n/);
   assert.match(markdown, /--skill skill-overlay/);
   assert.match(markdown, /--skill skill-fork/);
   assert.doesNotMatch(markdown, /npx skills@[^\n]*--global/);
+  assert.match(markdown, /npm install --global skill-customization@latest/);
+  assert.match(markdown, /Optionally pre-install the helper/);
+  assert.doesNotMatch(markdown, /skill-customization supports 1/);
+  assert.match(markdown, /Compatibility is checked before use/);
   assert.doesNotMatch(markdown, /Reported pain points and evidence/);
   assert.doesNotMatch(markdown, /github\.com\/(?:anthropics\/skills\/discussions|vercel-labs\/skills\/issues)/);
+  assert.match(markdown, /## 🌐 Ecosystem Compatibility/);
+  assert.match(markdown, /### Hosts and roots/);
+  assert.match(markdown, /### Skill managers/);
+  assert.ok(markdown.indexOf("## 📥 Installation") < markdown.indexOf("## 🌐 Ecosystem Compatibility"));
+  assert.ok(markdown.indexOf("## 🌐 Ecosystem Compatibility") < markdown.indexOf("## 💬 Usage"));
+  assert.match(markdown, /```text\n\/skill-overlay\n\/skill-fork\n```/);
   assert.match(markdown, /\/skill-overlay customize/);
   assert.match(markdown, /\/skill-fork make/);
   assert.doesNotMatch(markdown, /\$skill-(?:overlay|fork)/);
-  assert.match(markdown, /Both skills retain model discovery and explicit user invocation/);
+  assert.match(markdown, /Explicit invocation and automatic model selection enter the same creation process/);
+  assert.ok(markdown.indexOf("### Explicit Skill Invocations") < markdown.indexOf("### Natural Language Prompts"));
+  assert.match(markdown, /### After Creation/);
+  assert.match(markdown, /\*\*Destination:\*\* New workspace customizations use `\.agents\/skills\/<name>\/` by default/);
+  assert.match(markdown, /a compatible host-specific project root or personal skill root may be selected instead/);
+  assert.match(markdown, /\*\*Relocation:\*\* Move the entire customization directory/);
+  assert.match(markdown, /different workspace, an overlay requires source confirmation before running; a fork continues independently/);
   for (const managerLink of [
     "[skills](https://github.com/vercel-labs/skills)",
     "[asm](https://github.com/luongnv89/asm)",
@@ -129,15 +240,42 @@ test("README combines public workflow design with contract-compatible helper beh
     assert.ok(markdown.includes(host));
   }
   assert.match(markdown, /does not imply that every host loads or executes skills identically/);
-  assert.match(markdown, /## 🧭 Customization Workflow/);
+  assert.match(markdown, /## 📋 Creation Workflow/);
+  assert.match(markdown, /## 🧭 Runtime Workflow/);
+  assert.ok(markdown.indexOf("## 📋 Creation Workflow") < markdown.indexOf("## 🧭 Runtime Workflow"));
   assert.match(markdown, /```mermaid/);
-  assert.match(markdown, /model-facing workflows/);
-  assert.match(markdown, /deterministic engine/);
+  assert.ok(markdown.indexOf("```mermaid") < markdown.indexOf("| Graph component | Artifact | Responsibility |"));
+  assert.match(markdown, /subgraph P\["Preflight"\]/);
+  assert.match(markdown, /Dispatcher file<br\/>\(SKILL\.md\)/);
+  assert.match(markdown, /Preflight helper<br\/>\(skill-customization package\)/);
+  assert.match(markdown, /Descriptor file<br\/>\(customization\.json\)/);
+  assert.match(markdown, /source: ordinary skill \/ overlay \/ fork/);
+  assert.match(markdown, /B -->\|"reads"\| G/);
+  assert.match(markdown, /B -->\|"uses when required"\| H/);
+  assert.match(markdown, /Maintenance skills<br\/>\(skill-overlay \/ skill-fork\)/);
+  assert.match(markdown, /Runtime instructions<br\/>\(SKILL\.md \/ CUSTOMIZATION\.md\)/);
+  for (const component of [
+    "Dispatcher file",
+    "Descriptor file",
+    "Local binding state",
+    "Preflight helper",
+    "Runtime instructions",
+    "Maintenance skills",
+  ]) {
+    assert.match(markdown, new RegExp(`\\| ${component} \\|`));
+  }
+  assert.match(markdown, /Source `SKILL\.md` and customization `CUSTOMIZATION\.md` files/);
+  assert.match(markdown, /Stores portable identity, source requirements, and reviewed fingerprints/);
+  assert.match(markdown, /Run the base or fork workflow followed by overlay deltas/);
+  assert.match(markdown, /ready-with-advisory/);
+  assert.match(markdown, /maintenance-required/);
+  assert.match(markdown, /without invoking a maintenance skill/);
+  assert.doesNotMatch(markdown, /One maintenance handler/);
+  assert.doesNotMatch(markdown, /### Managed preflight/);
+  assert.doesNotMatch(markdown, /\[preflight contract\]/);
   assert.match(markdown, /skill name, repository, or path/i);
-  assert.match(markdown, /### 📋 Intake and Confirmed Brief/);
-  assert.match(markdown, /Helper-assisted discovery may be used during intake/);
-  assert.match(markdown, /before the first binding/);
-  assert.match(markdown, /same-name replacement requires separate confirmation/);
+  assert.match(markdown, /Helper-assisted discovery inventories available evidence/);
+  assert.match(markdown, /Same-name replacement requires separate confirmation/);
   for (const briefInput of [
     "Skill name, repository, or path",
     "Behavior and completion criteria",
@@ -145,18 +283,17 @@ test("README combines public workflow design with contract-compatible helper beh
     "Name and activation",
     "Workspace context",
     "License and provenance",
-    "Helper permission",
+    "Helper access",
   ]) {
     assert.ok(markdown.includes(briefInput), `README should cover ${briefInput}`);
   }
+  assert.match(markdown, /Before artifacts are written or a binding is created/);
   assert.match(markdown, /one brief confirms the complete customization boundary/);
   assert.doesNotMatch(markdown, /## 🔌 Helper Compatibility/);
-  assert.doesNotMatch(markdown, /skill-customization supports 1/);
   assert.match(markdown, /\[Helper contract 1\]\(docs\/helper-contract-1\.md\)/);
   assert.equal(markdown.match(/Helper contract 1/g)?.length, 1);
   assert.match(markdown, /\| Boundary \| Guarantee \|/);
-  assert.match(markdown, /## 🤝 Contributing & License/);
-  assert.match(markdown, /Skill Customization is available under the \[MIT License\]\(LICENSE\)/);
+  assert.doesNotMatch(markdown, /## 🤝 Contributing and License/);
 });
 
 test("public documentation pointers resolve", async () => {
@@ -170,6 +307,7 @@ test("public documentation pointers resolve", async () => {
     "docs/discovery-and-bindings.md",
     "docs/library.md",
     "docs/reconciliation.md",
+    "docs/adr/0001-managed-recursive-runtime.md",
   ];
   for (const document of documents) {
     const markdown = await read(document);
@@ -191,6 +329,7 @@ test("the package uses a public-document allowlist and verifies its Node 18 floo
     "docs/discovery-and-bindings.md",
     "docs/library.md",
     "docs/reconciliation.md",
+    "docs/adr/0001-managed-recursive-runtime.md",
   ]);
   assert.ok(publicDocs.every((file) => !file.includes("*")));
   assert.equal(packageJson.engines.node, ">=18");

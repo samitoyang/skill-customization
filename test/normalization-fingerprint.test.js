@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -71,6 +71,33 @@ test("fingerprints exact file bytes and directory trees deterministically", asyn
   const first = await fingerprintPath(root);
   const second = await fingerprintPath(root);
   assert.equal(first, second);
+  await mkdir(path.join(root, ".git", "refs"), { recursive: true });
+  await writeFile(path.join(root, ".git", "HEAD"), "ref: refs/heads/main\n");
+  await writeFile(path.join(root, ".git", "index"), "clone-local index\n");
+  await mkdir(path.join(root, "nested", ".Hg", "store"), { recursive: true });
+  await writeFile(path.join(root, "nested", ".Hg", "store", "fncache"), "local\n");
+  await mkdir(path.join(root, "nested", ".SVN"), { recursive: true });
+  await writeFile(path.join(root, "nested", ".SVN", "wc.db"), "local\n");
+  assert.equal(await fingerprintPath(root), first);
+  await writeFile(path.join(root, ".git", "HEAD"), "ref: refs/heads/other\n");
+  assert.equal(await fingerprintPath(root), first);
   await writeFile(path.join(root, "b.txt"), "changed\n");
   assert.notEqual(await fingerprintPath(root), first);
+});
+
+test("directory fingerprints follow a root alias but reject internal symlinks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "fingerprint-symlink-"));
+  const external = await mkdtemp(path.join(os.tmpdir(), "fingerprint-external-"));
+  const alias = `${root}-alias`;
+  await writeFile(path.join(root, "SKILL.md"), "workflow\n");
+  await writeFile(path.join(external, "shared.md"), "shared workflow\n");
+  await symlink(root, alias, "dir");
+
+  assert.equal(await fingerprintPath(alias), await fingerprintPath(root));
+
+  await symlink(
+    path.join(external, "shared.md"),
+    path.join(root, "HELPER.md"),
+  );
+  await assert.rejects(fingerprintPath(root), /symbolic link.*HELPER\.md/i);
 });

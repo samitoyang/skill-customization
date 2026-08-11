@@ -36,6 +36,7 @@
     "docs/discovery-and-bindings.md",
     "docs/library.md",
     "docs/reconciliation.md",
+    "docs/adr/0001-managed-recursive-runtime.md",
     "customization.schema.json",
     "CHANGELOG.md",
     "README.md",

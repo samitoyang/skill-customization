@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, readdir, readlink } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
+
+import {
+  isOwnedPayloadExcludedPath,
+  isSourceFingerprintExcludedPath,
+} from "./owned-payload.js";
 
 function digest(hash) {
   return `sha256:${hash.digest("hex")}`;
@@ -12,6 +17,37 @@ function frame(hash, value) {
   hash.update(":");
   hash.update(bytes);
   hash.update(";");
+}
+
+function symbolicLinkError(relative) {
+  const error = new TypeError(
+    `directory fingerprint contains a symbolic link: ${relative}`,
+  );
+  error.code = "FINGERPRINT_SYMLINK";
+  return error;
+}
+
+function unsupportedFingerprintNodeError(relative) {
+  const error = new TypeError(
+    `directory fingerprint contains an unsupported filesystem node: ${relative}`,
+  );
+  error.code = "FINGERPRINT_UNSUPPORTED_NODE";
+  return error;
+}
+
+function unsupportedOwnedPayloadNodeError(relative) {
+  const error = new TypeError(
+    `owned payload contains an unsupported filesystem node: ${relative}`,
+  );
+  error.code = "OWNED_PAYLOAD_UNSUPPORTED_NODE";
+  return error;
+}
+
+export function fingerprintValues(values, domain = "skill-customization-values-v1") {
+  const hash = createHash("sha256");
+  frame(hash, domain);
+  for (const value of values) frame(hash, value);
+  return digest(hash);
 }
 
 export async function fingerprintFile(filePath) {
@@ -36,26 +72,64 @@ async function listTree(root, current = root) {
   for (const entry of entries) {
     const absolute = path.join(current, entry.name);
     const relative = path.relative(root, absolute).split(path.sep).join("/");
+    if (isSourceFingerprintExcludedPath(relative)) continue;
     if (entry.isDirectory()) {
       result.push({ type: "directory", relative });
       result.push(...(await listTree(root, absolute)));
     } else if (entry.isSymbolicLink()) {
-      result.push({ type: "symlink", relative, target: await readlink(absolute) });
+      throw symbolicLinkError(relative);
     } else if (entry.isFile()) {
       result.push({ type: "file", relative, bytes: await readFile(absolute) });
+    } else {
+      throw unsupportedFingerprintNodeError(relative);
     }
   }
   return result;
+}
+
+async function listOwnedPayload(root, current = root) {
+  const entries = await readdir(current, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
+  const result = [];
+  for (const entry of entries) {
+    const absolute = path.join(current, entry.name);
+    const relative = path.relative(root, absolute).split(path.sep).join("/");
+    if (isOwnedPayloadExcludedPath(relative)) continue;
+    if (entry.isSymbolicLink()) {
+      const error = new TypeError(`owned payload contains a symbolic link: ${relative}`);
+      error.code = "OWNED_PAYLOAD_SYMLINK";
+      throw error;
+    }
+    if (entry.isDirectory()) {
+      result.push(...(await listOwnedPayload(root, absolute)));
+    } else if (entry.isFile()) {
+      result.push({ relative, bytes: await readFile(absolute) });
+    } else {
+      throw unsupportedOwnedPayloadNodeError(relative);
+    }
+  }
+  return result;
+}
+
+export async function payloadFingerprint(directory) {
+  const info = await lstat(directory);
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new TypeError("owned payload root must be a real directory");
+  }
+  const hash = createHash("sha256");
+  frame(hash, "skill-customization-owned-payload-v1");
+  for (const entry of await listOwnedPayload(directory)) {
+    frame(hash, entry.relative);
+    frame(hash, entry.bytes);
+  }
+  return digest(hash);
 }
 
 export async function fingerprintPath(targetPath) {
   const info = await lstat(targetPath);
   if (info.isFile()) return fingerprintFile(targetPath);
   if (info.isSymbolicLink()) {
-    const hash = createHash("sha256");
-    frame(hash, "symlink");
-    frame(hash, await readlink(targetPath));
-    return digest(hash);
+    return fingerprintPath(await realpath(targetPath));
   }
   if (!info.isDirectory()) throw new TypeError("only files, directories, and symlinks can be fingerprinted");
   const hash = createHash("sha256");
@@ -64,7 +138,6 @@ export async function fingerprintPath(targetPath) {
     frame(hash, entry.type);
     frame(hash, entry.relative);
     if (entry.bytes) frame(hash, entry.bytes);
-    if (entry.target) frame(hash, entry.target);
   }
   return digest(hash);
 }

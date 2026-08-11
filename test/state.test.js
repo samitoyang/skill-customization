@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, mkdtemp, readFile, unlink } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  unlink,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -13,6 +20,25 @@ const run = promisify(execFile);
 const stateModule = pathToFileURL(
   new URL("../src/state.js", import.meta.url).pathname,
 ).href;
+
+test("a completed atomic write survives immediate process exit", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "state-durable-write-"));
+  const filePath = path.join(root, "nested", "deeper", "state.json");
+  const program = `
+    import { writeFileAtomic } from ${JSON.stringify(stateModule)};
+    await writeFileAtomic(process.env.STATE_PATH, "durable state\\n", { mode: 0o640 });
+    process.exit(0);
+  `;
+
+  await run(process.execPath, ["--input-type=module", "--eval", program], {
+    env: { ...process.env, STATE_PATH: filePath },
+  });
+
+  assert.equal(await readFile(filePath, "utf8"), "durable state\n");
+  assert.equal((await stat(filePath)).mode & 0o777, 0o640);
+  assert.deepEqual(await readdir(path.dirname(filePath)), ["state.json"]);
+  assert.deepEqual(await readdir(root), ["nested"]);
+});
 
 test("atomic updates preserve keys written by concurrent Node processes", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "state-process-lock-"));

@@ -1,36 +1,20 @@
 # CLI reference
 
-Use the CLI for contract selection, descriptor validation, fingerprints, discovery, bindings, and reconciliation. Run `skill-customization --help` for the authoritative command and option list.
+Run `skill-customization --help` for the authoritative command and option list.
 
-## Select the helper
+For helper selection, run `skill-customization supports 1`. Accept only exit `0` and JSON with `compatible: true`, requested contract `1`, supported contracts containing `1`, and a non-empty package version. If the installed command is unavailable or incompatible, explain that an `npx` fallback may download code or reuse npm cache and obtain permission before running it.
 
-Contract 1 is the compatibility boundary used by the published skills.
+Runtime dispatch uses:
 
-1. Confirm Node.js 18+ and npm are available.
-2. Run `skill-customization supports 1`.
-3. Accept the installed command only when it exits `0` and emits JSON with `compatible: true`, `requested_contract: "1"`, `supported_contracts` containing `"1"`, and a non-empty `package_version`. Record that exact version for the run.
-4. If the installed command is missing or incompatible, explain that npm may download `skill-customization@latest` or reuse its cache and ask permission. After approval, run `npx --yes skill-customization@latest supports 1`.
-5. When the on-demand check succeeds, run later commands as `npx --yes skill-customization@<package_version> <command>`.
-
-Run the on-demand check only after a new customization brief is confirmed. If Node/npm is missing, permission is declined, output is malformed, or contract 1 is unsupported, stop with the failed prerequisite and one setup or update action. A global latest install is optional for frequent use.
-
-## `supports` output
-
-`skill-customization supports <contract>` always writes a JSON check result for supported, unsupported, malformed, missing, and extra-argument contract requests:
-
-```json
-{
-  "compatible": true,
-  "requested_contract": "1",
-  "supported_contracts": ["1"],
-  "package_version": "0.1.0"
-}
+```sh
+skill-customization payload-fingerprint <directory>
+skill-customization preflight <customization.json> --context <context>
 ```
 
-The shown package version is an example, not a compatibility pin. Supported checks exit `0`. Unsupported or invalid checks exit `1` and write the reason to standard error while keeping the JSON result on standard output.
+Preflight outputs `effectiveFingerprint`, ordered `steps` (`role`, concrete `path`, `root`, `customizationId`), `advisories`, and one `maintenanceHandler` or `null`. `ready` and `ready-with-advisory` exit `0`; `maintenance-required` exits `2` with no executable steps; malformed descriptors/metadata and operational failures exit `1`.
 
-## Runtime behavior
+Full-directory fingerprints follow a top-level source alias to its canonical target, exclude clone-local `.git`, `.hg`, and `.svn` metadata at any depth, and reject symlinks inside the remaining target tree. Validation requires real, canonical runtime files and rejects symlinks, empty or dot segments, line separators, trailing dots/spaces, alternate-data-stream separators, and any filesystem alias whose resolved target is reserved `customization.json`, `provenance/`, or version-control metadata.
 
-Structured command results are written to standard output and diagnostics to standard error. Success exits `0`, invalid input or an operational error exits `1`, and a safe reconciliation stop exits `2`.
+Maintenance remains explicit. `reconcile` targets one semantic or provenance decision and preflights a customization source to obtain its checked effective fingerprint and ordered execution plan. After acceptance, `accept-maintenance` refreshes the owned-payload fingerprint, the source effective fingerprint only when explicitly supplied, and fork snapshot/diff fingerprints. `--diff-file` durably publishes an accepted fork diff under an immutable content-addressed path; one atomic, durable descriptor replacement then commits the matching path and review state while preserving the existing descriptor and prior diff modes. `--reviewed-at` and `--evidence` must be supplied together and are valid only for a fork with an overlay-chain materialization; both `--reviewed-at` and `--evidence` are required when either materialization fingerprint changes. The maintenance lock is canonically contained in owned `provenance/`, and local state remains private. Always rerun preflight before activation.
 
-Discovery searches declared roots and bounded workspace ancestors. An unresolved source result ends with an explicit custom-path choice. The first binding is interactive, and overlay reconciliation resolves that confirmed binding rather than accepting a source override. [Helper contract 1](helper-contract-1.md) names the complete stable skill-facing surface.
+Discovery is bounded and evidence-based. Concrete source paths are written only by `bind`; direct source overrides cannot bypass an overlay binding. Fork bindings are optional tracking state and never runtime requirements.

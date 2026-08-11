@@ -10,8 +10,9 @@ import {
 import os from "node:os";
 import path from "node:path";
 
+import { validateDescriptor } from "./descriptor.js";
 import { DiscoveryError } from "./errors.js";
-import { fingerprintFile } from "./fingerprint.js";
+import { fingerprintPath } from "./fingerprint.js";
 import {
   collectManagerRecords,
   managerSkillRoots,
@@ -312,7 +313,7 @@ async function scanRoot(rootInfo) {
   try {
     entries = await readdir(rootInfo.path, { withFileTypes: true });
   } catch {
-    return [];
+    return { candidates: [], failures: [] };
   }
   const directories = [];
   if (await exists(path.join(rootInfo.path, "SKILL.md"))) directories.push(rootInfo.path);
@@ -322,9 +323,18 @@ async function scanRoot(rootInfo) {
       if (await exists(path.join(directory, "SKILL.md"))) directories.push(directory);
     }
   }
-  return Promise.all(
+  const results = await Promise.allSettled(
     directories.map((directory) => candidateFromDirectory(directory, rootInfo)),
   );
+  return {
+    candidates: results
+      .filter(({ status }) => status === "fulfilled")
+      .map(({ value }) => value),
+    failures: results.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [{ directory: directories[index], error: result.reason }]
+        : []),
+  };
 }
 
 async function gitEvidence(directory) {
@@ -367,46 +377,92 @@ async function gitEvidence(directory) {
 }
 
 async function embeddedEvidence(directory) {
-  for (const filename of [".skill-source.json", "customization.json"]) {
-    const file = path.join(directory, filename);
-    try {
-      const metadata = JSON.parse(await readFile(file, "utf8"));
-      const source = metadata.source ?? metadata;
-      if (source.kind === "repository" && source.repository) {
-        const upstreamPath = normalizeUpstreamEntrypoint(
-          source.upstream_path ?? source.upstreamPath,
-        );
-        return {
-          kind: "embedded",
-          repository: normalizeRepositoryUrl(source.repository),
-          ...(upstreamPath
-            ? { upstream_path: upstreamPath, upstreamPath }
-            : {}),
-        };
-      }
-      if (source.kind === "local" && source.identity) {
-        return { kind: "embedded", identity: source.identity };
-      }
-    } catch {
-      // Missing or unrelated adjacent metadata is not evidence.
+  const file = path.join(directory, ".skill-source.json");
+  try {
+    const metadata = JSON.parse(await readFile(file, "utf8"));
+    const source = metadata.source ?? metadata;
+    if (source.kind === "repository" && source.repository) {
+      const upstreamPath = normalizeUpstreamEntrypoint(
+        source.upstream_path ?? source.upstreamPath,
+      );
+      return {
+        kind: "embedded",
+        repository: normalizeRepositoryUrl(source.repository),
+        ...(upstreamPath ? { upstream_path: upstreamPath, upstreamPath } : {}),
+      };
+    }
+    if (source.kind === "local" && source.identity) {
+      return { kind: "embedded", identity: source.identity };
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw new DiscoveryError(`malformed embedded source metadata ${file}: ${error.message}`, {
+        code: "MALFORMED_SOURCE_METADATA",
+      });
     }
   }
   return undefined;
 }
 
+async function adjacentCustomization(directory) {
+  const descriptorPath = path.join(directory, "customization.json");
+  let contents;
+  try {
+    contents = await readFile(descriptorPath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    throw new DiscoveryError(`cannot read adjacent customization metadata ${descriptorPath}: ${error.message}`, {
+      code: "MALFORMED_CUSTOMIZATION_METADATA",
+    });
+  }
+  let descriptor;
+  try {
+    descriptor = JSON.parse(contents);
+  } catch (error) {
+    throw new DiscoveryError(`malformed customization metadata ${descriptorPath}: ${error.message}`, {
+      code: "MALFORMED_CUSTOMIZATION_METADATA",
+    });
+  }
+  const errors = validateDescriptor(descriptor);
+  if (errors.length > 0 || descriptor.name !== path.basename(directory)) {
+    throw new DiscoveryError(`invalid customization metadata ${descriptorPath}`, {
+      code: "MALFORMED_CUSTOMIZATION_METADATA",
+      details: errors.length > 0
+        ? errors
+        : [{ path: "/name", message: "must match its directory name" }],
+    });
+  }
+  return descriptor;
+}
+
 async function candidateFromDirectory(directory, rootInfo) {
   const entrypoint = path.join(directory, "SKILL.md");
   const markdown = await readFile(entrypoint, "utf8");
+  const realDirectory = await realpath(directory).catch(() => path.resolve(directory));
+  const customization = await adjacentCustomization(realDirectory);
   return {
     name: parseSkillMetadata(markdown).name ?? path.basename(directory),
     path: path.resolve(directory),
-    realPath: await realpath(directory).catch(() => path.resolve(directory)),
+    realPath: realDirectory,
     entrypoint,
     owner: rootInfo.owner,
     owners: rootInfo.owners ?? [rootInfo.owner],
     scope: rootInfo.scope,
     origin: rootInfo.origin,
-    fingerprint: await fingerprintFile(entrypoint),
+    fingerprint: customization?.owned_payload.reviewed_fingerprint
+      ?? await fingerprintPath(directory),
+    classification: customization ? "customization" : "skill",
+    ...(customization
+      ? {
+          customization: {
+            id: customization.id,
+            type: customization.type,
+            license: customization.license,
+            reviewedPayloadFingerprint:
+              customization.owned_payload.reviewed_fingerprint,
+          },
+        }
+      : {}),
     evidence: [],
   };
 }
@@ -540,6 +596,10 @@ function groupCandidates(candidates) {
       evidence: copyEvidence,
       provenance: copyProvenance.identities,
       conflict: copyProvenance.conflict,
+      classification: candidate.classification,
+      ...(candidate.customization
+        ? { customization: structuredClone(candidate.customization) }
+        : {}),
     });
     group.evidence.push(...candidate.evidence);
     groups.set(key, group);
@@ -588,27 +648,71 @@ export async function discoverSkills({
     declaredRoots.push(root(explicitDirectory, "explicit", "custom", "custom-path"));
   }
   const normalizedRoots = await uniquePhysicalRoots(declaredRoots);
-  const candidates = (await Promise.all(normalizedRoots.map(scanRoot))).flat();
+  const scans = await Promise.all(normalizedRoots.map(scanRoot));
+  const candidates = scans.flatMap(({ candidates: rootCandidates }) =>
+    rootCandidates
+  );
+  const candidateFailures = scans.flatMap(({ failures }) => failures);
+  const explicitTarget = explicitDirectory
+    ? await realpath(explicitDirectory).catch(() => path.resolve(explicitDirectory))
+    : undefined;
   const deduped = new Map();
   for (const candidate of candidates) {
     const key = `${candidate.path}\0${candidate.owner}`;
     if (!deduped.has(key)) deduped.set(key, candidate);
   }
-  for (const candidate of deduped.values()) {
-    if (explicitDirectory && candidate.path === path.resolve(explicitDirectory)) {
-      candidate.evidence.push({ kind: "explicit", path: candidate.path });
+  const enrichmentCandidates = [...deduped.values()];
+  const enrichmentResults = await Promise.allSettled(
+    enrichmentCandidates.map(async (candidate) => {
+      if (
+        explicitDirectory
+        && path.resolve(candidate.realPath ?? candidate.path) === explicitTarget
+      ) {
+        candidate.evidence.push({
+          kind: "explicit",
+          path: path.resolve(explicitDirectory),
+        });
+      }
+      const git = await gitEvidence(candidate.path);
+      if (git) candidate.evidence.push(git);
+      candidate.evidence.push(...managerEvidenceFor(candidate, managerRecords));
+      const embedded = await embeddedEvidence(candidate.path);
+      if (embedded) candidate.evidence.push(embedded);
+      return candidate;
+    }),
+  );
+  const enrichedCandidates = [];
+  for (const [index, result] of enrichmentResults.entries()) {
+    if (result.status === "fulfilled") {
+      enrichedCandidates.push(result.value);
+    } else {
+      candidateFailures.push({
+        directory: enrichmentCandidates[index].path,
+        error: result.reason,
+      });
     }
-    const git = await gitEvidence(candidate.path);
-    if (git) candidate.evidence.push(git);
-    candidate.evidence.push(...managerEvidenceFor(candidate, managerRecords));
-    const embedded = await embeddedEvidence(candidate.path);
-    if (embedded) candidate.evidence.push(embedded);
   }
+  if (explicitDirectory) {
+    for (const failure of candidateFailures) {
+      const failureTarget = await realpath(failure.directory).catch(() =>
+        path.resolve(failure.directory)
+      );
+      if (failureTarget === explicitTarget) throw failure.error;
+    }
+  }
+  const candidateDiagnostics = candidateFailures.map(({ directory, error }) => ({
+    path: path.resolve(directory),
+    code: error?.code ?? "INVALID_DISCOVERY_CANDIDATE",
+    message: error?.message ?? String(error),
+  }));
 
-  let selected = [...deduped.values()];
+  let selected = enrichedCandidates;
   if (input) {
     if (explicitDirectory) {
-      selected = selected.filter(({ path: candidatePath }) => candidatePath === path.resolve(explicitDirectory));
+      selected = selected.filter(
+        (candidate) =>
+          path.resolve(candidate.realPath ?? candidate.path) === explicitTarget,
+      );
     } else if (repositoryInput) {
       const locator = normalizeRepositoryLocator(input);
       selected = selected.filter((candidate) =>
@@ -643,6 +747,7 @@ export async function discoverSkills({
       details: {
         input,
         metadataMatches,
+        candidateDiagnostics,
         action: "install, clone, create, or choose a custom path",
       },
     });
@@ -656,6 +761,7 @@ export async function discoverSkills({
     ],
     searchedRoots: normalizedRoots,
     managerDiagnostics,
+    candidateDiagnostics,
     unresolvedManagerRecords: managerRecords.filter(({ path: managerPath }) => !managerPath),
   };
 }
@@ -764,4 +870,24 @@ export function activeSkillInventory(discovery) {
     }
   }
   return [...skills.values()];
+}
+
+export async function excludeSkillRootFromInventory(activeSkills, skillRoot) {
+  if (!Array.isArray(activeSkills)) return activeSkills;
+  let excludedRoot;
+  try {
+    excludedRoot = await realpath(skillRoot);
+  } catch {
+    excludedRoot = path.resolve(skillRoot);
+  }
+  const included = await Promise.all(activeSkills.map(async (skill) => {
+    const candidate = skill.realPath ?? skill.path;
+    if (typeof candidate !== "string") return skill;
+    try {
+      return await realpath(candidate) === excludedRoot ? null : skill;
+    } catch {
+      return path.resolve(candidate) === excludedRoot ? null : skill;
+    }
+  }));
+  return included.filter(Boolean);
 }

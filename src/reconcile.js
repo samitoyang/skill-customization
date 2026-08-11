@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir, stat } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -6,10 +6,15 @@ import { assertValidDescriptor } from "./descriptor.js";
 import { ReconciliationError } from "./errors.js";
 import {
   fingerprintFile,
-  fingerprintFiles,
   fingerprintPath,
+  fingerprintValues,
+  payloadFingerprint,
 } from "./fingerprint.js";
 import { generateLocalIdentity } from "./normalization.js";
+import {
+  isSourceFingerprintExcludedPath,
+  isVersionControlMetadataPath,
+} from "./owned-payload.js";
 import { resolveOwnedPath } from "./paths.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
@@ -21,59 +26,71 @@ export function compatibilityCachePath({ env = process.env, home = os.homedir() 
     : path.join(home, ".agents", "skill-customization", "compatibility.json");
 }
 
-async function sourceEntrypoint(sourcePath) {
+async function sourceLocation(sourcePath) {
   if (!sourcePath) {
     throw new ReconciliationError("semantic overlays require a live source", {
       code: "LIVE_SOURCE_REQUIRED",
     });
   }
+  let resolved;
   let info;
   try {
-    info = await stat(sourcePath);
+    resolved = await realpath(sourcePath);
+    info = await lstat(resolved);
   } catch {
     throw new ReconciliationError(`live source is unavailable: ${sourcePath}`, {
       code: "LIVE_SOURCE_REQUIRED",
     });
   }
-  const entrypoint = info.isDirectory() ? path.join(sourcePath, "SKILL.md") : sourcePath;
+  const root = info.isDirectory() ? resolved : path.dirname(resolved);
+  const entrypoint = info.isDirectory() ? path.join(root, "SKILL.md") : resolved;
   try {
-    const entrypointInfo = await stat(entrypoint);
+    const entrypointInfo = await lstat(entrypoint);
+    if (entrypointInfo.isSymbolicLink()) throw new Error("symbolic link");
     if (!entrypointInfo.isFile()) throw new Error("not a regular file");
-  } catch {
-    throw new ReconciliationError(`live source entrypoint is unavailable: ${entrypoint}`, {
-      code: "LIVE_SOURCE_REQUIRED",
-    });
+  } catch (error) {
+    throw new ReconciliationError(
+      `live source entrypoint is unavailable: ${entrypoint}: ${error.message}`,
+      { code: "LIVE_SOURCE_REQUIRED" },
+    );
   }
-  return entrypoint;
+  return { entrypoint, root };
 }
 
-function sourceCheckpoint(descriptor, sourceFingerprint) {
+function sourceCheckpoint(
+  descriptor,
+  sourceFingerprint,
+  sourceIdentityFingerprint = sourceFingerprint,
+) {
   const sourceIdentity = generateLocalIdentity({
     skillName: descriptor.source.skill_name,
-    fingerprint: sourceFingerprint,
+    fingerprint: sourceIdentityFingerprint,
   });
-  const expected = descriptor.source.kind === "repository"
-    ? descriptor.source.review.fingerprint
-    : descriptor.source.identity;
-  const actual = descriptor.source.kind === "repository"
-    ? sourceFingerprint
-    : sourceIdentity;
+  const expected = descriptor.source.effective_fingerprint;
+  const actual = sourceFingerprint;
   return { expected, actual, sourceIdentity, match: actual === expected };
 }
 
-function baseResult(descriptor, sourceFingerprint, customizationFingerprint) {
-  const checkpoint = sourceCheckpoint(descriptor, sourceFingerprint);
+function baseResult(
+  descriptor,
+  sourceFingerprint,
+  customizationFingerprint,
+  sourceIdentityFingerprint,
+) {
+  const checkpoint = sourceCheckpoint(
+    descriptor,
+    sourceFingerprint,
+    sourceIdentityFingerprint,
+  );
   return {
     customization: descriptor.id,
     type: descriptor.type,
     sourceFingerprint,
     customizationFingerprint,
-    ...(descriptor.source.kind === "repository"
-      ? { checkpointFingerprint: checkpoint.expected }
-      : {
-          sourceIdentity: checkpoint.sourceIdentity,
-          checkpointIdentity: checkpoint.expected,
-        }),
+    checkpointFingerprint: checkpoint.expected,
+    ...(descriptor.source.kind === "local"
+      ? { sourceIdentity: checkpoint.sourceIdentity }
+      : {}),
     checkpointMatch: checkpoint.match,
     stopped: false,
     cached: false,
@@ -83,9 +100,8 @@ function baseResult(descriptor, sourceFingerprint, customizationFingerprint) {
 
 async function forkSnapshotEntrypoint(snapshot) {
   const info = await lstat(snapshot);
-  if (info.isFile()) return snapshot;
   if (!info.isDirectory()) {
-    throw new Error("fork snapshot must be a file or directory");
+    throw new Error("fork snapshot must be a directory");
   }
   const entrypoint = path.join(snapshot, "SKILL.md");
   const entrypointInfo = await lstat(entrypoint).catch(() => undefined);
@@ -215,7 +231,10 @@ function parseUnifiedDiff(contents) {
       }
       patch.hunks.push({ ...header, operations });
     }
-    if (patch.hunks.length === 0 || !hasChange) {
+    const headerOnlyStructuralChange =
+      patch.hunks.length === 0
+      && (patch.oldPath === null || patch.newPath === null);
+    if (!headerOnlyStructuralChange && (patch.hunks.length === 0 || !hasChange)) {
       throw new Error("fork diff file must contain a hunk with changed lines");
     }
     patches.push(patch);
@@ -290,7 +309,11 @@ function isExcludedPayloadPath(relativePath, excludedPaths) {
 
 async function mapDirectoryPayload(
   root,
-  { excludedPaths = [], label = "fork payload" } = {},
+  {
+    excludedPaths = [],
+    label = "fork payload",
+    excludeSourceMetadata = false,
+  } = {},
 ) {
   const payload = new Map();
   async function visit(directory) {
@@ -298,7 +321,13 @@ async function mapDirectoryPayload(
     for (const entry of entries) {
       const absolutePath = path.join(directory, entry.name);
       const relativePath = portableRelative(root, absolutePath);
-      if (isExcludedPayloadPath(relativePath, excludedPaths)) continue;
+      const metadataExcluded = excludeSourceMetadata
+        ? isSourceFingerprintExcludedPath(relativePath)
+        : isVersionControlMetadataPath(relativePath);
+      if (
+        metadataExcluded
+        || isExcludedPayloadPath(relativePath, excludedPaths)
+      ) continue;
       const info = await lstat(absolutePath);
       if (info.isSymbolicLink()) {
         throw new Error(`${label} contains symbolic link at ${relativePath}`);
@@ -314,16 +343,6 @@ async function mapDirectoryPayload(
   }
   await visit(root);
   return payload;
-}
-
-async function mapSnapshotPayload(snapshot, snapshotInfo, snapshotFilePath) {
-  if (snapshotInfo.isFile()) {
-    return new Map([[snapshotFilePath, await readFile(snapshot)]]);
-  }
-  if (!snapshotInfo.isDirectory()) {
-    throw new Error("fork snapshot must be a file or directory");
-  }
-  return mapDirectoryPayload(snapshot, { label: "fork snapshot" });
 }
 
 function assertPayloadPathShape(payload, candidatePath) {
@@ -362,6 +381,15 @@ function applyPatchesToPayload(payload, patches) {
         );
       }
       source = decodePatchSource(sourceBuffer, patch.oldPath);
+      if (
+        patch.newPath
+        && patch.newPath !== patch.oldPath
+        && reconstructed.has(patch.newPath)
+      ) {
+        throw new Error(
+          `fork diff rename destination already exists in snapshot: ${patch.newPath}`,
+        );
+      }
     } else if (reconstructed.has(patch.newPath)) {
       throw new Error(`fork diff new file already exists in snapshot: ${patch.newPath}`);
     }
@@ -399,16 +427,13 @@ async function verifyForkDiff({
   contents,
   snapshot,
   customizationRoot,
-  snapshotFilePath,
   excludedPaths,
 }) {
   const patches = parseUnifiedDiff(contents);
-  const snapshotInfo = await lstat(snapshot);
-  const snapshotPayload = await mapSnapshotPayload(
-    snapshot,
-    snapshotInfo,
-    snapshotFilePath,
-  );
+  const snapshotPayload = await mapDirectoryPayload(snapshot, {
+    label: "fork snapshot",
+    excludeSourceMetadata: true,
+  });
   const reconstructed = applyPatchesToPayload(snapshotPayload, patches);
   const owned = await mapDirectoryPayload(customizationRoot, {
     excludedPaths,
@@ -467,13 +492,17 @@ async function readCompatibility(
   descriptorId,
   fingerprint,
   customizationFingerprint,
+  executionFingerprint,
 ) {
   if (!cachePath) return undefined;
   const cache = await readJsonState(cachePath, EMPTY_CACHE);
   assertCompatibilityCache(cache, cachePath);
   const cached = cache.compatibility[descriptorId]?.[fingerprint];
-  return cached?.customizationFingerprint === customizationFingerprint
-    ? cached
+  return (
+    cached?.customizationFingerprint === customizationFingerprint
+    && cached.executionFingerprint === executionFingerprint
+  )
+    ? { status: cached.status, evidence: cached.evidence }
     : undefined;
 }
 
@@ -495,6 +524,7 @@ async function cacheCompatibility(
   descriptorId,
   fingerprint,
   customizationFingerprint,
+  executionFingerprint,
   result,
 ) {
   if (!cachePath) return;
@@ -505,19 +535,54 @@ async function cacheCompatibility(
       status: result.status,
       evidence: result.evidence,
       customizationFingerprint,
+      executionFingerprint,
     };
     return cache;
   });
+}
+
+function overlayCompatibilityFingerprint(descriptor, ownedFingerprint) {
+  return fingerprintValues(
+    [descriptor.id, "delta", descriptor.customization, ownedFingerprint],
+    "skill-customization-overlay-compatibility-v1",
+  );
+}
+
+function checkedCustomizationSourcePlan(sourceExecutionPlan) {
+  if (
+    !Array.isArray(sourceExecutionPlan)
+    || sourceExecutionPlan.length === 0
+    || sourceExecutionPlan.some((step, index) => (
+      !step
+      || typeof step !== "object"
+      || step.role !== (index === 0 ? "workflow" : "delta")
+      || typeof step.path !== "string"
+      || !path.isAbsolute(step.path)
+      || typeof step.root !== "string"
+      || !path.isAbsolute(step.root)
+      || (index === 0
+        ? step.customizationId !== null && typeof step.customizationId !== "string"
+        : typeof step.customizationId !== "string" || !step.customizationId)
+    ))
+  ) {
+    throw new ReconciliationError(
+      "semantic review of a customization source requires its checked execution plan",
+      { code: "CUSTOMIZATION_SOURCE_EXECUTION_PLAN_REQUIRED" },
+    );
+  }
+  return structuredClone(sourceExecutionPlan);
 }
 
 async function reconcileOverlay({
   descriptor,
   customizationRoot,
   sourcePath,
+  sourceEffectiveFingerprint,
+  sourceExecutionPlan,
   cachePath = compatibilityCachePath(),
   semanticReconciler,
 }) {
-  const entrypoint = await sourceEntrypoint(sourcePath);
+  const { entrypoint, root: sourceRoot } = await sourceLocation(sourcePath);
   const customizationEntrypoint = await resolveOwnedPath(
     customizationRoot,
     descriptor.entrypoint,
@@ -536,16 +601,42 @@ async function reconcileOverlay({
       { code: "CUSTOMIZATION_PATH_NOT_OWNED" },
     );
   });
-  const sourceFingerprint = await fingerprintFile(entrypoint);
-  const customizationFingerprint = await fingerprintFiles([
-    customizationEntrypoint,
-    customizationInstructions,
-  ]);
+  if (
+    descriptor.source.kind === "customization"
+    && !/^sha256:[0-9a-f]{64}$/.test(sourceEffectiveFingerprint ?? "")
+  ) {
+    throw new ReconciliationError(
+      "customization sources require their checked effective fingerprint",
+      { code: "CUSTOMIZATION_SOURCE_EFFECTIVE_FINGERPRINT_REQUIRED" },
+    );
+  }
+  const sourceFingerprint = descriptor.source.kind === "customization"
+    ? sourceEffectiveFingerprint
+    : await fingerprintPath(sourceRoot);
+  const sourceIdentityFingerprint = descriptor.source.kind === "local"
+    ? await fingerprintFile(entrypoint)
+    : undefined;
+  const customizationFingerprint = await payloadFingerprint(customizationRoot);
+  const compatibilityFingerprint = overlayCompatibilityFingerprint(
+    descriptor,
+    customizationFingerprint,
+  );
   const base = baseResult(
     descriptor,
     sourceFingerprint,
     customizationFingerprint,
+    sourceIdentityFingerprint,
   );
+  if (
+    customizationFingerprint !== descriptor.owned_payload.reviewed_fingerprint
+  ) {
+    return {
+      ...base,
+      status: "owned-payload-drift",
+      stopped: true,
+      flags: { ambiguousDrift: false, absorbedDeltas: [] },
+    };
+  }
   if (base.checkpointMatch) return { ...base, status: "compatible" };
 
   const cached = await readCompatibility(
@@ -553,6 +644,7 @@ async function reconcileOverlay({
     descriptor.id,
     sourceFingerprint,
     customizationFingerprint,
+    compatibilityFingerprint,
   );
   if (cached?.status === "compatible") {
     return { ...base, ...cached, cached: true };
@@ -560,10 +652,16 @@ async function reconcileOverlay({
   if (typeof semanticReconciler !== "function") {
     return reconcileOutcome(base, { ambiguous: true });
   }
+  const checkedSourcePlan = descriptor.source.kind === "customization"
+    ? checkedCustomizationSourcePlan(sourceExecutionPlan)
+    : undefined;
   const outcome = await semanticReconciler({
     descriptor,
-    sourceEntrypoint: entrypoint,
+    sourceEntrypoint: checkedSourcePlan?.[0].path ?? entrypoint,
     sourceFingerprint,
+    ...(checkedSourcePlan
+      ? { sourceExecutionPlan: checkedSourcePlan }
+      : {}),
     customizationEntrypoint,
     customizationInstructions,
   });
@@ -574,6 +672,7 @@ async function reconcileOverlay({
       descriptor.id,
       sourceFingerprint,
       customizationFingerprint,
+      compatibilityFingerprint,
       result,
     );
   }
@@ -595,28 +694,31 @@ async function reconcileFork({ descriptor, customizationRoot }) {
       descriptor.entrypoint,
     );
     const snapshotEntrypoint = await forkSnapshotEntrypoint(snapshot);
-    const snapshotEntrypointFingerprint = await fingerprintFile(
-      snapshotEntrypoint,
-    );
-    const checkpoint = sourceCheckpoint(
-      descriptor,
-      snapshotEntrypointFingerprint,
-    );
-    if (!checkpoint.match) {
-      throw new Error("fork snapshot entrypoint does not match its source checkpoint");
+    const snapshotFingerprint = await fingerprintPath(snapshot);
+    const diffFingerprint = await fingerprintFile(diff);
+    const ownedFingerprint = await payloadFingerprint(customizationRoot);
+    if (snapshotFingerprint !== descriptor.fork.snapshot_fingerprint) {
+      throw new Error("fork snapshot fingerprint does not match its reviewed descriptor fingerprint");
+    }
+    if (
+      descriptor.source.kind !== "customization"
+      && snapshotFingerprint !== descriptor.source.effective_fingerprint
+    ) {
+      throw new Error("fork snapshot fingerprint does not match the reviewed full-source effective fingerprint");
+    }
+    if (diffFingerprint !== descriptor.fork.diff_fingerprint) {
+      throw new Error("fork diff fingerprint does not match its reviewed descriptor fingerprint");
+    }
+    if (ownedFingerprint !== descriptor.owned_payload.reviewed_fingerprint) {
+      throw new Error("fork owned payload fingerprint does not match its reviewed descriptor fingerprint");
     }
     const diffTargets = await verifyForkDiff({
       contents: await readFile(diff, "utf8"),
       snapshot,
       customizationRoot,
-      snapshotFilePath: descriptor.source.kind === "repository"
-        ? path.posix.basename(descriptor.source.upstream_path)
-        : "SKILL.md",
       excludedPaths: [
         "customization.json",
-        descriptor.customization,
-        descriptor.fork.snapshot,
-        descriptor.fork.diff,
+        "provenance",
       ],
     });
     return {
@@ -627,10 +729,11 @@ async function reconcileFork({ descriptor, customizationRoot }) {
       stopped: false,
       provenance: {
         source: descriptor.source,
-        snapshotFingerprint: await fingerprintPath(snapshot),
-        snapshotEntrypointFingerprint,
-        diffFingerprint: await fingerprintFile(diff),
+        snapshotFingerprint,
+        snapshotEntrypointFingerprint: await fingerprintFile(snapshotEntrypoint),
+        diffFingerprint,
         diffTargets,
+        ownedPayloadFingerprint: ownedFingerprint,
         forkFingerprint: await fingerprintFile(entrypoint),
       },
     };

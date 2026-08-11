@@ -1,6 +1,6 @@
 # Overlay intake
 
-Use this intake only for a new overlay or a material change to an existing one. Derive facts from the request, workspace, inventory, source, descriptor, `CUSTOMIZATION.md`, and binding before asking; ask only for unresolved decisions.
+Use this intake only for a new overlay or an explicit material change. Existing execution starts with helper preflight; derive facts from the request, workspace, inventory, source graph, descriptor, `CUSTOMIZATION.md`, and binding before asking.
 
 ## Starting point
 
@@ -18,13 +18,14 @@ If the requested behavior must survive source removal, explain why that contradi
 
 Resolve these fields:
 
-- **Source identity:** confirmed copy, declared name, repository and upstream entrypoint or opaque local identity, plus discovery evidence.
-- **Delta:** context, desired behavior, preserved source behavior, non-goals, and observable success.
-- **Placement:** workspace or personal scope and exact destination.
+- **Source identity:** confirmed full source or verified customization, declared name, stable identity, type, license, expected effective fingerprint, and discovery evidence. Concrete paths belong only in the context binding.
+- **Delta:** context, desired behavior, preserved source behavior, non-goals, and observable success. `CUSTOMIZATION.md` contains only this semantic delta.
+- **Placement:** Default a new workspace customization to `.agents/skills/<name>/`; use a compatible host-specific project or personal skill root when selected, and record the exact destination.
 - **Name and activation:** offer two or three collision-free `<source>-<outcome>` names and default to `coexist`. Record `replace` only after a separate confirmation of same-name intent and customization-first host precedence.
-- **Upstream relationship:** state that the live source remains required, what upstream continues to own, and what the overlay adds.
+- **Upstream relationship:** state that the live source remains required, what upstream continues to own, and how recursive preflight orders the base workflow followed by inner-to-outer deltas.
+- **Dispatcher:** generate a thin `SKILL.md` that runs contract-1 preflight, follows only ready steps, and delegates unavailable, incompatible, or maintenance-required results to `skill-overlay`.
 - **Helper fallback:** record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 1. The download may run only after brief confirmation.
 
 Before finalizing, invoke any available skill-creation or agent-writing skill, such as `skill-creator` or `writing-for-agents`. Review the proposed delta against source conventions, trigger behavior, realistic examples, and checkable completion criteria. Fold material findings into the brief.
 
-Present one brief containing every field above and ask for one confirmation. The intake is complete only when source identity, delta, placement, name, activation, live-upstream relationship, conditional helper permission, and any workflow-model switch are explicit and confirmed. Helper-backed creation begins only after that confirmation.
+Present one brief containing every field above and ask for one confirmation. Intake is complete only when source identity, delta, placement, name, activation, recursive live-upstream relationship, dispatcher behavior, conditional helper permission, and any workflow-model switch are explicit. Helper-backed creation begins after confirmation.

@@ -2,10 +2,10 @@ import { lstat, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { assertValidDescriptor } from "./descriptor.js";
+import { assertValidDescriptor, readDescriptor } from "./descriptor.js";
 import { discoverSkills } from "./discovery.js";
 import { BindingError } from "./errors.js";
-import { fingerprintFile } from "./fingerprint.js";
+import { fingerprintFile, fingerprintPath } from "./fingerprint.js";
 import {
   generateLocalIdentity,
   normalizeRepositoryUrl,
@@ -119,7 +119,7 @@ async function confirmOrFail(callback, payload, code, message) {
   }
 }
 
-function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
+async function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
   if (!confirmedSelection) {
     if (group.conflict) {
       throw new BindingError("binding source provenance is ambiguous", {
@@ -129,13 +129,21 @@ function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
     }
     return undefined;
   }
+  let confirmedTarget;
+  let sourceTarget;
+  try {
+    [confirmedTarget, sourceTarget] = await Promise.all([
+      realpath(confirmedSelection.copy?.path),
+      realpath(sourceDirectory),
+    ]);
+  } catch {
+    confirmedTarget = undefined;
+    sourceTarget = undefined;
+  }
   const copy = group.copies.find(
     (candidate) =>
-      candidate.path === confirmedSelection.copy?.path
-      && (candidate.owners ?? [candidate.owner]).includes(
-        confirmedSelection.copy?.owner,
-      )
-      && candidate.path === path.resolve(sourceDirectory),
+      path.resolve(candidate.realPath ?? candidate.path) === confirmedTarget
+      && confirmedTarget === sourceTarget,
   );
   const confirmation = confirmedSelection.confirmation
     ?? [...(confirmedSelection.evidence ?? [])]
@@ -145,9 +153,12 @@ function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
     confirmedSelection.name === group.name
     && copy
     && typeof confirmedSelection.provenance === "string"
+    && confirmedSelection.copy?.provenance?.includes(
+      confirmedSelection.provenance,
+    )
     && copy.provenance.includes(confirmedSelection.provenance)
     && confirmation?.kind === "confirmation"
-    && confirmation.path === copy.path;
+    && confirmation.path === confirmedSelection.copy?.path;
   if (!valid) {
     throw new BindingError(
       "confirmed source selection does not match current discovery evidence",
@@ -159,7 +170,7 @@ function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
   }
   return {
     name: group.name,
-    copy,
+    copy: structuredClone(confirmedSelection.copy),
     provenance: confirmedSelection.provenance,
     confirmation: structuredClone(confirmation),
   };
@@ -188,6 +199,9 @@ async function inspectBindingSource({
       code: "BINDING_SOURCE_INVALID",
     });
   }
+  const sourceRoot = await realpath(
+    info.isDirectory() ? resolved : path.dirname(entrypoint),
+  );
   const declaredName = await readSkillName(entrypoint).catch(() => undefined);
   if (declaredName !== descriptor.source.skill_name) {
     throw new BindingError(
@@ -198,7 +212,7 @@ async function inspectBindingSource({
   let discovery;
   try {
     discovery = await discoverSkills({
-      input: resolved,
+      input: descriptor.source.kind === "customization" ? sourceRoot : resolved,
       roots,
       managerRecords,
     });
@@ -214,10 +228,12 @@ async function inspectBindingSource({
       code: "BINDING_SOURCE_INVALID",
     });
   }
-  const selection = confirmedSelectionFor(
+  const selection = await confirmedSelectionFor(
     group,
     confirmedSelection,
-    path.dirname(entrypoint),
+    descriptor.source.kind === "customization"
+      ? sourceRoot
+      : path.dirname(entrypoint),
   );
   let repository;
   let upstreamPath;
@@ -275,10 +291,57 @@ async function inspectBindingSource({
       }
     }
   }
-  const fingerprint = await fingerprintFile(entrypoint);
+  let customization;
+  if (descriptor.source.kind === "customization") {
+    if (!info.isDirectory()) {
+      throw new BindingError("a customization source must be bound by its directory", {
+        code: "BINDING_SOURCE_INVALID",
+      });
+    }
+    try {
+      customization = await readDescriptor(path.join(sourceRoot, "customization.json"));
+    } catch (error) {
+      throw new BindingError(`bound customization metadata is invalid: ${error.message}`, {
+        code: "BINDING_CUSTOMIZATION_METADATA_INVALID",
+      });
+    }
+    if (
+      customization.id !== descriptor.source.id
+      || customization.type !== descriptor.source.type
+      || customization.name !== descriptor.source.skill_name
+      || customization.license !== descriptor.source.license
+    ) {
+      throw new BindingError("bound customization identity does not match the descriptor source", {
+        code: "BINDING_CUSTOMIZATION_SOURCE_MISMATCH",
+        details: {
+          expected: descriptor.source,
+          actual: {
+            id: customization.id,
+            type: customization.type,
+            skill_name: customization.name,
+            license: customization.license,
+          },
+        },
+      });
+    }
+  } else if (group.copies.some((copy) => copy.classification === "customization")) {
+    throw new BindingError("a customization candidate requires source.kind customization", {
+      code: "BINDING_SOURCE_KIND_MISMATCH",
+    });
+  }
+  let fingerprint;
+  let entrypointFingerprint;
+  try {
+    fingerprint = await fingerprintPath(sourceRoot);
+    entrypointFingerprint = await fingerprintFile(entrypoint);
+  } catch (error) {
+    throw new BindingError(`binding source cannot be fingerprinted: ${error.message}`, {
+      code: "BINDING_SOURCE_INVALID",
+    });
+  }
   const localIdentity = generateLocalIdentity({
     skillName: descriptor.source.skill_name,
-    fingerprint,
+    fingerprint: entrypointFingerprint,
   });
   if (
     descriptor.source.kind === "local" &&
@@ -294,8 +357,18 @@ async function inspectBindingSource({
     declaredName,
     entrypoint,
     fingerprint,
+    entrypointFingerprint,
     localIdentity,
     ...(repository ? { repository, upstreamPath } : {}),
+    ...(customization
+      ? {
+          customization: {
+            id: customization.id,
+            type: customization.type,
+            license: customization.license,
+          },
+        }
+      : {}),
     provenance: selection ? [selection.provenance] : group.provenance,
     evidence: group.evidence,
     selection,
@@ -399,7 +472,9 @@ export async function bindCustomization({
             repository: inspection.repository,
             upstreamPath: inspection.upstreamPath,
           }
-        : { localIdentity: inspection.localIdentity }),
+        : descriptor.source.kind === "local"
+          ? { localIdentity: inspection.localIdentity }
+          : { customization: inspection.customization }),
       fingerprint: inspection.fingerprint,
       provenance: inspection.provenance,
       ...(inspection.selection ? { selection: inspection.selection } : {}),
@@ -496,8 +571,22 @@ export async function validateBinding({
         },
       });
     }
-  } else if (binding.source.localIdentity !== descriptor.source.identity) {
+  } else if (
+    descriptor.source.kind === "local"
+    && binding.source.localIdentity !== descriptor.source.identity
+  ) {
     throw new BindingError("binding local source no longer matches the descriptor", {
+      code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
+    });
+  } else if (
+    descriptor.source.kind === "customization"
+    && (
+      binding.source.customization?.id !== descriptor.source.id
+      || binding.source.customization?.type !== descriptor.source.type
+      || binding.source.customization?.license !== descriptor.source.license
+    )
+  ) {
+    throw new BindingError("binding customization source no longer matches the descriptor", {
       code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
     });
   }
@@ -571,6 +660,9 @@ export async function resolveBinding({
         "BINDING_SOURCE_PROVENANCE_MISMATCH",
         "BINDING_SOURCE_UPSTREAM_PATH_MISMATCH",
         "BINDING_LOCAL_IDENTITY_MISMATCH",
+        "BINDING_CUSTOMIZATION_METADATA_INVALID",
+        "BINDING_CUSTOMIZATION_SOURCE_MISMATCH",
+        "BINDING_SOURCE_KIND_MISMATCH",
       ]).has(error.code)
     ) {
       await invalidate(statePath, key);

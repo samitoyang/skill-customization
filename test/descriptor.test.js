@@ -30,19 +30,24 @@ function repositoryDescriptor(overrides = {}) {
     id: "urn:skill-customization:example:review-local-archive",
     type: "semantic-overlay",
     name: "review-local-archive",
+    license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
+    owned_payload: {
+      reviewed_fingerprint:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    },
     source: {
       skill_name: "review",
       kind: "repository",
       repository: "https://github.com/example/skills",
       upstream_path: "skills/review/SKILL.md",
       license: "MIT",
+      effective_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       review: {
         revision: "0123456789abcdef",
-        fingerprint:
-          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       },
     },
     activation: { mode: "coexist" },
@@ -52,6 +57,59 @@ function repositoryDescriptor(overrides = {}) {
 
 test("descriptor accepts a strict coexist repository overlay", () => {
   assert.deepEqual(validateDescriptor(repositoryDescriptor()), []);
+});
+
+test("runtime selectors cannot point into excluded owned-payload paths", () => {
+  for (const key of ["entrypoint", "customization"]) {
+    for (const value of [
+      "customization.json",
+      "customization.json/runtime.md",
+      "CUSTOMIZATION.JSON",
+      "provenance",
+      "provenance/runtime.md",
+      "Provenance/runtime.md",
+      ".git/runtime.md",
+      "helpers/.Hg/runtime.md",
+      "helpers/deep/.SVN/runtime.md",
+    ]) {
+      const errors = validateDescriptor(repositoryDescriptor({ [key]: value }));
+      assert.ok(
+        errors.some(
+          ({ path: pointer, message }) =>
+            pointer === `/${key}` && /runtime-owned path/i.test(message),
+        ),
+      );
+    }
+  }
+});
+
+test("portable relative paths reject non-canonical segments", () => {
+  for (const key of ["entrypoint", "customization"]) {
+    for (const value of [
+      "./customization.json",
+      "./provenance/runtime.md",
+      "helpers/./run.md",
+      "customization.json.",
+      "provenance./runtime.md",
+      "provenance /runtime.md",
+      "customization.json:stream",
+      "helpers//run.md",
+      "helpers/",
+      "helpers/\0run.md",
+      "helpers\n/run.md",
+      "helpers\r/run:stream",
+      "helpers\u2028/../run.md",
+      "helpers\u2029/run\\file.md",
+    ]) {
+      const errors = validateDescriptor(repositoryDescriptor({ [key]: value }));
+      assert.ok(
+        errors.some(
+          ({ path: pointer, message }) =>
+            pointer === `/${key}` && /portable relative path/i.test(message),
+        ),
+      );
+    }
+  }
 });
 
 test("descriptor keeps private repositories as repository sources and accepts opaque local IDs", () => {
@@ -66,6 +124,9 @@ test("descriptor keeps private repositories as repository sources and accepts op
     source: {
       skill_name: "review",
       kind: "local",
+      license: "Proprietary",
+      effective_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       identity:
         "local:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     },
@@ -80,6 +141,9 @@ test("descriptor enforces stable names, source variants, and activation rules", 
     source: {
       skill_name: "review",
       kind: "local",
+      license: "MIT",
+      effective_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       identity: "/Users/alice/private-skill",
       auth: "token",
     },
@@ -143,21 +207,105 @@ test("descriptor rejects machine-local identifiers and schema locators", () => {
   }
 });
 
+test("descriptor rejects whitespace-only portable review strings", () => {
+  const descriptor = repositoryDescriptor();
+  descriptor.license = " \t ";
+  descriptor.source.license = "\n";
+  descriptor.source.review.revision = "   ";
+  const errors = validateDescriptor(descriptor);
+  assert.ok(errors.some(({ path: pointer }) => pointer === "/license"));
+  assert.ok(errors.some(({ path: pointer }) => pointer === "/source/license"));
+  assert.ok(
+    errors.some(({ path: pointer }) => pointer === "/source/review/revision"),
+  );
+});
+
 test("JSON Schema and runtime share machine-path exclusions", async () => {
   const schema = JSON.parse(
     await readFile(new URL("../customization.schema.json", import.meta.url), "utf8"),
   );
   const reference = "#/$defs/nonMachinePathString";
+  const nonBlankReference = "#/$defs/nonBlankPortableString";
   assert.equal(schema.properties.$schema.$ref, reference);
-  assert.equal(schema.$defs.repositorySource.properties.license.$ref, reference);
+  assert.equal(schema.$defs.license.$ref, nonBlankReference);
   assert.equal(
     schema.$defs.repositorySource.properties.review.properties.revision.$ref,
-    reference,
+    nonBlankReference,
   );
+  assert.equal(
+    schema.$defs.materialization.properties.reviewed_at.$ref,
+    nonBlankReference,
+  );
+  assert.equal(
+    schema.$defs.materialization.properties.evidence.$ref,
+    nonBlankReference,
+  );
+  const nonBlank = new RegExp(
+    schema.$defs.nonBlankPortableString.allOf.find(({ pattern }) => pattern)
+      .pattern,
+  );
+  assert.equal(nonBlank.test(" \t\n "), false);
+  assert.equal(nonBlank.test("reviewed"), true);
   const exclusions = schema.$defs.nonMachinePathString.allOf.map(
     ({ not }) => new RegExp(not.pattern),
   );
-  const idPattern = new RegExp(schema.properties.id.pattern);
+  const idPattern = new RegExp(schema.$defs.stableId.pattern);
+  assert.equal(schema.properties.entrypoint.$ref, "#/$defs/runtimePath");
+  assert.equal(schema.properties.customization.$ref, "#/$defs/runtimePath");
+  const runtimeExclusion = new RegExp(
+    schema.$defs.runtimePath.allOf.find(({ not }) => not)?.not.pattern,
+  );
+  const relativePath = new RegExp(schema.$defs.relativePath.pattern);
+  const provenancePath = new RegExp(
+    schema.$defs.provenancePath.allOf.find(({ pattern }) => pattern).pattern,
+  );
+  assert.equal(
+    schema.$defs.fork.properties.snapshot.$ref,
+    "#/$defs/provenancePath",
+  );
+  assert.equal(schema.$defs.fork.properties.diff.$ref, "#/$defs/provenancePath");
+  for (const value of [
+    "customization.json",
+    "CUSTOMIZATION.JSON",
+    "provenance",
+    "provenance/run.md",
+    "Provenance/run.md",
+    ".git/run.md",
+    "helpers/.Hg/run.md",
+    "helpers/deep/.SVN/run.md",
+  ]) {
+    assert.equal(runtimeExclusion.test(value), true);
+  }
+  for (const value of ["SKILL.md", "CUSTOMIZATION.md", "helpers/run.md"]) {
+    assert.equal(runtimeExclusion.test(value), false);
+  }
+  for (const value of [
+    "./customization.json",
+    "./provenance/run.md",
+    "helpers/./run.md",
+    "customization.json.",
+    "provenance./run.md",
+    "provenance /run.md",
+    "customization.json:stream",
+    "helpers//run.md",
+    "helpers/",
+    "helpers/\0run.md",
+    "helpers\n/run.md",
+    "helpers\r/run:stream",
+    "helpers\u2028/../run.md",
+    "helpers\u2029/run\\file.md",
+  ]) {
+    assert.equal(relativePath.test(value), false);
+  }
+  for (const value of ["SKILL.md", "helpers/run.md"]) {
+    assert.equal(relativePath.test(value), true);
+  }
+  for (const value of ["provenance/source", "provenance/reviews/source.diff"]) {
+    assert.equal(provenancePath.test(value), true);
+  }
+  for (const value of ["provenance", "source", "source.diff", "Provenance/source"]) {
+    assert.equal(provenancePath.test(value), false);
+  }
 
   for (const id of MACHINE_IDS) assert.equal(idPattern.test(id), false);
   for (const id of [
@@ -198,16 +346,115 @@ test("replace requires an equal source name and deterministic precedence", () =>
 test("fork requires relative snapshot and diff provenance", () => {
   const valid = repositoryDescriptor({
     type: "fork",
-    fork: { snapshot: "provenance/source", diff: "provenance/source.diff" },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      diff_fingerprint:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    },
   });
   assert.deepEqual(validateDescriptor(valid), []);
 
   const invalid = repositoryDescriptor({
     type: "fork",
-    fork: { snapshot: "/tmp/source", diff: "../source.diff" },
+    fork: {
+      snapshot: "/tmp/source",
+      diff: "../source.diff",
+      snapshot_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      diff_fingerprint:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    },
   });
   const errors = validateDescriptor(invalid);
   assert.equal(errors.filter(({ path }) => path.startsWith("/fork/")).length, 2);
+
+  const outsideProvenance = repositoryDescriptor({
+    type: "fork",
+    fork: {
+      snapshot: "source",
+      diff: "source.diff",
+      snapshot_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      diff_fingerprint:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    },
+  });
+  assert.deepEqual(
+    validateDescriptor(outsideProvenance)
+      .filter(({ path: issuePath }) => issuePath.startsWith("/fork/"))
+      .map(({ path: issuePath }) => issuePath),
+    ["/fork/snapshot", "/fork/diff"],
+  );
+});
+
+test("descriptor requires materialization only when forking an overlay chain", () => {
+  const source = {
+    skill_name: "review-team-base",
+    kind: "customization",
+    id: "urn:skill-customization:example:review-team-base",
+    type: "semantic-overlay",
+    license: "MIT",
+    effective_fingerprint:
+      "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  };
+  assert.deepEqual(validateDescriptor(repositoryDescriptor({ source })), []);
+
+  const fork = {
+    snapshot: "provenance/source",
+    diff: "provenance/source.diff",
+    snapshot_fingerprint:
+      "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    diff_fingerprint:
+      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  };
+  const missing = validateDescriptor(repositoryDescriptor({
+    type: "fork",
+    source,
+    fork,
+  }));
+  assert.ok(missing.some(({ path: pointer }) => pointer === "/fork/materialization"));
+
+  const valid = repositoryDescriptor({
+    type: "fork",
+    source,
+    fork: {
+      ...fork,
+      materialization: {
+        source_effective_fingerprint: source.effective_fingerprint,
+        snapshot_fingerprint: fork.snapshot_fingerprint,
+        reviewed_at: "2026-08-09T00:00:00Z",
+        evidence: "Reviewed the checked base workflow and ordered deltas.",
+      },
+    },
+  });
+  assert.deepEqual(validateDescriptor(valid), []);
+  for (const key of ["reviewed_at", "evidence"]) {
+    const whitespace = structuredClone(valid);
+    whitespace.fork.materialization[key] = "   ";
+    assert.ok(
+      validateDescriptor(whitespace).some(
+        ({ path: pointer }) => pointer === `/fork/materialization/${key}`,
+      ),
+    );
+  }
+  const forkFromFork = repositoryDescriptor({
+    type: "fork",
+    source: { ...source, type: "fork" },
+    fork,
+  });
+  assert.deepEqual(validateDescriptor(forkFromFork), []);
+  forkFromFork.fork.materialization = {
+    source_effective_fingerprint: source.effective_fingerprint,
+    snapshot_fingerprint: fork.snapshot_fingerprint,
+    reviewed_at: "2026-08-11T00:00:00Z",
+    evidence: "Reviewed the fork workflow materialization.",
+  };
+  assert.ok(validateDescriptor(forkFromFork).some(
+    ({ path: pointer }) => pointer === "/fork/materialization",
+  ));
 });
 
 test("reader checks folder/name equality and inventory collisions", async () => {
@@ -257,6 +504,40 @@ test("reader requires entrypoint and customization artifacts to be files", async
   await assert.rejects(readDescriptor(descriptorPath), /regular file/i);
 });
 
+test("reader rejects runtime selectors that traverse symlinks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-runtime-symlink-"));
+  const descriptorDir = path.join(root, "review-local-archive");
+  await mkdir(path.join(descriptorDir, "helpers"), { recursive: true });
+  await writeFile(path.join(descriptorDir, "SKILL.md"), "# Skill\n");
+  await writeFile(path.join(descriptorDir, "CUSTOMIZATION.md"), "# Delta\n");
+  await writeFile(path.join(descriptorDir, "helpers", "runtime.md"), "checked\n");
+  await symlink("helpers", path.join(descriptorDir, "runtime"));
+  const descriptorPath = path.join(descriptorDir, "customization.json");
+  await writeFile(
+    descriptorPath,
+    JSON.stringify(repositoryDescriptor({ entrypoint: "runtime/runtime.md" })),
+  );
+
+  await assert.rejects(readDescriptor(descriptorPath), /symbolic link/i);
+});
+
+test("reader rejects runtime selectors whose canonical targets are excluded", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-runtime-alias-"));
+  const descriptorDir = path.join(root, "review-local-archive");
+  await mkdir(path.join(descriptorDir, "provenance"), { recursive: true });
+  await writeFile(path.join(descriptorDir, "SKILL.md"), "# Skill\n");
+  await writeFile(path.join(descriptorDir, "CUSTOMIZATION.md"), "# Delta\n");
+  await writeFile(path.join(descriptorDir, "provenance", "runtime.md"), "unchecked\n");
+  await symlink("provenance", path.join(descriptorDir, "runtime-alias"));
+  const descriptorPath = path.join(descriptorDir, "customization.json");
+  await writeFile(
+    descriptorPath,
+    JSON.stringify(repositoryDescriptor({ entrypoint: "runtime-alias/runtime.md" })),
+  );
+
+  await assert.rejects(readDescriptor(descriptorPath), /excluded owned-payload path/i);
+});
+
 test("reader requires fork snapshot and diff to be owned, non-symlinked provenance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "fork-descriptor-"));
   const descriptorDir = path.join(root, "review-local-archive");
@@ -274,9 +555,46 @@ test("reader requires fork snapshot and diff to be owned, non-symlinked provenan
     JSON.stringify(
       repositoryDescriptor({
         type: "fork",
-        fork: { snapshot: "provenance/source", diff: "provenance/source.diff" },
+        fork: {
+          snapshot: "provenance/source",
+          diff: "provenance/source.diff",
+          snapshot_fingerprint:
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          diff_fingerprint:
+            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        },
       }),
     ),
   );
   await assert.rejects(readDescriptor(descriptorPath), /not owned|symbolic link/i);
+});
+
+test("reader requires a fork snapshot directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "fork-snapshot-type-"));
+  const descriptorDir = path.join(root, "review-local-archive");
+  const provenance = path.join(descriptorDir, "provenance");
+  await mkdir(provenance, { recursive: true });
+  await writeFile(path.join(descriptorDir, "SKILL.md"), "fork\n");
+  await writeFile(path.join(descriptorDir, "CUSTOMIZATION.md"), "delta\n");
+  await writeFile(path.join(provenance, "source"), "source\n");
+  await writeFile(path.join(provenance, "source.diff"), "diff\n");
+  const descriptorPath = path.join(descriptorDir, "customization.json");
+  await writeFile(
+    descriptorPath,
+    JSON.stringify(
+      repositoryDescriptor({
+        type: "fork",
+        fork: {
+          snapshot: "provenance/source",
+          diff: "provenance/source.diff",
+          snapshot_fingerprint:
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          diff_fingerprint:
+            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        },
+      }),
+    ),
+  );
+
+  await assert.rejects(readDescriptor(descriptorPath), /snapshot.*directory/i);
 });

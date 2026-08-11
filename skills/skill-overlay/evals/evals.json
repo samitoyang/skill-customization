@@ -60,12 +60,12 @@
     {
       "id": 6,
       "prompt": "Run my existing handoff-local-archive customization; its descriptor, CUSTOMIZATION.md, and binding are already present.",
-      "expected_output": "Uses the artifacts as stored intake, validates and reconciles, then runs the source workflow plus its delta.",
+      "expected_output": "Uses helper-first preflight and directly follows the checked source-workflow-plus-delta plan without invoking maintenance when ready.",
       "files": [],
       "expectations": [
         "The response does not rename, rescope, or repeat intake for the existing overlay.",
-        "The response validates, resolves, and reconciles before applying CUSTOMIZATION.md.",
-        "The response proceeds only when reconciliation is compatible and unstopped."
+        "The response runs preflight with the current context before any runtime instruction.",
+        "A ready result executes its ordered workflow and delta steps without invoking skill-overlay maintenance."
       ]
     },
     {
@@ -98,6 +98,37 @@
       "expectations": [
         "The response identifies a companion because the source behavior is not changing.",
         "The response does not create a customization descriptor."
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Run my existing deploy-team-release overlay. Its source is another verified overlay layered over the installed deploy skill.",
+      "expected_output": "Preflight recursively flattens the checked source graph and executes the base workflow followed by inner and outer deltas.",
+      "files": [],
+      "expectations": [
+        "The response uses preflight rather than manually traversing descriptors.",
+        "The checked execution order is base workflow, inner delta, then outer delta.",
+        "A stopped inner result propagates one actionable maintenance handler and executes nothing."
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "Launch review-local-archive, but the installed skill-customization command is missing on this machine.",
+      "expected_output": "The dispatcher delegates to skill-overlay setup or maintenance and never runs unchecked source or delta instructions.",
+      "files": [],
+      "expectations": [
+        "The response does not execute the overlay while preflight is unavailable.",
+        "The response delegates to skill-overlay and applies the contract-1 installed-then-permitted-npx policy."
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "Run deploy-release-checklist; someone edited its CUSTOMIZATION.md directly after review.",
+      "expected_output": "Preflight returns maintenance-required and delegates owned-payload drift to skill-overlay before activation.",
+      "files": [],
+      "expectations": [
+        "The response treats the changed owned-payload fingerprint as a safe stop.",
+        "After an accepted repair it refreshes reviewed fingerprints atomically and reruns preflight."
       ]
     }
   ]

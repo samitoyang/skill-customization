@@ -1,16 +1,11 @@
 # Library reference
 
-Use the library when another Node.js tool needs the same descriptor, discovery, binding, fingerprint, reconciliation, or atomic-state behavior as the CLI. The package supports Node.js 18+ and has no runtime dependencies.
+Import public functions from `skill-customization`; the package root is the supported Node.js 18+, zero-runtime-dependency API. The schema is exported as `skill-customization/schema`.
 
-Import public functions from `skill-customization`; the package root is the supported API boundary. The JSON Schema is exported as `skill-customization/schema`.
+Primary seams are descriptor validation that keeps runtime selectors inside the reviewed payload, normalization and naming, canonical-target and owned-payload fingerprints that exclude clone-local version-control metadata and reject internal symlinks, bounded discovery and manager records, context bindings, targeted reconciliation with entrypoint-derived local identity and recursively checked customization-source identity, recursive `preflightCustomization`, explicit `acceptMaintenanceUpdate`, and canonically contained locked atomic file/JSON updates.
 
-The main seams are:
+`preflightCustomization` returns `ready`, `ready-with-advisory`, or `maintenance-required`; ready results contain `effectiveFingerprint`, ordered steps with `role`, `path`, `root`, and `customizationId`, advisories, and at most one maintenance handler. `acceptMaintenanceUpdate` durably publishes accepted fork diff bytes under an immutable content-addressed path, then atomically and durably replaces the descriptor to commit that path and fingerprint together with refreshed owned-payload, source, snapshot, and materialization review state. Durable writes sync file contents and containing directory entries before returning. The update preserves the existing descriptor mode and prior diff mode, and changes the source effective fingerprint only when explicitly supplied. `reviewedAt` and `evidence` must be supplied together and are rejected without a fork materialization; both `reviewedAt` and `evidence` are required when either materialization fingerprint changes. An interruption before the descriptor commit may leave an unreferenced immutable diff in `provenance/diffs/`; preflight ignores it, and explicit maintenance may retain it for audit or remove it. Callers rerun preflight before execution.
 
-- descriptor reading and validation;
-- normalization, naming, and fingerprints;
-- checkpointed host roots, bounded discovery, and manager records;
-- context-scoped bindings and active-skill inventory;
-- overlay and fork reconciliation;
-- locked atomic JSON state updates.
+For a customization source, pass the successful nested preflight's `effectiveFingerprint` and `steps` to `reconcileCustomization` as `sourceEffectiveFingerprint` and `sourceExecutionPlan`; the CLI performs this nested preflight automatically. When semantic review is required, the callback receives that ordered `sourceExecutionPlan` and its base workflow as `sourceEntrypoint`. Reconciliation never substitutes the customization directory's raw fingerprint or a thin dispatcher for the checked plan.
 
-Keep publishable descriptors separate from local paths, credentials, bindings, and compatibility caches. Read [Descriptor v1](descriptor-v1.md) before constructing descriptors, [Discovery and bindings](discovery-and-bindings.md) before resolving sources, and [Reconciliation](reconciliation.md) before activating a customization.
+Keep resolved sources read-only and machine-local state outside portable customization artifacts. Read [Descriptor v1](descriptor-v1.md), [Discovery and bindings](discovery-and-bindings.md), and [Reconciliation](reconciliation.md) before constructing a runtime integration.

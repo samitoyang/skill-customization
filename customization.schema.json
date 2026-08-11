@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://skill-customization.dev/schema/customization-v1.json",
-  "title": "Skill customization descriptor v1",
+  "title": "Managed skill customization descriptor v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,40 +9,34 @@
     "id",
     "type",
     "name",
+    "license",
     "entrypoint",
     "customization",
     "dependencies",
+    "owned_payload",
     "source",
     "activation"
   ],
   "properties": {
     "$schema": { "$ref": "#/$defs/nonMachinePathString" },
     "schema_version": { "const": 1 },
-    "id": {
-      "type": "string",
-      "pattern": "^(?![Ff][Ii][Ll][Ee]:)(?![A-Za-z]:[\\\\/])[a-z][a-z0-9+.-]*:[^\\s]+$"
-    },
-    "type": { "enum": ["semantic-overlay", "fork"] },
-    "name": {
-      "type": "string",
-      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-      "maxLength": 63
-    },
-    "entrypoint": { "$ref": "#/$defs/relativePath" },
-    "customization": { "$ref": "#/$defs/relativePath" },
+    "id": { "$ref": "#/$defs/stableId" },
+    "type": { "$ref": "#/$defs/customizationType" },
+    "name": { "$ref": "#/$defs/skillName" },
+    "license": { "$ref": "#/$defs/license" },
+    "entrypoint": { "$ref": "#/$defs/runtimePath" },
+    "customization": { "$ref": "#/$defs/runtimePath" },
     "dependencies": {
       "type": "array",
       "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-        "maxLength": 63
-      }
+      "items": { "$ref": "#/$defs/skillName" }
     },
+    "owned_payload": { "$ref": "#/$defs/ownedPayload" },
     "source": {
       "oneOf": [
         { "$ref": "#/$defs/repositorySource" },
-        { "$ref": "#/$defs/localSource" }
+        { "$ref": "#/$defs/localSource" },
+        { "$ref": "#/$defs/customizationSource" }
       ]
     },
     "activation": { "$ref": "#/$defs/activation" },
@@ -67,9 +61,26 @@
         },
         "required": ["activation"]
       },
-      "then": {
+      "then": { "properties": { "activation": { "required": ["precedence"] } } }
+    },
+    {
+      "if": {
         "properties": {
-          "activation": { "required": ["precedence"] }
+          "type": { "const": "fork" },
+          "source": {
+            "properties": {
+              "kind": { "const": "customization" },
+              "type": { "const": "semantic-overlay" }
+            },
+            "required": ["kind", "type"]
+          }
+        },
+        "required": ["type", "source"]
+      },
+      "then": { "properties": { "fork": { "required": ["materialization"] } } },
+      "else": {
+        "properties": {
+          "fork": { "not": { "required": ["materialization"] } }
         }
       }
     }
@@ -85,10 +96,53 @@
         { "not": { "pattern": "^~[^\\\\/]*(?:[\\\\/]|$)" } }
       ]
     },
+    "nonBlankPortableString": {
+      "allOf": [
+        { "$ref": "#/$defs/nonMachinePathString" },
+        { "pattern": "\\S" }
+      ]
+    },
+    "stableId": {
+      "type": "string",
+      "pattern": "^(?![Ff][Ii][Ll][Ee]:)(?![A-Za-z]:[\\\\/])[a-z][a-z0-9+.-]*:[^\\s]+$"
+    },
+    "skillName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 63
+    },
+    "customizationType": { "enum": ["semantic-overlay", "fork"] },
+    "license": {
+      "$ref": "#/$defs/nonBlankPortableString"
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
     "relativePath": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+      "pattern": "^(?![A-Za-z]:[\\\\/])(?![\\s\\S]*[\\r\\n\\u2028\\u2029])(?![\\s\\S]*:)(?![\\s\\S]*(?:^|/)\\.{1,2}(?:/|$))(?![\\s\\S]*[. ](?:/|$))(?![\\s\\S]*\\\\)(?![\\s\\S]*\\u0000)[^/]+(?:/[^/]+)*$"
+    },
+    "provenancePath": {
+      "allOf": [
+        { "$ref": "#/$defs/relativePath" },
+        { "pattern": "^provenance/[^/]+(?:/[^/]+)*$" }
+      ]
+    },
+    "runtimePath": {
+      "allOf": [
+        { "$ref": "#/$defs/relativePath" },
+        { "not": { "pattern": "(?:^(?:[Cc][Uu][Ss][Tt][Oo][Mm][Ii][Zz][Aa][Tt][Ii][Oo][Nn]\\.[Jj][Ss][Oo][Nn]|[Pp][Rr][Oo][Vv][Ee][Nn][Aa][Nn][Cc][Ee])(?:/|$)|(?:^|/)\\.(?:[Gg][Ii][Tt]|[Hh][Gg]|[Ss][Vv][Nn])(?:/|$))" } }
+      ]
+    },
+    "ownedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewed_fingerprint"],
+      "properties": {
+        "reviewed_fingerprint": { "$ref": "#/$defs/fingerprint" }
+      }
     },
     "repositorySource": {
       "type": "object",
@@ -99,36 +153,26 @@
         "repository",
         "upstream_path",
         "license",
+        "effective_fingerprint",
         "review"
       ],
       "properties": {
-        "skill_name": {
-          "type": "string",
-          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-          "maxLength": 63
-        },
+        "skill_name": { "$ref": "#/$defs/skillName" },
         "kind": { "const": "repository" },
         "repository": {
           "type": "string",
           "pattern": "^https://(?![^/\\s]*@)[^/\\s]+/[^?#\\s]+$"
         },
         "upstream_path": { "$ref": "#/$defs/relativePath" },
-        "license": {
-          "$ref": "#/$defs/nonMachinePathString",
-          "minLength": 1
-        },
+        "license": { "$ref": "#/$defs/license" },
+        "effective_fingerprint": { "$ref": "#/$defs/fingerprint" },
         "review": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["revision", "fingerprint"],
+          "required": ["revision"],
           "properties": {
             "revision": {
-              "$ref": "#/$defs/nonMachinePathString",
-              "minLength": 1
-            },
-            "fingerprint": {
-              "type": "string",
-              "pattern": "^sha256:[0-9a-f]{64}$"
+              "$ref": "#/$defs/nonBlankPortableString"
             }
           }
         }
@@ -137,18 +181,42 @@
     "localSource": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["skill_name", "kind", "identity"],
+      "required": [
+        "skill_name",
+        "kind",
+        "identity",
+        "license",
+        "effective_fingerprint"
+      ],
       "properties": {
-        "skill_name": {
-          "type": "string",
-          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-          "maxLength": 63
-        },
+        "skill_name": { "$ref": "#/$defs/skillName" },
         "kind": { "const": "local" },
         "identity": {
           "type": "string",
           "pattern": "^local:sha256:[0-9a-f]{64}$"
-        }
+        },
+        "license": { "$ref": "#/$defs/license" },
+        "effective_fingerprint": { "$ref": "#/$defs/fingerprint" }
+      }
+    },
+    "customizationSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skill_name",
+        "kind",
+        "id",
+        "type",
+        "license",
+        "effective_fingerprint"
+      ],
+      "properties": {
+        "skill_name": { "$ref": "#/$defs/skillName" },
+        "kind": { "const": "customization" },
+        "id": { "$ref": "#/$defs/stableId" },
+        "type": { "$ref": "#/$defs/customizationType" },
+        "license": { "$ref": "#/$defs/license" },
+        "effective_fingerprint": { "$ref": "#/$defs/fingerprint" }
       }
     },
     "activation": {
@@ -160,13 +228,41 @@
         "precedence": { "const": "customization-first" }
       }
     },
+    "materialization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_effective_fingerprint",
+        "snapshot_fingerprint",
+        "reviewed_at",
+        "evidence"
+      ],
+      "properties": {
+        "source_effective_fingerprint": { "$ref": "#/$defs/fingerprint" },
+        "snapshot_fingerprint": { "$ref": "#/$defs/fingerprint" },
+        "reviewed_at": {
+          "$ref": "#/$defs/nonBlankPortableString"
+        },
+        "evidence": {
+          "$ref": "#/$defs/nonBlankPortableString"
+        }
+      }
+    },
     "fork": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["snapshot", "diff"],
+      "required": [
+        "snapshot",
+        "diff",
+        "snapshot_fingerprint",
+        "diff_fingerprint"
+      ],
       "properties": {
-        "snapshot": { "$ref": "#/$defs/relativePath" },
-        "diff": { "$ref": "#/$defs/relativePath" }
+        "snapshot": { "$ref": "#/$defs/provenancePath" },
+        "diff": { "$ref": "#/$defs/provenancePath" },
+        "snapshot_fingerprint": { "$ref": "#/$defs/fingerprint" },
+        "diff_fingerprint": { "$ref": "#/$defs/fingerprint" },
+        "materialization": { "$ref": "#/$defs/materialization" }
       }
     }
   }

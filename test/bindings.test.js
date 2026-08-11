@@ -36,19 +36,24 @@ function descriptor(activation = { mode: "coexist" }) {
     id: "urn:skill-customization:fixture:review-local-archive",
     type: "semantic-overlay",
     name: replacing ? "review" : "review-local-archive",
+    license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
+    owned_payload: {
+      reviewed_fingerprint:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    },
     source: {
       skill_name: "review",
       kind: "repository",
       repository: "https://github.com/example/skills",
       upstream_path: "skills/review/SKILL.md",
       license: "MIT",
+      effective_fingerprint:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       review: {
         revision: "fixture",
-        fingerprint:
-          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       },
     },
     activation,
@@ -330,6 +335,9 @@ test("binding rejects a different local identity and non-SKILL file inputs", asy
     source: {
       skill_name: "review",
       kind: "local",
+      license: "MIT",
+      effective_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       identity:
         "local:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     },
@@ -479,6 +487,109 @@ test("binding persists and revalidates an auditable provenance choice", async ()
   assert.equal(afterDrift.source.selection.provenance, binding.source.selection.provenance);
 });
 
+test("binding preserves a provenance choice made through a customization alias", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-customization-alias-"));
+  const source = path.join(root, "review-fork");
+  const alias = path.join(root, "installed-review-fork");
+  const statePath = path.join(root, "bindings.json");
+  await mkdir(source);
+  await writeFile(
+    path.join(source, "SKILL.md"),
+    "---\nname: review-fork\n---\ncustomized source\n",
+  );
+  await writeFile(path.join(source, "CUSTOMIZATION.md"), "Fork rationale.\n");
+  const sourceDescriptor = {
+    ...descriptor(),
+    id: "urn:skill-customization:fixture:review-fork",
+    name: "review-fork",
+  };
+  await writeFile(
+    path.join(source, "customization.json"),
+    JSON.stringify(sourceDescriptor),
+  );
+  await writeFile(
+    path.join(source, ".skill-source.json"),
+    JSON.stringify({
+      source: {
+        kind: "repository",
+        repository: "https://github.com/other/skills",
+        upstream_path: "review-fork/SKILL.md",
+      },
+    }),
+  );
+  await symlink(source, alias);
+  assert.equal(spawnSync("git", ["init", "-q", root]).status, 0);
+  assert.equal(
+    spawnSync("git", [
+      "-C",
+      root,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/skills",
+    ]).status,
+    0,
+  );
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  const discovery = await discoverSkills({ input: alias, roots, managerRecords: [] });
+  const group = discovery.groups[0];
+  assert.equal(group.conflict, true);
+  const confirmedSelection = confirmDiscoverySelection({
+    discovery,
+    choice: {
+      name: group.name,
+      fingerprint: group.fingerprint,
+      path: alias,
+      owner: group.copies[0].owner,
+    },
+    interactive: true,
+    confirmedProvenance:
+      "repository:https://github.com/example/skills#review-fork/SKILL.md",
+    confirmationEvidence: {
+      actor: "human",
+      reason: "selected the aliased customization with conflicting provenance",
+    },
+  });
+  const outerDescriptor = {
+    ...descriptor(),
+    source: {
+      skill_name: sourceDescriptor.name,
+      kind: "customization",
+      id: sourceDescriptor.id,
+      type: sourceDescriptor.type,
+      license: sourceDescriptor.license,
+      effective_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    },
+  };
+  const binding = await bindCustomization({
+    descriptor: outerDescriptor,
+    sourcePath: alias,
+    context: "global",
+    statePath,
+    roots,
+    managerRecords: [],
+    confirmedSelection,
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.equal(binding.source.selection.copy.path, alias);
+  assert.equal(binding.source.selection.confirmation.path, alias);
+  assert.equal(binding.source.target, await realpath(source));
+  assert.equal(
+    (
+      await resolveBinding({
+        descriptor: outerDescriptor,
+        context: "global",
+        statePath,
+        roots,
+        managerRecords: [],
+      })
+    ).source.selection.confirmation.path,
+    alias,
+  );
+});
+
 test("binding rejects the wrong upstream entrypoint in the expected repository", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-upstream-path-"));
   const source = path.join(root, "skills", "other");
@@ -543,6 +654,56 @@ test("resolution rechecks repository provenance and invalidates a changed source
   assert.equal(Object.keys((await readBindingStore(statePath)).bindings).length, 0);
 });
 
+test("resolution invalidates a source that can no longer be fingerprinted", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-revalidate-symlink-"));
+  const source = path.join(root, "review");
+  const replacement = path.join(root, "replacement", "review");
+  const external = path.join(root, "external.md");
+  const statePath = path.join(root, "bindings.json");
+  await mkdir(source);
+  await mkdir(replacement, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  await writeFile(path.join(replacement, "SKILL.md"), "---\nname: review\n---\nreplacement\n");
+  await writeFile(external, "external\n");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots,
+    interactive: true,
+    confirm: async () => true,
+  });
+  await symlink(external, path.join(source, "helper.md"));
+
+  await assert.rejects(
+    resolveBinding({
+      descriptor: descriptor(),
+      context: "global",
+      statePath,
+      roots,
+    }),
+    (error) => error.code === "BINDING_SOURCE_INVALID",
+  );
+  assert.equal(Object.keys((await readBindingStore(statePath)).bindings).length, 0);
+
+  const rebound = await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: replacement,
+    context: "global",
+    statePath,
+    roots: [{
+      path: path.dirname(replacement),
+      scope: "global",
+      origin: "personal",
+    }],
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.equal(rebound.source.path, replacement);
+});
+
 test("resolution preserves a confirmed local binding across content drift", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-revalidate-local-"));
   const source = path.join(root, "review");
@@ -555,6 +716,9 @@ test("resolution preserves a confirmed local binding across content drift", asyn
     source: {
       skill_name: "review",
       kind: "local",
+      license: "MIT",
+      effective_fingerprint:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       identity: generateLocalIdentity({ skillName: "review", fingerprint }),
     },
   };

@@ -5,7 +5,6 @@ import {
   readFile,
   rename,
   unlink,
-  writeFile,
 } from "node:fs/promises";
 import path from "node:path";
 
@@ -33,7 +32,7 @@ export async function acquireStateLock(
   } = {},
 ) {
   const directory = path.dirname(filePath);
-  await mkdir(directory, { recursive: true });
+  await ensureDirectoryDurable(directory);
   const lockPath = `${filePath}.lock`;
   const deadline = Date.now() + timeoutMs;
   while (true) {
@@ -102,17 +101,54 @@ export async function readJsonState(filePath, fallback) {
   }
 }
 
-export async function writeJsonAtomic(filePath, value) {
+export async function writeJsonAtomic(filePath, value, options) {
+  return writeFileAtomic(
+    filePath,
+    `${JSON.stringify(value, null, 2)}\n`,
+    options,
+  );
+}
+
+async function syncDirectory(directory) {
+  const handle = await open(directory, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function ensureDirectoryDurable(directory) {
+  const created = await mkdir(directory, { recursive: true });
+  if (!created) return;
+  const stableAncestor = path.dirname(path.resolve(created));
+  let current = path.resolve(directory);
+  while (true) {
+    await syncDirectory(current);
+    if (current === stableAncestor) return;
+    current = path.dirname(current);
+  }
+}
+
+export async function writeFileAtomic(filePath, contents, { mode = 0o600 } = {}) {
   const directory = path.dirname(filePath);
-  await mkdir(directory, { recursive: true });
+  await ensureDirectoryDurable(directory);
   const temporary = path.join(
     directory,
     `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
   );
+  let handle;
   try {
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    handle = await open(temporary, "wx", mode);
+    await handle.writeFile(contents);
+    await handle.chmod(mode);
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
     await rename(temporary, filePath);
+    await syncDirectory(directory);
   } catch (error) {
+    await handle?.close().catch(() => {});
     await unlink(temporary).catch(() => {});
     throw error;
   }
