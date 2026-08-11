@@ -116,7 +116,10 @@ test("replacement forks require a confirmed unambiguous context binding", async 
     context: "workspace:test",
     statePath,
     roots,
-    activeSkills: oneActiveSource,
+    activeSkills: [
+      ...oneActiveSource,
+      { name: "review", path: forkRoot },
+    ],
   });
   assert.equal(confirmed.status, "ready");
   assert.deepEqual(confirmed.advisories, []);

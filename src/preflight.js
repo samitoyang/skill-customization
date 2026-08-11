@@ -39,6 +39,20 @@ function maintenance(descriptor, root, reason, detail) {
   };
 }
 
+async function excludeCurrentCustomization(activeSkills, root) {
+  if (!Array.isArray(activeSkills)) return activeSkills;
+  const included = await Promise.all(activeSkills.map(async (skill) => {
+    const candidate = skill.realPath ?? skill.path;
+    if (typeof candidate !== "string") return skill;
+    try {
+      return await realpath(candidate) === root ? null : skill;
+    } catch {
+      return path.resolve(candidate) === root ? null : skill;
+    }
+  }));
+  return included.filter(Boolean);
+}
+
 function effectiveFingerprint(descriptor, ownedFingerprint, sourceFingerprint) {
   const executionRole = descriptor.type === "fork" ? "workflow" : "delta";
   const executionSelector = [executionRole, descriptor.customization];
@@ -205,13 +219,14 @@ async function visit({
   if (descriptor.type === "fork") {
     if (descriptor.activation.mode === "replace") {
       try {
+        const replacementInventory = await excludeCurrentCustomization(activeSkills, root);
         await resolveBinding({
           descriptor,
           context,
           statePath,
           roots,
           managerRecords,
-          activeSkills,
+          activeSkills: replacementInventory,
         });
       } catch (error) {
         return maintenance(descriptor, root, "binding-maintenance", error.message);

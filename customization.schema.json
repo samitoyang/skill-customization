@@ -69,10 +69,9 @@
           "type": { "const": "fork" },
           "source": {
             "properties": {
-              "kind": { "const": "customization" },
-              "type": { "const": "semantic-overlay" }
+              "kind": { "const": "customization" }
             },
-            "required": ["kind", "type"]
+            "required": ["kind"]
           }
         },
         "required": ["type", "source"]
