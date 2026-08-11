@@ -27,6 +27,14 @@ function symbolicLinkError(relative) {
   return error;
 }
 
+function unsupportedOwnedPayloadNodeError(relative) {
+  const error = new TypeError(
+    `owned payload contains an unsupported filesystem node: ${relative}`,
+  );
+  error.code = "OWNED_PAYLOAD_UNSUPPORTED_NODE";
+  return error;
+}
+
 export function fingerprintValues(values, domain = "skill-customization-values-v1") {
   const hash = createHash("sha256");
   frame(hash, domain);
@@ -86,6 +94,8 @@ async function listOwnedPayload(root, current = root) {
       result.push(...(await listOwnedPayload(root, absolute)));
     } else if (entry.isFile()) {
       result.push({ relative, bytes: await readFile(absolute) });
+    } else {
+      throw unsupportedOwnedPayloadNodeError(relative);
     }
   }
   return result;

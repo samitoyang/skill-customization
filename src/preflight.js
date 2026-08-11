@@ -6,6 +6,7 @@ import {
   bindingStorePath,
   readBindingStore,
   resolveBinding,
+  validateBinding,
 } from "./bindings.js";
 import { readDescriptor } from "./descriptor.js";
 import {
@@ -76,6 +77,7 @@ async function sourceRoot(binding) {
 }
 
 async function forkTrackingAdvisory(descriptor, {
+  customizationRoot,
   context,
   statePath,
   roots,
@@ -105,6 +107,28 @@ async function forkTrackingAdvisory(descriptor, {
     };
   }
   try {
+    let validated;
+    if (descriptor.source.kind === "repository" || descriptor.source.kind === "local") {
+      try {
+        const trackingInventory = await excludeCurrentCustomization(
+          activeSkills,
+          customizationRoot,
+        );
+        validated = await validateBinding({
+          descriptor,
+          binding,
+          roots,
+          managerRecords,
+          activeSkills: trackingInventory,
+        });
+      } catch (error) {
+        return {
+          code: "tracking-binding-invalid",
+          message: "The optional fork tracking binding is invalid; fork execution is unaffected.",
+          detail: error.message,
+        };
+      }
+    }
     const target = await realpath(lookup);
     const info = await lstat(target);
     const root = info.isDirectory() ? target : path.dirname(target);
@@ -141,7 +165,7 @@ async function forkTrackingAdvisory(descriptor, {
       }
       current = tracked.effectiveFingerprint;
     } else {
-      current = await fingerprintPath(root);
+      current = validated?.inspection.fingerprint ?? await fingerprintPath(root);
     }
     if (current !== expected) {
       return {
@@ -238,6 +262,7 @@ async function visit({
       return maintenance(descriptor, root, "fork-payload-or-provenance-drift", error.message);
     }
     const advisory = await forkTrackingAdvisory(descriptor, {
+      customizationRoot: root,
       context,
       statePath,
       roots,

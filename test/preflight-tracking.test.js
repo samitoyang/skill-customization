@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -174,4 +174,80 @@ test("fork tracking compares a customization source by checked effective fingerp
   assert.equal(after.advisories.length, 1);
   assert.equal(after.advisories[0].code, "tracking-source-drift");
   assert.equal(after.advisories[0].expectedFingerprint, innerEffective);
+});
+
+test("fork tracking validates repository binding canonical targets before drift comparison", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "preflight-tracking-binding-"));
+  const sources = path.join(root, "sources");
+  const original = path.join(sources, "review-original");
+  const replacement = path.join(sources, "review-replacement");
+  const alias = path.join(sources, "review");
+  const forkRoot = path.join(root, "review-fork");
+  const snapshot = path.join(forkRoot, "provenance", "source");
+  const statePath = path.join(root, "state", "bindings.json");
+  await mkdir(original, { recursive: true });
+  await writeFile(path.join(original, "SKILL.md"), "---\nname: review\n---\nWorkflow.\n");
+  await symlink(original, alias, "dir");
+  await mkdir(snapshot, { recursive: true });
+  await writeFile(path.join(snapshot, "SKILL.md"), "---\nname: review\n---\nWorkflow.\n");
+  await writeRuntimeFiles(forkRoot, "review-fork", "Independent workflow.");
+  const diffPath = path.join(forkRoot, "provenance", "source.diff");
+  await writeFile(
+    diffPath,
+    "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1,4 +1,4 @@\n ---\n-name: review\n+name: review-fork\n ---\n-Workflow.\n+Run preflight and follow its checked steps.\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+Independent workflow.\n",
+  );
+  const snapshotFingerprint = await fingerprintPath(snapshot);
+  const descriptor = {
+    schema_version: 1,
+    id: "urn:test:tracking-binding-validation",
+    type: "fork",
+    name: "review-fork",
+    license: "MIT",
+    entrypoint: "SKILL.md",
+    customization: "CUSTOMIZATION.md",
+    dependencies: [],
+    owned_payload: { reviewed_fingerprint: await payloadFingerprint(forkRoot) },
+    source: {
+      skill_name: "review",
+      kind: "repository",
+      repository,
+      upstream_path: "skills/review/SKILL.md",
+      license: "MIT",
+      effective_fingerprint: snapshotFingerprint,
+      review: { revision: "tracking-binding-review" },
+    },
+    activation: { mode: "coexist" },
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint: snapshotFingerprint,
+      diff_fingerprint: await fingerprintFile(diffPath),
+    },
+  };
+  await writeDescriptor(forkRoot, descriptor);
+  const roots = [{ path: sources, scope: "workspace", origin: "fixture" }];
+  await bindCustomization({
+    descriptor,
+    sourcePath: alias,
+    context: "workspace:test",
+    statePath,
+    roots,
+    interactive: true,
+    confirm: async () => true,
+  });
+
+  await mkdir(replacement);
+  await writeFile(path.join(replacement, "SKILL.md"), "---\nname: review\n---\nWorkflow.\n");
+  await unlink(alias);
+  await symlink(replacement, alias, "dir");
+  const result = await preflightCustomization({
+    descriptorPath: path.join(forkRoot, "customization.json"),
+    context: "workspace:test",
+    statePath,
+    roots,
+  });
+
+  assert.equal(result.status, "ready-with-advisory");
+  assert.equal(result.advisories[0].code, "tracking-binding-invalid");
+  assert.match(result.advisories[0].detail, /retargeted/i);
 });
