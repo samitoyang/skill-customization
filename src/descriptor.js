@@ -248,9 +248,13 @@ function validateFork(descriptor, errors) {
   }
   checkFingerprint(errors, descriptor.fork.snapshot_fingerprint, "/fork/snapshot_fingerprint");
   checkFingerprint(errors, descriptor.fork.diff_fingerprint, "/fork/diff_fingerprint");
-  const needsMaterialization = descriptor.source?.kind === "customization";
+  const needsMaterialization = descriptor.source?.kind === "customization"
+    && descriptor.source.type === "semantic-overlay";
   if (needsMaterialization && descriptor.fork.materialization === undefined) {
-    issue(errors, "/fork/materialization", "is required when forking a customization source");
+    issue(errors, "/fork/materialization", "is required when forking an overlay source");
+  }
+  if (!needsMaterialization && descriptor.fork.materialization !== undefined) {
+    issue(errors, "/fork/materialization", "is only valid when forking an overlay source");
   }
   if (descriptor.fork.materialization !== undefined) {
     const materialization = descriptor.fork.materialization;

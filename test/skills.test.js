@@ -21,7 +21,8 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.match(markdown, /accept-maintenance/);
     assert.match(markdown, /never runs unchecked/);
     assert.match(markdown, /description: Create or maintain/);
-    assert.match(markdown, /natural-language or explicit/);
+    assert.match(markdown, /natural-language (?:overlay|fork) requests/);
+    assert.doesNotMatch(markdown, /natural-language or explicit/);
     assert.match(markdown, /existing/);
     assert.match(markdown, /ambiguous/);
     assert.doesNotMatch(markdown, /disable-(?:model|user)-invocation/);
@@ -33,6 +34,7 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
       markdown,
       /Treat the source as read-only and write only inside the (?:customization|fork) or local state paths\./,
     );
+    assert.match(markdown, /preflight reruns `ready` or `ready-with-advisory`/);
     const evals = JSON.parse(await read(`skills/${skillName}/evals/evals.json`));
     const intake = await read(`skills/${skillName}/references/intake.md`);
     assert.match(
@@ -111,6 +113,26 @@ test("fork maintenance guidance preserves reviewed materialization and advisory 
     assert.match(document, /unreadable or invalid optional tracking state/);
     assert.match(document, /snapshot directory/);
   }
+  assert.doesNotMatch(intake, /proposed delta/);
+  const evals = JSON.parse(await read("skills/skill-fork/evals/evals.json"));
+  assert.equal(evals.evals.find(({ id }) => id === 6)?.prompt.startsWith("Run "), true);
+  assert.match(
+    evals.evals.find(({ id }) => id === 14)?.expected_output ?? "",
+    /without overlay-chain materialization/,
+  );
+});
+
+test("contract fixture dispatcher negotiates the helper and stops safely", async () => {
+  const dispatcher = await read(
+    "test/fixtures/contract-v1/review-local-archive/SKILL.md",
+  );
+  assert.match(dispatcher, /description: Review work and archive the result locally\./);
+  assert.doesNotMatch(dispatcher, /description:.*preflight/);
+  assert.match(dispatcher, /skill-customization supports 1/);
+  assert.match(dispatcher, /unavailable, incompatible, or malformed/);
+  assert.match(dispatcher, /delegate to `skill-overlay` and do not execute/);
+  assert.match(dispatcher, /`ready` or `ready-with-advisory`/);
+  assert.match(dispatcher, /delegate `maintenance-required` to its maintenance handler/);
 });
 
 test("public maintenance references describe explicit fingerprint updates", async () => {

@@ -1,6 +1,6 @@
 ---
 name: skill-overlay
-description: Create or maintain a live-source skill customization that keeps receiving upstream improvements. Use for natural-language or explicit overlay requests, existing overlay maintenance stops, and ambiguous customization requests that need routing among overlay, fork, replacement, and companion.
+description: Create or maintain a live-source skill customization that keeps receiving upstream improvements. Use for natural-language overlay requests, existing overlay maintenance stops, and ambiguous customization requests that need routing among overlay, fork, replacement, and companion.
 license: MIT
 compatibility: Requires Node.js 18+ and skill-customization helper contract 1; npm only for the on-demand fallback.
 ---
@@ -14,7 +14,7 @@ An overlay keeps a live source workflow and adds one semantic delta. Generated o
 1. Inventory installed skills and adjacent customization metadata. For an existing overlay execution request, try the dispatcher fast path before intake. **Gate:** one descriptor and current host/workspace context are identified, or the request is classified as new maintenance work.
 2. Select one contract-1 helper, then run `skill-customization preflight <customization.json> --context <context>`. **Gate:** the result is checked and no runtime file has executed early.
 3. On `ready`, follow every execution step in order. On `ready-with-advisory`, report the advisory and follow the same steps. If preflight names another maintenance handler, delegate to it. **Gate:** execution completes from the checked plan or stops at one handler.
-4. For `maintenance-required`, explicit maintenance, or creation, use the matching branch below. Treat the source as read-only and write only inside the customization or local state paths. **Gate:** accepted changes are recorded atomically and preflight reruns ready, or the result stops with one action.
+4. For `maintenance-required`, explicit maintenance, or creation, use the matching branch below. Treat the source as read-only and write only inside the customization or local state paths. **Gate:** accepted changes are recorded atomically and preflight reruns `ready` or `ready-with-advisory`, or the result stops with one action.
 
 ## Select the helper
 
@@ -24,7 +24,7 @@ An installed compatible helper requires Node.js only. If unavailable or incompat
 
 ## Maintain an overlay
 
-Use the preflight handler reason to focus reconciliation on the stopped overlay. Review source drift against the semantic delta, repair bindings or owned-payload drift, and decide absorbed or incompatible changes explicitly. After acceptance, run `skill-customization accept-maintenance` with the reviewed source effective fingerprint when it changed, then rerun preflight. Activation resumes only from a ready result.
+Use the preflight handler reason to focus reconciliation on the stopped overlay. Review source drift against the semantic delta, repair bindings or owned-payload drift, and decide absorbed or incompatible changes explicitly. After acceptance, run `skill-customization accept-maintenance` with the reviewed source effective fingerprint when it changed, then rerun preflight. Activation resumes only from `ready` or `ready-with-advisory`.
 
 ## Create an overlay
 

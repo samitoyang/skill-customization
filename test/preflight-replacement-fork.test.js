@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -17,7 +17,7 @@ async function writeDescriptor(root, descriptor) {
   );
 }
 
-test("replacement forks require a confirmed unambiguous context binding", async () => {
+test("replacement forks remain runtime leaves with advisory-only tracking", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "preflight-replacement-fork-"));
   const sourceRoot = path.join(root, "review-source");
   const forkRoot = path.join(root, "review");
@@ -73,16 +73,17 @@ test("replacement forks require a confirmed unambiguous context binding", async 
   const descriptorPath = path.join(forkRoot, "customization.json");
   const oneActiveSource = [{ name: "review", path: sourceRoot }];
 
-  const unconfirmed = await preflightCustomization({
+  const untracked = await preflightCustomization({
     descriptorPath,
     context: "workspace:test",
     statePath,
     roots,
     activeSkills: oneActiveSource,
   });
-  assert.equal(unconfirmed.status, "maintenance-required");
-  assert.equal(unconfirmed.maintenanceHandler.reason, "binding-maintenance");
-  assert.deepEqual(unconfirmed.steps, []);
+  assert.equal(untracked.status, "ready");
+  assert.deepEqual(untracked.advisories, []);
+  assert.equal(untracked.maintenanceHandler, null);
+  assert.equal(untracked.steps.length, 1);
 
   await bindCustomization({
     descriptor,
@@ -96,7 +97,7 @@ test("replacement forks require a confirmed unambiguous context binding", async 
     activeSkills: oneActiveSource,
   });
 
-  const ambiguous = await preflightCustomization({
+  const ambiguousTracking = await preflightCustomization({
     descriptorPath,
     context: "workspace:test",
     statePath,
@@ -106,10 +107,11 @@ test("replacement forks require a confirmed unambiguous context binding", async 
       { name: "review", path: path.join(root, "other-review") },
     ],
   });
-  assert.equal(ambiguous.status, "maintenance-required");
-  assert.equal(ambiguous.maintenanceHandler.reason, "binding-maintenance");
-  assert.match(ambiguous.maintenanceHandler.detail, /ambiguous/i);
-  assert.deepEqual(ambiguous.steps, []);
+  assert.equal(ambiguousTracking.status, "ready-with-advisory");
+  assert.equal(ambiguousTracking.maintenanceHandler, null);
+  assert.equal(ambiguousTracking.advisories[0].code, "tracking-binding-invalid");
+  assert.match(ambiguousTracking.advisories[0].detail, /ambiguous/i);
+  assert.equal(ambiguousTracking.steps.length, 1);
 
   const confirmed = await preflightCustomization({
     descriptorPath,
@@ -126,4 +128,17 @@ test("replacement forks require a confirmed unambiguous context binding", async 
   assert.equal(confirmed.steps.length, 1);
   assert.equal(confirmed.steps[0].role, "workflow");
   assert.equal(confirmed.steps[0].customizationId, descriptor.id);
+
+  await rm(sourceRoot, { recursive: true });
+  const unavailableTracking = await preflightCustomization({
+    descriptorPath,
+    context: "workspace:test",
+    statePath,
+    roots,
+    activeSkills: [{ name: "review", path: forkRoot }],
+  });
+  assert.equal(unavailableTracking.status, "ready-with-advisory");
+  assert.equal(unavailableTracking.maintenanceHandler, null);
+  assert.equal(unavailableTracking.advisories[0].code, "tracking-binding-invalid");
+  assert.equal(unavailableTracking.steps.length, 1);
 });

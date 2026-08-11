@@ -5,8 +5,8 @@ All notable changes to this project are documented here.
 ## Unreleased
 
 - Redesign unpublished descriptor v1 and helper contract 1 around thin dispatchers, reviewed owned payloads, full-source/customization-source effective fingerprints, and helper-first preflight.
-- Add recursive overlay flattening with cycle/depth protection, fork runtime-leaf execution, advisory coexistence tracking bindings, separately confirmed and unambiguous context bindings for replacement forks (excluding the current customization from inventory), reviewed customization-source materialization, and targeted maintenance handlers.
-- Add `payload-fingerprint`, `preflight`, and `accept-maintenance` CLI/library behavior with atomic accepted-review updates and public-behavior tests.
+- Add recursive overlay flattening with cycle/depth protection, fork runtime-leaf execution, optional advisory tracking in every activation mode, separately confirmed replacement intent without a live runtime binding, overlay-chain materialization, verified-fork sources, and targeted maintenance handlers.
+- Add `payload-fingerprint`, `preflight`, and `accept-maintenance` CLI/library behavior with crash-safe accepted-review updates through immutable content-addressed fork diffs and one atomic descriptor commit, covered by public-behavior tests.
 - Require provenance-contained directory fork snapshots and diffs, fresh evidence for changed materializations, advisory handling for invalid optional tracking state, symlink-free fingerprinted source trees, canonically contained maintenance locks, and canonical, symlink-free runtime selectors covered by the owned-payload fingerprint.
 - Pass recursively checked execution plans into customization-source semantic review, preserve portable descriptor/diff modes during maintenance, and keep schema validation aligned with runtime non-blank string requirements.
 - Exclude clone-local version-control metadata from portable directory fingerprints and reject materialization review inputs when no materialization record exists.

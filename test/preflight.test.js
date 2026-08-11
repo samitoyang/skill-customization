@@ -454,6 +454,7 @@ test("materialization fingerprint changes require fresh review evidence", async 
     acceptMaintenanceUpdate({
       descriptorPath,
       sourceEffectiveFingerprint: changedSourceFingerprint,
+      diffContents: "unaccepted materialization diff\n",
     }),
     /reviewedAt and evidence are required/i,
   );
@@ -468,11 +469,15 @@ test("materialization fingerprint changes require fresh review evidence", async 
     JSON.parse(await readFile(descriptorPath, "utf8")),
     descriptor,
   );
+  assert.equal(
+    await readFile(diffPath, "utf8"),
+    "reviewed materialization diff\n",
+  );
 
   const accepted = await acceptMaintenanceUpdate({
     descriptorPath,
     sourceEffectiveFingerprint: changedSourceFingerprint,
-    diffContents: await readFile(diffPath),
+    diffContents: "updated reviewed materialization diff\n",
     reviewedAt: "2026-08-10T00:00:00Z",
     evidence: "Reviewed the updated materialization.",
   });
@@ -482,8 +487,31 @@ test("materialization fingerprint changes require fresh review evidence", async 
     reviewed_at: "2026-08-10T00:00:00Z",
     evidence: "Reviewed the updated materialization.",
   });
+  assert.match(
+    accepted.descriptor.fork.diff,
+    /^provenance\/diffs\/[0-9a-f]{64}\.diff$/,
+  );
+  assert.equal(
+    await readFile(path.join(forkRoot, accepted.descriptor.fork.diff), "utf8"),
+    "updated reviewed materialization diff\n",
+  );
+  assert.equal(
+    await readFile(diffPath, "utf8"),
+    "reviewed materialization diff\n",
+  );
+  const committed = JSON.parse(await readFile(descriptorPath, "utf8"));
+  const committedDiffPath = path.join(forkRoot, committed.fork.diff);
+  assert.equal(committed.fork.diff, accepted.descriptor.fork.diff);
+  assert.equal(
+    committed.fork.diff_fingerprint,
+    await fingerprintFile(committedDiffPath),
+  );
+  assert.equal(accepted.diffFingerprint, committed.fork.diff_fingerprint);
   assert.equal((await stat(descriptorPath)).mode & 0o777, 0o644);
-  assert.equal((await stat(diffPath)).mode & 0o777, 0o640);
+  assert.equal(
+    (await stat(committedDiffPath)).mode & 0o777,
+    0o640,
+  );
 });
 
 test("preflight detects recursive customization cycles by stable ID and canonical path", async () => {

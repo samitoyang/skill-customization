@@ -1,6 +1,6 @@
 ---
 name: skill-fork
-description: Create or maintain an independent skill that owns its complete workflow, provenance, license, snapshot directory, and diff. Use for natural-language or explicit fork requests, existing fork maintenance stops, and ambiguous customization requests that need routing among fork, overlay, replacement, and companion.
+description: Create or maintain an independent skill that owns its complete workflow, provenance, license, snapshot directory, and diff. Use for natural-language fork requests, existing fork maintenance stops, and ambiguous customization requests that need routing among fork, overlay, replacement, and companion.
 license: MIT
 compatibility: Requires Node.js 18+ and skill-customization helper contract 1; npm only for the on-demand fallback.
 ---
@@ -14,7 +14,7 @@ A fork is a runtime leaf whose `CUSTOMIZATION.md` is the complete independent wo
 1. Inventory installed skills and adjacent customization metadata. For an existing fork execution request, try the dispatcher fast path before intake. **Gate:** one descriptor and current host/workspace context are identified, or the request is classified as new maintenance work.
 2. Select one contract-1 helper, then run `skill-customization preflight <customization.json> --context <context>`. **Gate:** the result is checked and no runtime file has executed early.
 3. On `ready`, follow the workflow step. On `ready-with-advisory`, report the optional tracking advisory and run the fork unchanged; adoption or rebase remains explicit. If preflight names another maintenance handler, delegate to it. **Gate:** execution completes from the checked plan or stops at one handler.
-4. For `maintenance-required`, explicit maintenance, or creation, use the matching branch below. Treat the source as read-only and write only inside the fork or local state paths. **Gate:** accepted changes are recorded atomically and preflight reruns ready, or the result stops with one action.
+4. For `maintenance-required`, explicit maintenance, or creation, use the matching branch below. Treat the source as read-only and write only inside the fork or local state paths. **Gate:** accepted changes are recorded atomically and preflight reruns `ready` or `ready-with-advisory`, or the result stops with one action.
 
 ## Select the helper
 

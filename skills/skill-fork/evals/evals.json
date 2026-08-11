@@ -9,7 +9,7 @@
       "expectations": [
         "The response chooses fork rather than overlay and confirms the concrete source identity.",
         "The response derives workspace scope and avoids re-asking facts available from the path and request.",
-        "An available agent-writing or skill-creation skill reviews the delta, source conventions, triggers, examples, and completion criteria before the final brief.",
+        "An available agent-writing or skill-creation skill reviews the independent workflow, source conventions, triggers, examples, and completion criteria before the final brief.",
         "The brief includes independence, team distribution, and conditional npm fetch permission before any npx command."
       ]
     },
@@ -59,7 +59,7 @@
     },
     {
       "id": 6,
-      "prompt": "Verify my existing incident-response-standalone fork; its descriptor, CUSTOMIZATION.md, snapshot directory, and diff already exist.",
+      "prompt": "Run my existing incident-response-standalone fork; its descriptor, CUSTOMIZATION.md, snapshot directory, and diff already exist.",
       "expected_output": "Uses helper-first preflight and directly runs the fork's complete checked workflow without invoking maintenance when ready.",
       "files": [],
       "expectations": [
@@ -139,6 +139,17 @@
       "expectations": [
         "Unreadable or invalid optional tracking state produces ready-with-advisory rather than a maintenance stop.",
         "The response runs the complete fork workflow and does not rewrite authoritative provenance from malformed tracking state."
+      ]
+    },
+    {
+      "id": 14,
+      "prompt": "/skill-fork create an independent release skill from the verified deploy-standalone fork.",
+      "expected_output": "Uses the verified fork as a reviewed runtime-leaf source without overlay-chain materialization or a required live runtime binding.",
+      "files": [],
+      "expectations": [
+        "The descriptor records the verified source fork's stable ID, type, license, and effective fingerprint.",
+        "The fork owns a complete independent workflow, snapshot directory, and diff without adding overlay-chain materialization evidence.",
+        "Any tracking binding is optional and advisory; the resulting fork remains a runtime leaf."
       ]
     }
   ]

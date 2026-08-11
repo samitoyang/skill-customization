@@ -69,14 +69,20 @@
           "type": { "const": "fork" },
           "source": {
             "properties": {
-              "kind": { "const": "customization" }
+              "kind": { "const": "customization" },
+              "type": { "const": "semantic-overlay" }
             },
-            "required": ["kind"]
+            "required": ["kind", "type"]
           }
         },
         "required": ["type", "source"]
       },
-      "then": { "properties": { "fork": { "required": ["materialization"] } } }
+      "then": { "properties": { "fork": { "required": ["materialization"] } } },
+      "else": {
+        "properties": {
+          "fork": { "not": { "required": ["materialization"] } }
+        }
+      }
     }
   ],
   "$defs": {

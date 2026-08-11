@@ -390,7 +390,7 @@ test("fork requires relative snapshot and diff provenance", () => {
   );
 });
 
-test("descriptor supports recursive customization sources and requires reviewed materialization for forks", () => {
+test("descriptor requires materialization only when forking an overlay chain", () => {
   const source = {
     skill_name: "review-team-base",
     kind: "customization",
@@ -445,16 +445,16 @@ test("descriptor supports recursive customization sources and requires reviewed 
     source: { ...source, type: "fork" },
     fork,
   });
-  assert.ok(validateDescriptor(forkFromFork).some(
-    ({ path: pointer }) => pointer === "/fork/materialization",
-  ));
+  assert.deepEqual(validateDescriptor(forkFromFork), []);
   forkFromFork.fork.materialization = {
     source_effective_fingerprint: source.effective_fingerprint,
     snapshot_fingerprint: fork.snapshot_fingerprint,
     reviewed_at: "2026-08-11T00:00:00Z",
     evidence: "Reviewed the fork workflow materialization.",
   };
-  assert.deepEqual(validateDescriptor(forkFromFork), []);
+  assert.ok(validateDescriptor(forkFromFork).some(
+    ({ path: pointer }) => pointer === "/fork/materialization",
+  ));
 });
 
 test("reader checks folder/name equality and inventory collisions", async () => {

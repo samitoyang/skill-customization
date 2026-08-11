@@ -225,30 +225,7 @@ async function visit({
     );
   }
 
-  let bindingInventory;
-  try {
-    bindingInventory = descriptor.activation.mode === "replace"
-      ? await excludeSkillRootFromInventory(activeSkills, root)
-      : activeSkills;
-  } catch (error) {
-    return maintenance(descriptor, root, "binding-maintenance", error.message);
-  }
-
   if (descriptor.type === "fork") {
-    if (descriptor.activation.mode === "replace") {
-      try {
-        await resolveBinding({
-          descriptor,
-          context,
-          statePath,
-          roots,
-          managerRecords,
-          activeSkills: bindingInventory,
-        });
-      } catch (error) {
-        return maintenance(descriptor, root, "binding-maintenance", error.message);
-      }
-    }
     try {
       await reconcileCustomization({ descriptor, customizationRoot: root });
     } catch (error) {
@@ -278,6 +255,15 @@ async function visit({
       advisories,
       maintenanceHandler: null,
     };
+  }
+
+  let bindingInventory;
+  try {
+    bindingInventory = descriptor.activation.mode === "replace"
+      ? await excludeSkillRootFromInventory(activeSkills, root)
+      : activeSkills;
+  } catch (error) {
+    return maintenance(descriptor, root, "binding-maintenance", error.message);
   }
 
   let binding;

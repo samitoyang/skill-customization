@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
-import { lstat, mkdir, readFile } from "node:fs/promises";
+import { lstat, mkdir } from "node:fs/promises";
 
 import {
   assertValidDescriptor,
@@ -18,6 +19,30 @@ import {
 } from "./state.js";
 
 const FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
+
+async function publishForkDiff(root, descriptor, contents) {
+  const currentDiffPath = await resolveOwnedPath(root, descriptor.fork.diff, {
+    rejectSymlinks: true,
+  });
+  const mode = (await lstat(currentDiffPath)).mode & 0o777;
+  const digest = createHash("sha256").update(contents).digest("hex");
+  const relativePath = `provenance/diffs/${digest}.diff`;
+  const directory = path.join(root, "provenance", "diffs");
+  const directoryInfo = await lstat(directory).catch((error) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (directoryInfo) {
+    await resolveOwnedPath(root, "provenance/diffs", { rejectSymlinks: true });
+  }
+  const targetPath = path.join(directory, `${digest}.diff`);
+  await writeFileAtomic(targetPath, contents, { mode });
+  await resolveOwnedPath(root, relativePath, { rejectSymlinks: true });
+  return {
+    relativePath,
+    fingerprint: `sha256:${digest}`,
+  };
+}
 
 async function maintenanceLockPath(descriptorPath) {
   const root = path.dirname(descriptorPath);
@@ -46,9 +71,6 @@ export async function acceptMaintenanceUpdate({
   await readDescriptor(absoluteDescriptorPath);
   const maintenanceLock = await maintenanceLockPath(absoluteDescriptorPath);
   const release = await acquireStateLock(maintenanceLock);
-  let changedDiffPath;
-  let previousDiffContents;
-  let previousDiffMode;
   try {
     const descriptorMode = (await lstat(absoluteDescriptorPath)).mode & 0o777;
     const descriptor = structuredClone(await readDescriptor(absoluteDescriptorPath));
@@ -78,24 +100,22 @@ export async function acceptMaintenanceUpdate({
       if (descriptor.type !== "fork") {
         throw new TypeError("diffContents is only valid for fork maintenance");
       }
-      const diffPath = await resolveOwnedPath(root, descriptor.fork.diff, {
-        rejectSymlinks: true,
-      });
-      changedDiffPath = diffPath;
-      previousDiffMode = (await lstat(diffPath)).mode & 0o777;
-      previousDiffContents = await readFile(diffPath);
-      await writeFileAtomic(diffPath, diffContents, { mode: previousDiffMode });
+      const published = await publishForkDiff(root, descriptor, diffContents);
+      descriptor.fork.diff = published.relativePath;
+      descriptor.fork.diff_fingerprint = published.fingerprint;
     }
     descriptor.owned_payload.reviewed_fingerprint = await payloadFingerprint(root);
     if (descriptor.type === "fork") {
       const snapshotPath = await resolveOwnedPath(root, descriptor.fork.snapshot, {
         rejectSymlinks: true,
       });
-      const diffPath = await resolveOwnedPath(root, descriptor.fork.diff, {
-        rejectSymlinks: true,
-      });
       descriptor.fork.snapshot_fingerprint = await fingerprintPath(snapshotPath);
-      descriptor.fork.diff_fingerprint = await fingerprintFile(diffPath);
+      if (diffContents === undefined) {
+        const diffPath = await resolveOwnedPath(root, descriptor.fork.diff, {
+          rejectSymlinks: true,
+        });
+        descriptor.fork.diff_fingerprint = await fingerprintFile(diffPath);
+      }
       if (
         ["repository", "local"].includes(descriptor.source.kind)
         && descriptor.fork.snapshot_fingerprint
@@ -142,13 +162,6 @@ export async function acceptMaintenanceUpdate({
           }
         : {}),
     };
-  } catch (error) {
-    if (changedDiffPath && previousDiffContents) {
-      await writeFileAtomic(changedDiffPath, previousDiffContents, {
-        mode: previousDiffMode,
-      }).catch(() => {});
-    }
-    throw error;
   } finally {
     await release();
   }

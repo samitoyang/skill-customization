@@ -7,7 +7,7 @@ const fingerprint = `sha256:${"a".repeat(64)}`;
 const snapshotFingerprint = `sha256:${"b".repeat(64)}`;
 const diffFingerprint = `sha256:${"c".repeat(64)}`;
 
-test("fork-from-fork customization sources require reviewed materialization", () => {
+test("fork-from-fork sources use the verified runtime leaf without materialization", () => {
   const descriptor = {
     schema_version: 1,
     id: "urn:test:fork-from-fork",
@@ -35,9 +35,7 @@ test("fork-from-fork customization sources require reviewed materialization", ()
     },
   };
 
-  assert.ok(validateDescriptor(descriptor).some(
-    ({ path: pointer }) => pointer === "/fork/materialization",
-  ));
+  assert.deepEqual(validateDescriptor(descriptor), []);
 
   descriptor.fork.materialization = {
     source_effective_fingerprint: fingerprint,
@@ -45,5 +43,7 @@ test("fork-from-fork customization sources require reviewed materialization", ()
     reviewed_at: "2026-08-11T00:00:00Z",
     evidence: "Reviewed the fork workflow materialization.",
   };
-  assert.deepEqual(validateDescriptor(descriptor), []);
+  assert.ok(validateDescriptor(descriptor).some(
+    ({ path: pointer }) => pointer === "/fork/materialization",
+  ));
 });

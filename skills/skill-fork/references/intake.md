@@ -28,6 +28,6 @@ Resolve these fields:
 - **Dispatcher:** generate a thin `SKILL.md` that runs contract-1 preflight, follows only ready steps, and delegates unavailable, incompatible, or maintenance-required results to `skill-fork`.
 - **Helper fallback:** record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 1. The download may run only after brief confirmation.
 
-Before finalizing, invoke any available skill-creation or agent-writing skill, such as `skill-creator` or `writing-for-agents`. Review the proposed delta against source conventions, trigger behavior, realistic examples, and checkable completion criteria. Fold material findings into the brief.
+Before finalizing, invoke any available skill-creation or agent-writing skill, such as `skill-creator` or `writing-for-agents`. Review the proposed independent workflow against source conventions, trigger behavior, realistic examples, and checkable completion criteria. Fold material findings into the brief.
 
 Present one brief containing every field above and ask for one confirmation. Intake is complete only when source identity, independent workflow, placement, name, activation, materialization/tracking choices, distribution intent, dispatcher behavior, conditional helper permission, and any workflow-model switch are explicit. Helper-backed creation begins after confirmation.
