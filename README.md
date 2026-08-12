@@ -106,7 +106,7 @@ skill-customization/
 ```
 
 > [!NOTE]
-> Local helper reuse requires a symlink and approval; copied skills use an installed helper or the approved registry fallback.
+> A symlinked checkout can reuse its local helper after approval. If the skills are just copied to a skill root, an installed helper or the approved registry fallback is still needed.
 
 Optionally pre-install the helper:
 
@@ -114,7 +114,7 @@ Optionally pre-install the helper:
 npm install --global skill-customization@latest
 ```
 
-The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. Compatibility is checked before use, and each on-demand local or registry execution requires approval.
+The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. Compatibility is checked before use. Approval when selecting an on-demand helper covers subsequent helper commands while its recorded identity and state remain unchanged.
 
 ## 🌐 Ecosystem Compatibility
 
@@ -188,7 +188,7 @@ Before artifacts are written or a binding is created, one brief confirms the com
 | Name and activation | Coexist or explicit replacement |
 | Workspace context | Destination, binding scope, and directory boundaries |
 | License and provenance | Review and redistribution evidence |
-| Helper access | Whether to use an installed helper or permit an on-demand compatibility check to download or reuse cached code |
+| Helper access | Whether to use an installed helper or approve an on-demand local or registry helper |
 
 > [!IMPORTANT]
 > Same-name replacement requires separate confirmation because it changes which skill activates.
@@ -232,6 +232,7 @@ A ready customization executes its checked runtime instructions directly without
 | Resolved source | Read-only input with a symlink-free fingerprinted target tree that excludes clone-local version-control metadata; top-level installation aliases resolve to their canonical target |
 | Portable descriptor | Stable identity, own/source licenses, relative artifacts, reviewed fingerprints, and activation; runtime selectors stay inside the reviewed owned payload and no concrete source paths are stored |
 | Local state | Context-scoped bindings and compatibility decisions remain private and are written atomically; maintenance locks are canonically contained and portable descriptor/diff modes are preserved |
+| Helper execution | Checkout metadata identifies but does not authenticate a local candidate; approval when selecting an on-demand helper covers subsequent commands only while its recorded identity and state remain unchanged |
 | Overlay | Live context binding, reviewed owned payload, and full-source or customization-source effective fingerprint |
 | Fork | Runtime leaf with complete workflow and a relative, symlink-free snapshot directory and diff beneath reserved `provenance/` |
 
@@ -240,7 +241,7 @@ Published descriptors keep stable identity and provenance portable. Concrete sou
 ## 📚 References
 
 - For direct helper use, read the [CLI reference](docs/cli.md); `skill-customization --help` is authoritative for commands and options.
-- For Node.js/npm prerequisites, helper negotiation, download and cache permission, package selection, and compatibility guarantees, read [Helper contract 1](docs/helper-contract-1.md).
+- For Node.js/npm prerequisites, helper negotiation, local-code execution approval, registry download/cache permission, package selection, and compatibility guarantees, read [Helper contract 1](docs/helper-contract-1.md).
 - For publishable identity and activation fields, read [Descriptor v1](docs/descriptor-v1.md).
 - For roots, evidence order, source selection, and local state, read [Discovery and bindings](docs/discovery-and-bindings.md).
 - For overlay drift and fork-payload verification, read [Reconciliation](docs/reconciliation.md).

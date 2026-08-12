@@ -222,11 +222,18 @@ test("README combines public workflow design with contract-compatible helper beh
   assert.match(markdown, /git clone https:\/\/github\.com\/samitoyang\/skill-customization\.git/);
   assert.match(markdown, /symlink the complete skill directories/);
   assert.doesNotMatch(markdown, /copy or symlink the complete skill directories/);
-  assert.match(markdown, /> \[!NOTE\]\n> Local helper reuse requires a symlink and approval;/);
-  assert.match(markdown, /copied skills use an installed helper or the approved registry fallback/);
+  assert.match(
+    markdown,
+    /> \[!NOTE\]\n> A symlinked checkout can reuse its local helper after approval\./,
+  );
+  assert.match(
+    markdown,
+    /If the skills are just copied to a skill root, an installed helper or the approved registry fallback is still needed/,
+  );
   assert.doesNotMatch(markdown, /recent Claude Code releases/);
   assert.doesNotMatch(markdown, /repository-verified symlinked checkout/);
-  assert.match(markdown, /each on-demand local or registry execution requires approval/);
+  assert.match(markdown, /Approval when selecting an on-demand helper covers subsequent helper commands/);
+  assert.match(markdown, /while its recorded identity and state remain unchanged/);
   assert.match(markdown, /npm install --global skill-customization@latest/);
   assert.match(markdown, /Optionally pre-install the helper/);
   assert.match(markdown, /Compatibility is checked before use/);
@@ -323,6 +330,9 @@ test("README combines public workflow design with contract-compatible helper beh
   assert.match(markdown, /\[Helper contract 1\]\(docs\/helper-contract-1\.md\)/);
   assert.equal(markdown.match(/Helper contract 1/g)?.length, 1);
   assert.match(markdown, /\| Boundary \| Guarantee \|/);
+  assert.match(markdown, /\| Helper execution \| Checkout metadata identifies but does not authenticate a local candidate/);
+  assert.match(markdown, /covers subsequent commands only while its recorded identity and state remain unchanged/);
+  assert.match(markdown, /local-code execution approval/);
   assert.doesNotMatch(markdown, /## 🤝 Contributing and License/);
 });
 
