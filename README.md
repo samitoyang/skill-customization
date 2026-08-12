@@ -105,7 +105,8 @@ skill-customization/
     └── skill-overlay/
 ```
 
-Keeping the symlink is required for a maintenance skill to locate and verify the checkout before executing its local helper package. A copied skill still works with an installed helper or the permission-gated registry fallback, but it cannot reuse the clone's helper.
+> [!NOTE]
+> Local helper reuse requires a symlink and approval; copied skills use an installed helper or the approved registry fallback.
 
 Optionally pre-install the helper:
 
@@ -113,7 +114,7 @@ Optionally pre-install the helper:
 npm install --global skill-customization@latest
 ```
 
-The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. A repository-verified symlinked checkout can provide it locally through `npx --package`; otherwise a skill can ask permission for an on-demand registry fetch. Compatibility is checked before use.
+The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. Compatibility is checked before use, and each on-demand local or registry execution requires approval.
 
 ## 🌐 Ecosystem Compatibility
 
