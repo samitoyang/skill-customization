@@ -39,12 +39,15 @@
     "docs/adr/0001-managed-recursive-runtime.md",
     "customization.schema.json",
     "CHANGELOG.md",
+    "CONTRIBUTING.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md"
   ],
   "scripts": {
+    "check:package": "node scripts/check-package.js",
     "test": "node --test",
-    "verify": "node scripts/verify.js && node --test",
+    "verify": "node scripts/verify.js && node --test && npm run check:package",
     "prepublishOnly": "npm run verify"
   },
   "engines": {
