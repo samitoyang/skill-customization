@@ -97,8 +97,13 @@ test("skill helper policy covers installed, linked, registry, and stopped paths"
     );
     assert.match(markdown, /compatible: true/);
     assert.match(markdown, /non-empty `package_version`/);
-    assert.match(markdown, /clean Git checkout/);
-    assert.match(markdown, /commit and clean state remain unchanged/);
+    assert.match(markdown, /bounded Git ancestors/);
+    assert.match(
+      markdown,
+      /`origin` URL normalizes to `https:\/\/github\.com\/samitoyang\/skill-customization`/,
+    );
+    assert.match(markdown, /root package is named `skill-customization`/);
+    assert.match(markdown, /origin, commit, and clean state remain unchanged/);
     assert.match(markdown, /may download `skill-customization@latest` and reuse npm's cache/);
     assert.match(markdown, /obtain permission\. After approval, run/);
     assert.match(markdown, /skill-customization@<package_version> <command>/);
@@ -207,9 +212,15 @@ test("README combines public workflow design with contract-compatible helper beh
     /Natural-language requests can select either skill automatically/,
   );
   assert.match(markdown, /git clone https:\/\/github\.com\/samitoyang\/skill-customization\.git/);
-  assert.match(markdown, /copy or symlink the complete skill directories/);
+  assert.match(markdown, /symlink the complete skill directories/);
+  assert.doesNotMatch(markdown, /copy or symlink the complete skill directories/);
+  assert.match(markdown, /Keeping the symlink is required/);
+  assert.match(markdown, /A copied skill still works/);
   assert.doesNotMatch(markdown, /recent Claude Code releases/);
-  assert.match(markdown, /A cloned checkout can provide it locally through `npx --package`/);
+  assert.match(
+    markdown,
+    /A repository-verified symlinked checkout can provide it locally through `npx --package`/,
+  );
   assert.match(markdown, /npm install --global skill-customization@latest/);
   assert.match(markdown, /Optionally pre-install the helper/);
   assert.match(markdown, /Compatibility is checked before use/);

@@ -92,7 +92,7 @@ Install both customization skills with [skills](https://github.com/vercel-labs/s
 npx skills@latest add samitoyang/skill-customization
 ```
 
-Or clone the repository, then copy or symlink the complete skill directories into a skill root supported by the host:
+Or clone the repository, then symlink the complete skill directories into a skill root supported by the host:
 
 ```sh
 git clone https://github.com/samitoyang/skill-customization.git
@@ -105,13 +105,15 @@ skill-customization/
     └── skill-overlay/
 ```
 
+Keeping the symlink is required for a maintenance skill to locate and verify the checkout before executing its local helper package. A copied skill still works with an installed helper or the permission-gated registry fallback, but it cannot reuse the clone's helper.
+
 Optionally pre-install the helper:
 
 ```sh
 npm install --global skill-customization@latest
 ```
 
-The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. A cloned checkout can provide it locally through `npx --package`; otherwise a skill can ask permission for an on-demand registry fetch. Compatibility is checked before use.
+The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. A repository-verified symlinked checkout can provide it locally through `npx --package`; otherwise a skill can ask permission for an on-demand registry fetch. Compatibility is checked before use.
 
 ## 🌐 Ecosystem Compatibility
 
