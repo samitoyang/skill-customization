@@ -92,14 +92,18 @@ Install both customization skills with [skills](https://github.com/vercel-labs/s
 npx skills@latest add samitoyang/skill-customization
 ```
 
-Or install either skill:
+Or clone the repository, then copy or symlink the complete skill directories into a skill root supported by the host:
 
 ```sh
-npx skills@latest add samitoyang/skill-customization --skill skill-overlay
-npx skills@latest add samitoyang/skill-customization --skill skill-fork
+git clone https://github.com/samitoyang/skill-customization.git
 ```
 
-Natural-language requests can select either skill automatically, and explicit slash invocation remains available.
+```text
+skill-customization/
+└── skills/
+    ├── skill-fork/
+    └── skill-overlay/
+```
 
 Optionally pre-install the helper:
 
@@ -107,7 +111,7 @@ Optionally pre-install the helper:
 npm install --global skill-customization@latest
 ```
 
-The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. Without a pre-installed copy, a skill can ask permission to run it through `npx` when needed. Compatibility is checked before use.
+The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. A cloned checkout can provide it locally through `npx --package`; otherwise a skill can ask permission for an on-demand registry fetch. Compatibility is checked before use.
 
 ## 🌐 Ecosystem Compatibility
 

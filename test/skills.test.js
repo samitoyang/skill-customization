@@ -83,14 +83,22 @@ test("published skills are independently installable", async () => {
   }
 });
 
-test("skill helper policy covers installed, npx, declined, incompatible, and missing prerequisites", async () => {
+test("skill helper policy covers installed, linked, registry, and stopped paths", async () => {
   for (const skillName of ["skill-overlay", "skill-fork"]) {
     const markdown = await read(`skills/${skillName}/SKILL.md`);
     const installed = markdown.indexOf("skill-customization supports 1");
-    const fallback = markdown.indexOf("npx --yes skill-customization@latest supports 1");
-    assert.ok(installed >= 0 && fallback > installed, "installed helper must be tried first");
+    const linked = markdown.indexOf(
+      "npx --yes --package <checkout-root> skill-customization supports 1",
+    );
+    const registry = markdown.indexOf("npx --yes skill-customization@latest supports 1");
+    assert.ok(
+      installed >= 0 && linked > installed && registry > linked,
+      "helper selection must try installed, linked, then registry candidates",
+    );
     assert.match(markdown, /compatible: true/);
     assert.match(markdown, /non-empty `package_version`/);
+    assert.match(markdown, /clean Git checkout/);
+    assert.match(markdown, /commit and clean state remain unchanged/);
     assert.match(markdown, /may download `skill-customization@latest` and reuse npm's cache/);
     assert.match(markdown, /obtain permission\. After approval, run/);
     assert.match(markdown, /skill-customization@<package_version> <command>/);
@@ -193,12 +201,17 @@ test("README combines public workflow design with contract-compatible helper beh
   assert.match(markdown, /no live runtime source required/);
   assert.match(markdown, /\| Mode \| Naming \| Behavior \|/);
   assert.match(markdown, /npx skills@latest add samitoyang\/skill-customization\n/);
-  assert.match(markdown, /--skill skill-overlay/);
-  assert.match(markdown, /--skill skill-fork/);
   assert.doesNotMatch(markdown, /npx skills@[^\n]*--global/);
+  assert.doesNotMatch(
+    markdown,
+    /Natural-language requests can select either skill automatically/,
+  );
+  assert.match(markdown, /git clone https:\/\/github\.com\/samitoyang\/skill-customization\.git/);
+  assert.match(markdown, /copy or symlink the complete skill directories/);
+  assert.doesNotMatch(markdown, /recent Claude Code releases/);
+  assert.match(markdown, /A cloned checkout can provide it locally through `npx --package`/);
   assert.match(markdown, /npm install --global skill-customization@latest/);
   assert.match(markdown, /Optionally pre-install the helper/);
-  assert.doesNotMatch(markdown, /skill-customization supports 1/);
   assert.match(markdown, /Compatibility is checked before use/);
   assert.doesNotMatch(markdown, /Reported pain points and evidence/);
   assert.doesNotMatch(markdown, /github\.com\/(?:anthropics\/skills\/discussions|vercel-labs\/skills\/issues)/);
@@ -334,6 +347,19 @@ test("the package uses a public-document allowlist and verifies its Node 18 floo
   assert.ok(publicDocs.every((file) => !file.includes("*")));
   assert.equal(packageJson.engines.node, ">=18");
   assert.equal(packageJson.publishConfig.access, "public");
+  assert.ok(packageJson.files.includes("CONTRIBUTING.md"));
+  assert.ok(packageJson.files.includes("SECURITY.md"));
+  assert.match(packageJson.scripts.verify, /npm run check:package/);
+  assert.equal(packageJson.scripts.prepublishOnly, "npm run verify");
+  const packageAudit = await read("scripts/check-package.js");
+  for (const releaseFile of [
+    "docs/adr/0001-managed-recursive-runtime.md",
+    "src/maintenance.js",
+    "src/owned-payload.js",
+    "src/preflight.js",
+  ]) {
+    assert.ok(packageAudit.includes(`"${releaseFile}"`));
+  }
   assert.equal(
     packageJson.repository.url,
     "git+https://github.com/samitoyang/skill-customization.git",

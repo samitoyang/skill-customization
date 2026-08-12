@@ -1,0 +1,110 @@
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "skill-customization-pack-"));
+
+const requiredFiles = [
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "LICENSE",
+  "README.md",
+  "SECURITY.md",
+  "bin/skill-customization.js",
+  "customization.schema.json",
+  "docs/cli.md",
+  "docs/descriptor-v1.md",
+  "docs/discovery-and-bindings.md",
+  "docs/helper-contract-1.md",
+  "docs/library.md",
+  "docs/reconciliation.md",
+  "docs/adr/0001-managed-recursive-runtime.md",
+  "package.json",
+  "skills/skill-fork/SKILL.md",
+  "skills/skill-overlay/SKILL.md",
+  "src/index.js",
+  "src/maintenance.js",
+  "src/owned-payload.js",
+  "src/preflight.js",
+];
+
+const forbiddenPaths = [
+  ".git/",
+  ".github/",
+  ".internal/",
+  "AGENTS.md",
+  "CONTEXT.md",
+  "scripts/",
+  "test/",
+];
+
+function npmInvocation() {
+  if (process.env.npm_execpath) {
+    return {
+      command: process.execPath,
+      arguments: [process.env.npm_execpath],
+    };
+  }
+
+  return {
+    command: process.platform === "win32" ? "npm.cmd" : "npm",
+    arguments: [],
+  };
+}
+
+try {
+  const invocation = npmInvocation();
+  const packed = spawnSync(
+    invocation.command,
+    [
+      ...invocation.arguments,
+      "pack",
+      "--dry-run",
+      "--ignore-scripts",
+      "--json",
+      "--cache",
+      path.join(temporaryRoot, "npm-cache"),
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+
+  if (packed.status !== 0) {
+    throw new Error(packed.stderr || packed.stdout || "npm pack --dry-run failed");
+  }
+
+  const report = JSON.parse(packed.stdout);
+  if (!Array.isArray(report) || report.length !== 1) {
+    throw new Error("npm pack returned an unexpected report");
+  }
+
+  const files = new Set(report[0].files?.map(({ path: file }) => file));
+  const missing = requiredFiles.filter((file) => !files.has(file));
+  const forbidden = [...files].filter((file) =>
+    forbiddenPaths.some((candidate) =>
+      candidate.endsWith("/") ? file.startsWith(candidate) : file === candidate,
+    ),
+  );
+
+  if (missing.length > 0) {
+    throw new Error(`npm package is missing required files: ${missing.join(", ")}`);
+  }
+  if (forbidden.length > 0) {
+    throw new Error(`npm package contains private files: ${forbidden.join(", ")}`);
+  }
+
+  const cli = report[0].files.find(
+    ({ path: file }) => file === "bin/skill-customization.js",
+  );
+  if ((cli.mode & 0o111) === 0) {
+    throw new Error("npm package CLI is not executable");
+  }
+
+  process.stdout.write(
+    `checked npm package (${report[0].entryCount} files, ${report[0].unpackedSize} bytes unpacked)\n`,
+  );
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}

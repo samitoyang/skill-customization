@@ -2,7 +2,7 @@
 
 Run `skill-customization --help` for the authoritative command and option list.
 
-For helper selection, run `skill-customization supports 1`. Accept only exit `0` and JSON with `compatible: true`, requested contract `1`, supported contracts containing `1`, and a non-empty package version. If the installed command is unavailable or incompatible, explain that an `npx` fallback may download code or reuse npm cache and obtain permission before running it.
+For helper selection, run `skill-customization supports 1`. Accept only exit `0` and JSON with `compatible: true`, requested contract `1`, supported contracts containing `1`, and a non-empty package version. If the installed command is unavailable or incompatible, first resolve the active maintenance skill's real path. A clean `skill-customization` checkout may run `npx --yes --package <checkout-root> skill-customization supports 1` without a download; record its commit and reuse it only while the commit and clean state remain unchanged. Otherwise explain that the registry fallback may download code or reuse npm cache and obtain permission before running it.
 
 Runtime dispatch uses:
 

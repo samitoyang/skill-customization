@@ -20,7 +20,9 @@ An overlay keeps a live source workflow and adds one semantic delta. Generated o
 
 Run `skill-customization supports 1`. Accept only exit `0` with JSON reporting `compatible: true`, `requested_contract: "1"`, `supported_contracts` containing `"1"`, and a non-empty `package_version`. Use that installed executable for this run.
 
-An installed compatible helper requires Node.js only. If unavailable or incompatible, explain that `npx` may download `skill-customization@latest` and reuse npm's cache, then obtain permission. After approval, run `npx --yes skill-customization@latest supports 1`; when compatible, use `npx --yes skill-customization@<package_version> <command>` for the remaining commands. Stop with setup guidance if Node.js is missing, if the fallback requires npm and npm is missing, if permission is declined, if output is malformed, or if contract 1 is unsupported. A dispatcher delegates here when installed preflight is unavailable or incompatible; it never runs unchecked.
+An installed compatible helper requires Node.js only. If unavailable or incompatible, resolve this skill's real path. When it belongs to a clean Git checkout whose root package is `skill-customization`, record its commit and run `npx --yes --package <checkout-root> skill-customization supports 1`. When compatible, use that same checkout for the remaining commands only while its commit and clean state remain unchanged.
+
+Otherwise explain that `npx` may download `skill-customization@latest` and reuse npm's cache, then obtain permission. After approval, run `npx --yes skill-customization@latest supports 1`; when compatible, use `npx --yes skill-customization@<package_version> <command>` for the remaining commands. Stop with setup guidance if Node.js is missing, if either fallback requires npm and npm is missing, if permission is declined, if output is malformed, if the linked checkout changes, or if contract 1 is unsupported. A dispatcher delegates here when installed preflight is unavailable or incompatible; it never runs unchecked.
 
 ## Maintain an overlay
 

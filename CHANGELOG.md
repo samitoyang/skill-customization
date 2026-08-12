@@ -2,23 +2,13 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.1.0 - 2026-08-12
 
-- Redesign unpublished descriptor v1 and helper contract 1 around thin dispatchers, reviewed owned payloads, full-source/customization-source effective fingerprints, and helper-first preflight.
-- Add recursive overlay flattening with cycle/depth protection, fork runtime-leaf execution, optional advisory tracking in every activation mode, separately confirmed replacement intent without a live runtime binding, overlay-chain materialization, verified-fork sources, and targeted maintenance handlers.
-- Add `payload-fingerprint`, `preflight`, and `accept-maintenance` CLI/library behavior with crash-safe accepted-review updates through immutable content-addressed fork diffs and one atomic descriptor commit, covered by public-behavior tests.
-- Require provenance-contained directory fork snapshots and diffs, fresh evidence for changed materializations, advisory handling for invalid optional tracking state, symlink-free fingerprinted source trees, canonically contained maintenance locks, and canonical, symlink-free runtime selectors covered by the owned-payload fingerprint.
-- Pass recursively checked execution plans into customization-source semantic review, preserve portable descriptor/diff modes during maintenance, and keep schema validation aligned with runtime non-blank string requirements.
-- Exclude clone-local version-control metadata from portable directory fingerprints and reject materialization review inputs when no materialization record exists.
-- Reconcile recursive customization sources by their checked effective fingerprint, align schema/runtime portable paths, and invalidate bindings whose sources become unfingerprintable.
-- Add helper contract 1 and the public `skill-customization supports <contract>` compatibility check.
-- Freeze the redesigned contract-1 descriptors, state readability, fingerprints, discovery/binding semantics, CLI outputs and exits with named regression tests and golden fixtures.
-- Replace exact helper-version coupling in both published skills with confirmed intake, contract negotiation, and an exact-version on-demand run after compatibility succeeds.
-- Add complete-path, name-only, idea-only, empty, existing-artifact, and model-mismatch intake behavior for overlay and fork workflows.
-- Expand user documentation with reported pain points, prerequisites, slash invocation, required-input examples, and legacy exact-pin compatibility guidance.
-
-## 0.1.0 - 2026-08-05
-
-- Add the Node.js library and CLI for portable customization descriptors, bounded source discovery, local bindings, fingerprints, reconciliation, and atomic state.
-- Add the independently installable `skill-overlay` and `skill-fork` agent skills.
-- Add descriptor schema, manager adapters, and GitHub Actions verification.
+- Add the dependency-free Node.js library and CLI for portable descriptor v1 validation, bounded source discovery, local bindings, fingerprints, preflight, reconciliation, and crash-safe atomic maintenance.
+- Add helper contract 1 negotiation through `skill-customization supports <contract>`, with stable regression fixtures for descriptors, state, discovery, CLI results, and reconciliation statuses.
+- Add recursive overlay preflight with cycle and depth protection, fork runtime leaves, advisory tracking, overlay-chain materialization, checked execution plans, and targeted maintenance handlers.
+- Add symlink-free owned-payload and source verification, provenance-contained fork snapshots and diffs, canonical runtime selectors and locks, and clone-local version-control metadata exclusions.
+- Add independently installable `skill-overlay` and `skill-fork` workflows with confirmed intake, coexist and replacement activation, helper compatibility checks, and safe maintenance stops.
+- Support installed helpers, clean cloned-checkout helpers through local-package `npx`, and permission-gated exact-version registry fallback without requiring a global helper installation.
+- Support declared host roots, bounded workspace ancestors, configured paths, and metadata from skills v3, ASM, Skills Manager, and skillsmgr without arbitrary filesystem crawling.
+- Add the descriptor schema, public ADR and technical references, npm package-surface auditing, Node.js 18/22/24 verification, and GitHub Actions CI for the initial public release.
