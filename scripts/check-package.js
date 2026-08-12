@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isForbiddenPackagePath } from "./package-path-policy.js";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "skill-customization-pack-"));
@@ -29,16 +30,6 @@ const requiredFiles = [
   "src/maintenance.js",
   "src/owned-payload.js",
   "src/preflight.js",
-];
-
-const forbiddenPaths = [
-  ".git/",
-  ".github/",
-  ".internal/",
-  "AGENTS.md",
-  "CONTEXT.md",
-  "scripts/",
-  "test/",
 ];
 
 function npmInvocation() {
@@ -82,11 +73,7 @@ try {
 
   const files = new Set(report[0].files?.map(({ path: file }) => file));
   const missing = requiredFiles.filter((file) => !files.has(file));
-  const forbidden = [...files].filter((file) =>
-    forbiddenPaths.some((candidate) =>
-      candidate.endsWith("/") ? file.startsWith(candidate) : file === candidate,
-    ),
-  );
+  const forbidden = [...files].filter(isForbiddenPackagePath);
 
   if (missing.length > 0) {
     throw new Error(`npm package is missing required files: ${missing.join(", ")}`);
