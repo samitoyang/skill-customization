@@ -8,7 +8,7 @@
   "customization": "CUSTOMIZATION.md",
   "dependencies": [],
   "owned_payload": {
-    "reviewed_fingerprint": "sha256:edd75c5e26f1170d3cff687603e90144d7e75360f0fff15fbdd71ab3bb6be74d"
+    "reviewed_fingerprint": "sha256:a397568b1d02bcecbab5fb3486f15e17fe581b109c0d20d64dca8d67db3a843b"
   },
   "source": {
     "skill_name": "review",

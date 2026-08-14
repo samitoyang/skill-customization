@@ -26,6 +26,7 @@ const requiredFiles = [
   "package.json",
   "skills/skill-fork/SKILL.md",
   "skills/skill-overlay/SKILL.md",
+  "src/dispatcher-renderer.js",
   "src/index.js",
   "src/maintenance.js",
   "src/owned-payload.js",

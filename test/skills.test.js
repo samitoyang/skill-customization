@@ -147,13 +147,16 @@ test("contract fixture dispatcher negotiates the helper and stops safely", async
   const dispatcher = await read(
     "test/fixtures/contract-v1/review-local-archive/SKILL.md",
   );
-  assert.match(dispatcher, /description: Review work and archive the result locally\./);
+  assert.match(dispatcher, /description: "Review work and archive the result locally\."/);
   assert.doesNotMatch(dispatcher, /description:.*preflight/);
   assert.match(dispatcher, /skill-customization supports 1/);
-  assert.match(dispatcher, /unavailable, incompatible, or malformed/);
-  assert.match(dispatcher, /delegate to `skill-overlay` and do not execute/);
+  assert.match(dispatcher, /Accept only an exit-0 JSON result/);
+  assert.match(dispatcher, /delegate once to `skill-overlay` and end this invocation/);
   assert.match(dispatcher, /`ready` or `ready-with-advisory`/);
-  assert.match(dispatcher, /delegate `maintenance-required` to its maintenance handler/);
+  assert.match(dispatcher, /For `maintenance-required`, delegate once to exactly the returned maintenance handler/);
+  assert.match(dispatcher, /Load every file referenced by the ordered `steps` before performing any workflow action/);
+  assert.match(dispatcher, /apply every `delta` step from inner to outer/);
+  assert.match(dispatcher, /execute only the resulting effective workflow/);
 });
 
 test("public maintenance references describe explicit fingerprint updates", async () => {
@@ -290,7 +293,9 @@ test("README combines public workflow design with contract-compatible helper beh
   assert.match(markdown, /B -->\|"reads"\| G/);
   assert.match(markdown, /B -->\|"uses when required"\| H/);
   assert.match(markdown, /Maintenance skills<br\/>\(skill-overlay \/ skill-fork\)/);
-  assert.match(markdown, /Runtime instructions<br\/>\(SKILL\.md \/ CUSTOMIZATION\.md\)/);
+  assert.match(markdown, /Checked execution plan<br\/>\(workflow \+ ordered deltas\)/);
+  assert.match(markdown, /Load the complete plan<br\/>before any workflow action/);
+  assert.match(markdown, /Compose one effective workflow<br\/>deltas refine inner to outer/);
   for (const component of [
     "Dispatcher file",
     "Descriptor file",
@@ -303,7 +308,7 @@ test("README combines public workflow design with contract-compatible helper beh
   }
   assert.match(markdown, /Source `SKILL\.md` and customization `CUSTOMIZATION\.md` files/);
   assert.match(markdown, /Stores portable identity, source requirements, and reviewed fingerprints/);
-  assert.match(markdown, /Run the base or fork workflow followed by overlay deltas/);
+  assert.match(markdown, /compose the base or fork workflow with inner-to-outer deltas before any action/);
   assert.match(markdown, /ready-with-advisory/);
   assert.match(markdown, /maintenance-required/);
   assert.match(markdown, /without invoking a maintenance skill/);

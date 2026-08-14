@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { bindCustomization } from "../src/bindings.js";
+import { renderDispatcher } from "../src/dispatcher-renderer.js";
 import {
   fingerprintFile,
   fingerprintPath,
@@ -557,6 +558,76 @@ test("CLI accepts standard top-level help flags", async () => {
   }
 });
 
+test("CLI renders exact canonical dispatchers for overlays and forks", async () => {
+  for (const [type, metadata, options] of [
+    [
+      "semantic-overlay",
+      {
+        name: "review-local-archive",
+        description: "Review work and archive the result locally.",
+        license: "MIT",
+        compatibility: "Requires Node.js 18+",
+        metadata: { author: "example-org", version: "1.0" },
+        "allowed-tools": "Read Bash(git:*)",
+        "argument-hint": "Repository or pull request to review",
+        "disable-model-invocation": true,
+        "user-invocable": false,
+      },
+      [
+        "--name", "review-local-archive",
+        "--description", "Review work and archive the result locally.",
+        "--license", "MIT",
+        "--compatibility", "Requires Node.js 18+",
+        "--metadata", "version=1.0",
+        "--metadata", "author=example-org",
+        "--allowed-tools", "Read Bash(git:*)",
+        "--argument-hint", "Repository or pull request to review",
+        "--disable-model-invocation", "true",
+        "--user-invocable", "false",
+      ],
+    ],
+    [
+      "fork",
+      {
+        name: "review-local",
+        description: "Review work with an independent local workflow.",
+      },
+      [
+        "--name", "review-local",
+        "--description", "Review work with an independent local workflow.",
+      ],
+    ],
+  ]) {
+    const result = await run(["render-dispatcher", type, ...options]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    assert.equal(result.stdout, renderDispatcher(type, metadata));
+  }
+});
+
+test("CLI rejects duplicate dispatcher metadata", async () => {
+  const duplicateField = await run([
+    "render-dispatcher",
+    "fork",
+    "--name", "review-local",
+    "--name", "other-name",
+    "--description", "Review locally.",
+  ]);
+  assert.equal(duplicateField.code, 1);
+  assert.match(duplicateField.stderr, /duplicate --name/i);
+
+  const duplicateNestedKey = await run([
+    "render-dispatcher",
+    "fork",
+    "--name", "review-local",
+    "--description", "Review locally.",
+    "--metadata", "author=one",
+    "--metadata", "author=two",
+  ]);
+  assert.equal(duplicateNestedKey.code, 1);
+  assert.match(duplicateNestedKey.stderr, /duplicate --metadata key author/i);
+});
+
 test("CLI reports the package version", async () => {
   const packageJson = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -625,6 +696,7 @@ test("CLI rejects unknown long options for every command", async (t) => {
     validate: ["customization.json"],
     fingerprint: ["SKILL.md"],
     "payload-fingerprint": ["customization"],
+    "render-dispatcher": ["fork"],
     discover: ["review"],
     bind: ["customization.json"],
     resolve: ["customization.json"],
@@ -656,6 +728,7 @@ test("CLI rejects extra positional arguments for every command", async (t) => {
     validate: ["customization.json", "extra"],
     fingerprint: ["SKILL.md", "extra"],
     "payload-fingerprint": ["customization", "extra"],
+    "render-dispatcher": ["fork", "extra"],
     discover: ["review", "extra"],
     bind: ["customization.json", "extra"],
     resolve: ["customization.json", "extra"],

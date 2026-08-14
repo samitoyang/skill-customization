@@ -19,6 +19,7 @@ import {
   discoverSkills,
   excludeSkillRootFromInventory,
 } from "./discovery.js";
+import { renderDispatcher } from "./dispatcher-renderer.js";
 import { DiscoveryError } from "./errors.js";
 import { fingerprintPath, payloadFingerprint } from "./fingerprint.js";
 import {
@@ -35,6 +36,7 @@ function usage() {
   skill-customization validate <customization.json> [--inventory inventory.json]
   skill-customization fingerprint <path>
   skill-customization payload-fingerprint <directory>
+  skill-customization render-dispatcher <semantic-overlay|fork> --name name --description text [metadata options]
   skill-customization discover [name|repository|path] [--root path] [--custom-path path]
   skill-customization bind <customization.json> --source path --context context [--scope global|workspace] [--state path] [--root path]
   skill-customization resolve <customization.json> --context context [--state path] [--root path]
@@ -60,6 +62,17 @@ const COMMAND_OPTIONS = Object.freeze({
   validate: new Set(["inventory"]),
   fingerprint: new Set(),
   "payload-fingerprint": new Set(),
+  "render-dispatcher": new Set([
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "metadata",
+    "allowed-tools",
+    "argument-hint",
+    "disable-model-invocation",
+    "user-invocable",
+  ]),
   discover: new Set(["root", "custom-path"]),
   bind: new Set(["source", "context", "scope", "state", "root"]),
   resolve: new Set(["context", "state", "root"]),
@@ -88,6 +101,7 @@ const COMMAND_POSITIONAL_MAX = Object.freeze({
   validate: 1,
   fingerprint: 1,
   "payload-fingerprint": 1,
+  "render-dispatcher": 1,
   discover: 1,
   bind: 1,
   resolve: 1,
@@ -100,7 +114,7 @@ const COMMAND_POSITIONAL_MAX = Object.freeze({
 function parseArguments(command, argv) {
   const positionals = [];
   const options = {};
-  const repeatable = new Set(["root", "absorbed-delta"]);
+  const repeatable = new Set(["root", "absorbed-delta", "metadata"]);
   const allowed = COMMAND_OPTIONS[command];
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
@@ -121,10 +135,55 @@ function parseArguments(command, argv) {
       options[name] ??= [];
       options[name].push(next);
     } else {
+      if (command === "render-dispatcher" && Object.hasOwn(options, name)) {
+        throw new TypeError(`duplicate --${name}`);
+      }
       options[name] = next;
     }
   }
   return { positionals, options };
+}
+
+function parseBooleanOption(value, field) {
+  if (value === undefined) return undefined;
+  if (!["true", "false"].includes(value)) {
+    throw new TypeError(`--${field} must be true or false`);
+  }
+  return value === "true";
+}
+
+function dispatcherMetadata(options) {
+  const metadata = {};
+  for (const field of [
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "allowed-tools",
+    "argument-hint",
+  ]) {
+    if (options[field] !== undefined) metadata[field] = options[field];
+  }
+  for (const field of ["disable-model-invocation", "user-invocable"]) {
+    const value = parseBooleanOption(options[field], field);
+    if (value !== undefined) metadata[field] = value;
+  }
+  if (options.metadata) {
+    const entries = Object.create(null);
+    for (const entry of options.metadata) {
+      const separator = entry.indexOf("=");
+      if (separator < 1) {
+        throw new TypeError("--metadata must use key=value");
+      }
+      const key = entry.slice(0, separator);
+      if (Object.hasOwn(entries, key)) {
+        throw new TypeError(`duplicate --metadata key ${key}`);
+      }
+      entries[key] = entry.slice(separator + 1);
+    }
+    metadata.metadata = entries;
+  }
+  return metadata;
 }
 
 function outputJson(io, value) {
@@ -293,6 +352,10 @@ async function commandValidate(descriptorPath, options, io) {
     inventory,
   });
   outputJson(io, { valid: true, id: descriptor.id, name: descriptor.name });
+}
+
+function commandRenderDispatcher(customizationType, options, io) {
+  io.stdout.write(renderDispatcher(customizationType, dispatcherMetadata(options)));
 }
 
 async function commandDiscover(input, options, io) {
@@ -615,6 +678,12 @@ export async function main(argv = process.argv.slice(2), io = process) {
       io.stdout.write(`${await fingerprintPath(requireValue(positionals[0], "path is required"))}\n`);
     } else if (command === "payload-fingerprint") {
       io.stdout.write(`${await payloadFingerprint(requireValue(positionals[0], "directory is required"))}\n`);
+    } else if (command === "render-dispatcher") {
+      commandRenderDispatcher(
+        requireValue(positionals[0], "customization type is required"),
+        options,
+        io,
+      );
     } else if (command === "discover") await commandDiscover(positionals[0], options, io);
     else if (command === "bind") await commandBind(positionals[0], options, io);
     else if (command === "resolve") await commandResolve(positionals[0], options, io);

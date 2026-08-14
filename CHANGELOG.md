@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+- Add one canonical, validated dispatcher renderer with a matching CLI adapter and pre-execution effective-workflow composition.
+
 ## 0.1.0 - 2026-08-12
 
 - Add the dependency-free Node.js library and CLI for portable descriptor v1 validation, bounded source discovery, local bindings, fingerprints, preflight, reconciliation, and crash-safe atomic maintenance.

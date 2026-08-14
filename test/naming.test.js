@@ -4,7 +4,14 @@ import test from "node:test";
 import {
   suggestCustomizationNames,
   validateCustomizationName,
+  validateSkillName,
 } from "../src/naming.js";
+
+test("skill name validation owns the shared portable name invariant", () => {
+  assert.deepEqual(validateSkillName("a".repeat(63)), []);
+  assert.match(validateSkillName("a".repeat(64))[0], /shorter than 64/i);
+  assert.match(validateSkillName("Review_Local")[0], /lowercase kebab-case/i);
+});
 
 test("coexist naming uses source plus outcome before scaffolding", () => {
   const names = suggestCustomizationNames({

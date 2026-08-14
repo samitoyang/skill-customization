@@ -19,6 +19,7 @@ import {
 } from "../src/bindings.js";
 import { discoverSkills } from "../src/discovery.js";
 import { readDescriptor, validateDescriptor } from "../src/descriptor.js";
+import { renderDispatcher } from "../src/dispatcher-renderer.js";
 import {
   fingerprintFile,
   fingerprintPath,
@@ -67,6 +68,16 @@ async function contractSourceCheckout(prefix) {
     skillsRoot: path.dirname(sourceRoot),
   };
 }
+
+test("helper contract 1: dispatcher fixture equals canonical renderer output", async () => {
+  assert.equal(
+    await readFile(path.join(customizationRoot, "SKILL.md"), "utf8"),
+    renderDispatcher("semantic-overlay", {
+      name: "review-local-archive",
+      description: "Review work and archive the result locally.",
+    }),
+  );
+});
 
 test("helper contract 1: descriptor v1 and fingerprint goldens remain stable", async () => {
   const [descriptor, golden] = await Promise.all([
