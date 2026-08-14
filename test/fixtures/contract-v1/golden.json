@@ -5,7 +5,7 @@
     "live_file": "sha256:b4943bc08230564d6d54ade4976dacb10e961b43051099496cc8a89a7eeff953",
     "checkpoint_effective": "sha256:c9ad27e165f7c2013dc084ea340e6ccd21990f893e2f2eb28a5265a139164833",
     "live_effective": "sha256:9bd09cbecea4d76855433d03563ab91e1578028bfd84dbcd904d7806a129a81c",
-    "owned_payload": "sha256:a397568b1d02bcecbab5fb3486f15e17fe581b109c0d20d64dca8d67db3a843b",
+    "owned_payload": "sha256:412e297113a2d1050f7cece59863f7302a279f447f06e6ff29fda288f61ea3c7",
     "checkpoint_tree": "sha256:ac7f37d2ee68856608872b231f6481f0c8646f4f64fd5260ff86b03528f2eb1e"
   },
   "fingerprint_exclusions": {
@@ -36,7 +36,7 @@
     "customization": "urn:skill-customization:contract-v1:review-local-archive",
     "type": "semantic-overlay",
     "sourceFingerprint": "sha256:c9ad27e165f7c2013dc084ea340e6ccd21990f893e2f2eb28a5265a139164833",
-    "customizationFingerprint": "sha256:a397568b1d02bcecbab5fb3486f15e17fe581b109c0d20d64dca8d67db3a843b",
+    "customizationFingerprint": "sha256:412e297113a2d1050f7cece59863f7302a279f447f06e6ff29fda288f61ea3c7",
     "checkpointFingerprint": "sha256:c9ad27e165f7c2013dc084ea340e6ccd21990f893e2f2eb28a5265a139164833",
     "checkpointMatch": true,
     "stopped": false,

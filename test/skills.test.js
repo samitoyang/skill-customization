@@ -150,13 +150,26 @@ test("contract fixture dispatcher negotiates the helper and stops safely", async
   assert.match(dispatcher, /description: "Review work and archive the result locally\."/);
   assert.doesNotMatch(dispatcher, /description:.*preflight/);
   assert.match(dispatcher, /skill-customization supports 1/);
-  assert.match(dispatcher, /Accept only an exit-0 JSON result/);
-  assert.match(dispatcher, /delegate once to `skill-overlay` and end this invocation/);
-  assert.match(dispatcher, /`ready` or `ready-with-advisory`/);
-  assert.match(dispatcher, /For `maintenance-required`, delegate once to exactly the returned maintenance handler/);
-  assert.match(dispatcher, /Load every file referenced by the ordered `steps` before performing any workflow action/);
-  assert.match(dispatcher, /apply every `delta` step from inner to outer/);
-  assert.match(dispatcher, /execute only the resulting effective workflow/);
+  assert.match(dispatcher, /accept only a well-formed,\s+compatible contract-1 result/);
+  assert.match(
+    dispatcher,
+    /delegate once to\s+`skill-overlay` and execute no customization instructions/,
+  );
+  assert.match(dispatcher, /`ready` or\s+`ready-with-advisory`/);
+  assert.match(
+    dispatcher,
+    /For `maintenance-required`, delegate once to its returned handler/,
+  );
+  assert.match(
+    dispatcher,
+    /load the complete plan, then compose its workflow\s+with deltas inner-to-outer/,
+  );
+  assert.match(dispatcher, /later deltas refine earlier instructions/);
+  assert.match(dispatcher, /execute only the effective workflow/);
+  assert.deepEqual(
+    [...dispatcher.matchAll(/^(\d+)\. /gm)].map((match) => match[1]),
+    ["1", "2", "3"],
+  );
 });
 
 test("public maintenance references describe explicit fingerprint updates", async () => {
