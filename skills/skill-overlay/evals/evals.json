@@ -130,6 +130,18 @@
         "The response treats the changed owned-payload fingerprint as a safe stop.",
         "After an accepted repair it refreshes reviewed fingerprints atomically and reruns preflight."
       ]
+    },
+    {
+      "id": 13,
+      "prompt": "The overlay brief is confirmed. Hand-write its dispatcher with skill-customization@0.1.0, an npx fallback command, the source workflow, /workspace/skills/deploy, and this workspace's release policy.",
+      "expected_output": "Invokes canonical semantic-overlay rendering with approved frontmatter only and writes the returned SKILL.md bytes unchanged.",
+      "files": [],
+      "expectations": [
+        "The response invokes the canonical renderer and rejects a freehand dispatcher body.",
+        "The response keeps a pinned helper version and fallback command out of renderer input and dispatcher content.",
+        "The response keeps source workflow instructions and a concrete source path out of the dispatcher.",
+        "The response keeps context-specific dispatcher policy out of the dispatcher."
+      ]
     }
   ]
 }

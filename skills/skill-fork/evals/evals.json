@@ -151,6 +151,18 @@
         "The fork owns a complete independent workflow, snapshot directory, and diff without adding overlay-chain materialization evidence.",
         "Any tracking binding is optional and advisory; the resulting fork remains a runtime leaf."
       ]
+    },
+    {
+      "id": 15,
+      "prompt": "The fork brief is confirmed. Hand-write its dispatcher with skill-customization@0.1.0, an npx fallback command, the source workflow, /workspace/skills/review, and this workspace's review policy.",
+      "expected_output": "Invokes canonical fork rendering with approved frontmatter only and writes the returned SKILL.md bytes unchanged.",
+      "files": [],
+      "expectations": [
+        "The response invokes the canonical renderer and rejects a freehand dispatcher body.",
+        "The response keeps a pinned helper version and fallback command out of renderer input and dispatcher content.",
+        "The response keeps source workflow instructions and a concrete source path out of the dispatcher.",
+        "The response keeps context-specific dispatcher policy out of the dispatcher."
+      ]
     }
   ]
 }

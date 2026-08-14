@@ -34,7 +34,7 @@ An optional confirmed tracking binding is advisory only: absence is silent; drif
 
 Read [Fork intake](references/intake.md), confirm one brief, then create:
 
-- a thin `SKILL.md` dispatcher that negotiates contract 1, runs preflight, follows only ready steps, and delegates every stopped/unavailable-helper case to `skill-fork`;
+- run `skill-customization render-dispatcher fork` with only the approved frontmatter and write its output to `SKILL.md` unchanged. Never compose, paraphrase, extend, or repair the dispatcher body;
 - `CUSTOMIZATION.md` containing the complete independent workflow;
 - a relative, symlink-free snapshot directory and unified diff beneath reserved `provenance/` that reconstruct every runtime-owned file;
 - a portable v1 descriptor with own/source licenses, reviewed owned-payload, snapshot, diff, and source effective fingerprints.

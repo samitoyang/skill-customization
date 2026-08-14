@@ -32,7 +32,7 @@ Use the preflight handler reason to focus reconciliation on the stopped overlay.
 
 Read [Overlay intake](references/intake.md), confirm one brief, then create:
 
-- a thin `SKILL.md` dispatcher that negotiates contract 1, runs preflight, follows only ready steps, and delegates every stopped/unavailable-helper case to `skill-overlay`;
+- run `skill-customization render-dispatcher semantic-overlay` with only the approved frontmatter and write its output to `SKILL.md` unchanged. Never compose, paraphrase, extend, or repair the dispatcher body;
 - `CUSTOMIZATION.md` containing only the semantic delta;
 - a portable v1 descriptor with reviewed owned-payload and full-source or customization-source effective fingerprints;
 - one confirmed context-scoped source binding.

@@ -37,6 +37,20 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.match(markdown, /preflight reruns `ready` or `ready-with-advisory`/);
     const evals = JSON.parse(await read(`skills/${skillName}/evals/evals.json`));
     const intake = await read(`skills/${skillName}/references/intake.md`);
+    assert.match(markdown, /skill-customization render-dispatcher/);
+    assert.match(markdown, /approved frontmatter/);
+    assert.match(markdown, /write its output to `SKILL\.md` unchanged/);
+    assert.match(
+      markdown,
+      /Never compose, paraphrase, extend, or repair the dispatcher body/,
+    );
+    assert.match(intake, /\[ADR 0001\]\(https:\/\/github\.com\/samitoyang\/skill-customization\/blob\/main\/docs\/adr\/0001-managed-recursive-runtime\.md\)/);
+    assert.match(intake, /\*\*Approved frontmatter:\*\*/);
+    assert.match(intake, /\*\*Helper fallback:\*\*/);
+    assert.match(
+      intake,
+      /Never pass fallback permission, helper commands, package versions, source instructions, paths, or context policy to the renderer/,
+    );
     assert.match(
       intake,
       /Default a new workspace customization to `\.agents\/skills\/<name>\/`/,
@@ -66,6 +80,19 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.match(expectations, /agent-writing or skill-creation/);
     assert.match(expectations, /waits for explicit routing confirmation/);
     assert.match(expectations, /inventory/);
+    for (const forbidden of [
+      "freehand dispatcher body",
+      "pinned helper version",
+      "fallback command",
+      "source workflow instructions",
+      "concrete source path",
+      "context-specific dispatcher policy",
+    ]) {
+      assert.ok(
+        expectations.includes(forbidden),
+        `evals should reject ${forbidden}`,
+      );
+    }
   });
 }
 

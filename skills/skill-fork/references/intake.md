@@ -25,9 +25,12 @@ Resolve these fields:
 - **Independence and distribution:** state that the fork is a runtime leaf, and record whether it is private, team-shared, or public so license and redistribution review match the intended audience.
 - **Materialization:** when the source is an overlay chain, review its checked base-plus-deltas result and record the chain effective fingerprint, concrete snapshot directory fingerprint, review time, and evidence before diffing to the independent workflow.
 - **Tracking:** ask whether to retain a confirmed advisory binding. No binding is silent; drift and unavailability never block; unreadable or invalid optional tracking state remains advisory; adoption and rebase are explicit.
-- **Dispatcher:** generate a thin `SKILL.md` that runs contract-1 preflight, follows only ready steps, and delegates unavailable, incompatible, or maintenance-required results to `skill-fork`.
-- **Helper fallback:** record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 1. The download may run only after brief confirmation.
+- **Approved frontmatter:** confirm `name`, `description`, and any other approved metadata for the generated skill.
+- **Dispatcher:** after brief confirmation, pass only `fork` and the approved frontmatter to `skill-customization render-dispatcher`; write its output unchanged and never generate or edit its body freehand.
+- **Helper fallback:** separately record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 1. The download may run only after brief confirmation. Never pass fallback permission, helper commands, package versions, source instructions, paths, or context policy to the renderer.
+
+[ADR 0001](https://github.com/samitoyang/skill-customization/blob/main/docs/adr/0001-managed-recursive-runtime.md) is the rationale: one canonical renderer owns the thin-dispatcher seam, and the complete checked plan is loaded and its semantic deltas are composed before any workflow action.
 
 Before finalizing, invoke any available skill-creation or agent-writing skill, such as `skill-creator` or `writing-for-agents`. Review the proposed independent workflow against source conventions, trigger behavior, realistic examples, and checkable completion criteria. Fold material findings into the brief.
 
-Present one brief containing every field above and ask for one confirmation. Intake is complete only when source identity, independent workflow, placement, name, activation, materialization/tracking choices, distribution intent, dispatcher behavior, conditional helper permission, and any workflow-model switch are explicit. Helper-backed creation begins after confirmation.
+Present one brief containing every field above and ask for one confirmation. Intake is complete only when source identity, independent workflow, placement, name, activation, materialization/tracking choices, distribution intent, approved frontmatter, canonical rendering, conditional helper permission, and any workflow-model switch are explicit. Helper-backed creation begins after confirmation.
