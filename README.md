@@ -71,7 +71,7 @@ Customization models describe the runtime relationship between a skill and its s
 
 | Model | Source relationship | Runtime behavior |
 | --- | --- | --- |
-| `skill-overlay` | Live ordinary skill, verified overlay, or verified fork | Source workflow followed by a semantic delta; source updates remain available |
+| `skill-overlay` | Live ordinary skill, verified overlay, or verified fork | Source workflow composed with a semantic delta before execution; source updates remain available |
 | `skill-fork` | Reviewed ordinary skill, verified overlay, or verified fork | Complete independent workflow; no live runtime source required |
 | Companion skill | Ordinary dependency | Separate workflow that calls or consumes the source; no customization binding |
 
@@ -207,9 +207,10 @@ flowchart LR
     end
     A["Dispatcher file<br/>(SKILL.md)"] -->|"runs"| B
     A -->|"helper unavailable / incompatible"| F["Maintenance skills<br/>(skill-overlay / skill-fork)"]
-    B -->|"ready / ready-with-advisory"| C["Runtime instructions<br/>(SKILL.md / CUSTOMIZATION.md)"]
-    C --> D["Base workflow or fork leaf"]
-    D -->|"then, if present"| E["Overlay deltas<br/>(CUSTOMIZATION.md, inner to outer)"]
+    B -->|"ready / ready-with-advisory"| C["Checked execution plan<br/>(workflow + ordered deltas)"]
+    C --> D["Load the complete plan<br/>before any workflow action"]
+    D --> E["Compose one effective workflow<br/>deltas refine inner to outer"]
+    E --> I["Execute the effective workflow"]
     B -->|"maintenance-required"| F
     F -->|"accepted update"| B
 ```
@@ -220,7 +221,7 @@ flowchart LR
 | Descriptor file | `customization.json` | Stores portable identity, source requirements, and reviewed fingerprints |
 | Local binding state | `bindings.json` | Stores the concrete source path for one context when required |
 | Preflight helper | `skill-customization` package | Validates local evidence and returns checked runtime instructions or a maintenance stop |
-| Runtime instructions | Source `SKILL.md` and customization `CUSTOMIZATION.md` files | Run the base or fork workflow followed by overlay deltas |
+| Runtime instructions | Source `SKILL.md` and customization `CUSTOMIZATION.md` files | Load the full checked plan, compose the base or fork workflow with inner-to-outer deltas before any action, then execute the effective workflow |
 | Maintenance skills | `skill-overlay` or `skill-fork` | Handle creation, drift, repair, incompatible setup, and explicit maintenance |
 
 A ready customization executes its checked runtime instructions directly without invoking a maintenance skill.
@@ -241,7 +242,7 @@ Published descriptors keep stable identity and provenance portable. Concrete sou
 ## 📚 References
 
 - For direct helper use, read the [CLI reference](docs/cli.md); `skill-customization --help` is authoritative for commands and options.
-- For Node.js/npm prerequisites, helper negotiation, local-code execution approval, registry download/cache permission, package selection, and compatibility guarantees, read [Helper contract 1](docs/helper-contract-1.md).
+- For Node.js/npm prerequisites, lifecycle helper negotiation, canonical rendering, local-code execution approval, registry download/cache permission, package selection, and compatibility guarantees, read [Helper contract 2](docs/helper-contract-2.md). [Helper contract 1](docs/helper-contract-1.md) remains supported for existing dispatchers.
 - For publishable identity and activation fields, read [Descriptor v1](docs/descriptor-v1.md).
 - For roots, evidence order, source selection, and local state, read [Discovery and bindings](docs/discovery-and-bindings.md).
 - For overlay drift and fork-payload verification, read [Reconciliation](docs/reconciliation.md).

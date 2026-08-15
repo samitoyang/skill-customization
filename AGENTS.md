@@ -10,3 +10,17 @@ Keep descriptors portable and binding state local. Reuse the library seams for n
 - Run `npm run verify` before committing.
 
 When changing descriptors, discovery, bindings, or reconciliation, read [CONTEXT.md](CONTEXT.md) for the domain vocabulary.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Uses the default five canonical triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Uses a single-context layout: root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.

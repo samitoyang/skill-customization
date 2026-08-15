@@ -2,7 +2,7 @@
 
 Run `skill-customization --help` for the authoritative command and option list.
 
-For helper selection, run `skill-customization supports 1`. Accept only exit `0` and JSON with `compatible: true`, requested contract `1`, supported contracts containing `1`, and a non-empty package version. If the installed command is unavailable or incompatible, resolve the active maintenance skill's real path and inspect only its bounded Git ancestors. Treat a clean checkout whose `origin` normalizes to `https://github.com/samitoyang/skill-customization` and whose root package is named `skill-customization` as a local candidate, not authenticated code. Report its canonical root, origin, and commit, explain that `npx --package` will execute local code without a download, and obtain permission before running it. Confirm the recorded state before each remaining command. Otherwise explain that the registry fallback may download code or reuse npm cache and obtain permission before running it.
+For the complete lifecycle, run `skill-customization supports 2`. Accept only exit `0` and JSON with `compatible: true`, requested contract `2`, supported contracts containing `2`, and a non-empty package version. If the installed command is unavailable or incompatible, resolve the active maintenance skill's real path and inspect only its bounded Git ancestors. Treat a clean checkout whose `origin` normalizes to `https://github.com/samitoyang/skill-customization` and whose root package is named `skill-customization` as a local candidate, not authenticated code. Report its canonical root, origin, and commit, explain that `npx --package` will execute local code without a download, and obtain permission before running it. Confirm the recorded state before each remaining command. Otherwise explain that the registry fallback may download code or reuse npm cache and obtain permission before running it. Helper `v0.1.1` also supports contract 1 for existing dispatchers.
 
 Runtime dispatch uses:
 
@@ -10,6 +10,14 @@ Runtime dispatch uses:
 skill-customization payload-fingerprint <directory>
 skill-customization preflight <customization.json> --context <context>
 ```
+
+After contract-2 selection, create the dispatcher through the canonical renderer:
+
+```sh
+skill-customization render-dispatcher <semantic-overlay|fork> --name <name> --description <text>
+```
+
+Optional approved metadata flags are `--license`, `--compatibility`, repeatable `--metadata key=value`, `--allowed-tools`, `--argument-hint`, `--disable-model-invocation true|false`, and `--user-invocable true|false`. The command writes the complete Markdown to standard output and accepts no dispatcher body or runtime-policy inputs. It is a thin adapter over the library renderer; [ADR 0001](adr/0001-managed-recursive-runtime.md) is the rationale for canonical thin dispatchers and pre-execution composition.
 
 Preflight outputs `effectiveFingerprint`, ordered `steps` (`role`, concrete `path`, `root`, `customizationId`), `advisories`, and one `maintenanceHandler` or `null`. `ready` and `ready-with-advisory` exit `0`; `maintenance-required` exits `2` with no executable steps; malformed descriptors/metadata and operational failures exit `1`.
 

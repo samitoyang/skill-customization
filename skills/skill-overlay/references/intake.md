@@ -23,9 +23,12 @@ Resolve these fields:
 - **Placement:** Default a new workspace customization to `.agents/skills/<name>/`; use a compatible host-specific project or personal skill root when selected, and record the exact destination.
 - **Name and activation:** offer two or three collision-free `<source>-<outcome>` names and default to `coexist`. Record `replace` only after a separate confirmation of same-name intent and customization-first host precedence.
 - **Upstream relationship:** state that the live source remains required, what upstream continues to own, and how recursive preflight orders the base workflow followed by inner-to-outer deltas.
-- **Dispatcher:** generate a thin `SKILL.md` that runs contract-1 preflight, follows only ready steps, and delegates unavailable, incompatible, or maintenance-required results to `skill-overlay`.
-- **Helper fallback:** record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 1. The download may run only after brief confirmation.
+- **Approved frontmatter:** confirm `name`, `description`, and any other approved metadata for the generated skill.
+- **Dispatcher:** after brief confirmation, pass only `semantic-overlay` and the approved frontmatter to `skill-customization render-dispatcher`; write its output unchanged and never generate or edit its body freehand.
+- **Helper fallback:** separately record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 2. The download may run only after brief confirmation. Never pass fallback permission, helper commands, package versions, source instructions, paths, or context policy to the renderer.
+
+[ADR 0001](https://github.com/samitoyang/skill-customization/blob/main/docs/adr/0001-managed-recursive-runtime.md) is the rationale: one canonical renderer owns the thin-dispatcher seam, and the complete checked plan is loaded and its semantic deltas are composed before any workflow action.
 
 Before finalizing, invoke any available skill-creation or agent-writing skill, such as `skill-creator` or `writing-for-agents`. Review the proposed delta against source conventions, trigger behavior, realistic examples, and checkable completion criteria. Fold material findings into the brief.
 
-Present one brief containing every field above and ask for one confirmation. Intake is complete only when source identity, delta, placement, name, activation, recursive live-upstream relationship, dispatcher behavior, conditional helper permission, and any workflow-model switch are explicit. Helper-backed creation begins after confirmation.
+Present one brief containing every field above and ask for one confirmation. Intake is complete only when source identity, delta, placement, name, activation, recursive live-upstream relationship, approved frontmatter, canonical rendering, conditional helper permission, and any workflow-model switch are explicit. Helper-backed creation begins after confirmation.

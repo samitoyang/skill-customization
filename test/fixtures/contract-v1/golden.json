@@ -16,7 +16,7 @@
   "supports": {
     "compatible": true,
     "requested_contract": "1",
-    "supported_contracts": ["1"]
+    "supported_contracts": ["1", "2"]
   },
   "usage_lines": [
     "skill-customization supports <contract>",

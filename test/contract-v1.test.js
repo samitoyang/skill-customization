@@ -68,6 +68,12 @@ async function contractSourceCheckout(prefix) {
   };
 }
 
+test("helper contract 1: existing dispatcher remains compatible", async () => {
+  const dispatcher = await readFile(path.join(customizationRoot, "SKILL.md"), "utf8");
+  assert.match(dispatcher, /skill-customization supports 1/);
+  assert.doesNotMatch(dispatcher, /skill-customization supports 2|render-dispatcher/);
+});
+
 test("helper contract 1: descriptor v1 and fingerprint goldens remain stable", async () => {
   const [descriptor, golden] = await Promise.all([
     contractDescriptor(),

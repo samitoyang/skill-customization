@@ -1,6 +1,12 @@
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const AVOIDED_SUFFIXES = ["-overlay", "-fork", "-custom"];
 
+export function validateSkillName(name) {
+  return typeof name === "string" && KEBAB.test(name) && name.length <= 63
+    ? []
+    : ["name must be lowercase kebab-case and shorter than 64 characters"];
+}
+
 export function normalizeSkillName(value) {
   return String(value)
     .normalize("NFKD")
@@ -19,10 +25,7 @@ export function validateCustomizationName({
   folderName,
   inventory = [],
 }) {
-  const errors = [];
-  if (typeof name !== "string" || !KEBAB.test(name) || name.length > 63) {
-    errors.push("name must be lowercase kebab-case and shorter than 64 characters");
-  }
+  const errors = validateSkillName(name);
   const avoided = AVOIDED_SUFFIXES.find((suffix) => name?.endsWith(suffix));
   if (avoided) errors.push(`name should describe the outcome instead of ending in ${avoided}`);
   if (folderName !== undefined && name !== folderName) {

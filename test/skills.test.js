@@ -14,7 +14,7 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.match(markdown, /compatibility: Requires Node\.js 18\+/);
     assert.match(markdown, /npm only for the on-demand fallback/);
     assert.doesNotMatch(markdown, /Node\.js 18\+, npm access/);
-    assert.match(markdown, /helper contract 1/);
+    assert.match(markdown, /helper contract 2/);
     assert.match(markdown, /thin dispatchers/);
     assert.match(markdown, /skill-customization preflight/);
     assert.match(markdown, /ready-with-advisory/);
@@ -37,6 +37,20 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.match(markdown, /preflight reruns `ready` or `ready-with-advisory`/);
     const evals = JSON.parse(await read(`skills/${skillName}/evals/evals.json`));
     const intake = await read(`skills/${skillName}/references/intake.md`);
+    assert.match(markdown, /skill-customization render-dispatcher/);
+    assert.match(markdown, /approved frontmatter/);
+    assert.match(markdown, /write its output to `SKILL\.md` unchanged/);
+    assert.match(
+      markdown,
+      /Never compose, paraphrase, extend, or repair the dispatcher body/,
+    );
+    assert.match(intake, /\[ADR 0001\]\(https:\/\/github\.com\/samitoyang\/skill-customization\/blob\/main\/docs\/adr\/0001-managed-recursive-runtime\.md\)/);
+    assert.match(intake, /\*\*Approved frontmatter:\*\*/);
+    assert.match(intake, /\*\*Helper fallback:\*\*/);
+    assert.match(
+      intake,
+      /Never pass fallback permission, helper commands, package versions, source instructions, paths, or context policy to the renderer/,
+    );
     assert.match(
       intake,
       /Default a new workspace customization to `\.agents\/skills\/<name>\/`/,
@@ -66,6 +80,19 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.match(expectations, /agent-writing or skill-creation/);
     assert.match(expectations, /waits for explicit routing confirmation/);
     assert.match(expectations, /inventory/);
+    for (const forbidden of [
+      "freehand dispatcher body",
+      "pinned helper version",
+      "fallback command",
+      "source workflow instructions",
+      "concrete source path",
+      "context-specific dispatcher policy",
+    ]) {
+      assert.ok(
+        expectations.includes(forbidden),
+        `evals should reject ${forbidden}`,
+      );
+    }
   });
 }
 
@@ -83,17 +110,22 @@ test("published skills are independently installable", async () => {
   }
 });
 
+test("the default project customization root remains trackable", async () => {
+  const ignore = await read(".gitignore");
+  assert.doesNotMatch(ignore, /^\.agents\/?\s*$/m);
+});
+
 test("skill helper policy covers installed, linked, registry, and stopped paths", async () => {
   for (const skillName of ["skill-overlay", "skill-fork"]) {
     const markdown = await read(`skills/${skillName}/SKILL.md`);
-    const installed = markdown.indexOf("skill-customization supports 1");
+    const installed = markdown.indexOf("skill-customization supports 2");
     const linked = markdown.indexOf(
-      "npx --yes --package <checkout-root> skill-customization supports 1",
+      "npx --yes --package <checkout-root> skill-customization supports 2",
     );
     const linkedPermission = markdown.indexOf(
       "obtain permission to use it for this run",
     );
-    const registry = markdown.indexOf("npx --yes skill-customization@latest supports 1");
+    const registry = markdown.indexOf("npx --yes skill-customization@latest supports 2");
     assert.ok(
       installed >= 0
         && linkedPermission > installed
@@ -118,7 +150,7 @@ test("skill helper policy covers installed, linked, registry, and stopped paths"
     assert.match(markdown, /permission is declined/);
     assert.match(markdown, /Node\.js is missing/);
     assert.match(markdown, /fallback requires npm/);
-    assert.match(markdown, /contract 1 is unsupported/);
+    assert.match(markdown, /contract 2 is unsupported/);
     assert.doesNotMatch(markdown, /skill-customization@0\.1\.0/);
   }
 });
@@ -150,10 +182,17 @@ test("contract fixture dispatcher negotiates the helper and stops safely", async
   assert.match(dispatcher, /description: Review work and archive the result locally\./);
   assert.doesNotMatch(dispatcher, /description:.*preflight/);
   assert.match(dispatcher, /skill-customization supports 1/);
-  assert.match(dispatcher, /unavailable, incompatible, or malformed/);
-  assert.match(dispatcher, /delegate to `skill-overlay` and do not execute/);
+  assert.match(dispatcher, /accepting only a compatible contract-1 result/);
+  assert.match(
+    dispatcher,
+    /unavailable, incompatible, or malformed, delegate to `skill-overlay` and do not execute the customization/,
+  );
   assert.match(dispatcher, /`ready` or `ready-with-advisory`/);
-  assert.match(dispatcher, /delegate `maintenance-required` to its maintenance handler/);
+  assert.match(
+    dispatcher,
+    /delegate `maintenance-required` to its maintenance handler/,
+  );
+  assert.doesNotMatch(dispatcher, /supports 2|render-dispatcher/);
 });
 
 test("public maintenance references describe explicit fingerprint updates", async () => {
@@ -290,7 +329,9 @@ test("README combines public workflow design with contract-compatible helper beh
   assert.match(markdown, /B -->\|"reads"\| G/);
   assert.match(markdown, /B -->\|"uses when required"\| H/);
   assert.match(markdown, /Maintenance skills<br\/>\(skill-overlay \/ skill-fork\)/);
-  assert.match(markdown, /Runtime instructions<br\/>\(SKILL\.md \/ CUSTOMIZATION\.md\)/);
+  assert.match(markdown, /Checked execution plan<br\/>\(workflow \+ ordered deltas\)/);
+  assert.match(markdown, /Load the complete plan<br\/>before any workflow action/);
+  assert.match(markdown, /Compose one effective workflow<br\/>deltas refine inner to outer/);
   for (const component of [
     "Dispatcher file",
     "Descriptor file",
@@ -303,7 +344,7 @@ test("README combines public workflow design with contract-compatible helper beh
   }
   assert.match(markdown, /Source `SKILL\.md` and customization `CUSTOMIZATION\.md` files/);
   assert.match(markdown, /Stores portable identity, source requirements, and reviewed fingerprints/);
-  assert.match(markdown, /Run the base or fork workflow followed by overlay deltas/);
+  assert.match(markdown, /compose the base or fork workflow with inner-to-outer deltas before any action/);
   assert.match(markdown, /ready-with-advisory/);
   assert.match(markdown, /maintenance-required/);
   assert.match(markdown, /without invoking a maintenance skill/);
@@ -327,7 +368,9 @@ test("README combines public workflow design with contract-compatible helper beh
   assert.match(markdown, /Before artifacts are written or a binding is created/);
   assert.match(markdown, /one brief confirms the complete customization boundary/);
   assert.doesNotMatch(markdown, /## 🔌 Helper Compatibility/);
+  assert.match(markdown, /\[Helper contract 2\]\(docs\/helper-contract-2\.md\)/);
   assert.match(markdown, /\[Helper contract 1\]\(docs\/helper-contract-1\.md\)/);
+  assert.equal(markdown.match(/Helper contract 2/g)?.length, 1);
   assert.equal(markdown.match(/Helper contract 1/g)?.length, 1);
   assert.match(markdown, /\| Boundary \| Guarantee \|/);
   assert.match(markdown, /\| Helper execution \| Checkout metadata identifies but does not authenticate a local candidate/);
@@ -343,10 +386,14 @@ test("public documentation pointers resolve", async () => {
     "CONTRIBUTING.md",
     "docs/cli.md",
     "docs/helper-contract-1.md",
+    "docs/helper-contract-2.md",
     "docs/descriptor-v1.md",
     "docs/discovery-and-bindings.md",
     "docs/library.md",
     "docs/reconciliation.md",
+    "docs/agents/domain.md",
+    "docs/agents/issue-tracker.md",
+    "docs/agents/triage-labels.md",
     "docs/adr/0001-managed-recursive-runtime.md",
   ];
   for (const document of documents) {
@@ -365,6 +412,7 @@ test("the package uses a public-document allowlist and verifies its Node 18 floo
   assert.deepEqual(publicDocs, [
     "docs/cli.md",
     "docs/helper-contract-1.md",
+    "docs/helper-contract-2.md",
     "docs/descriptor-v1.md",
     "docs/discovery-and-bindings.md",
     "docs/library.md",

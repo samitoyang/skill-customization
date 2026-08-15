@@ -1,6 +1,27 @@
+# Dependency directories
 node_modules/
+jspm_packages/
+.pnpm-store/
+
+# Build and distribution outputs
+dist/
+build/
+.next/
+out/
+
+# AI Agent runtime directories and local caches
+.gitagent/
+agent-logs/
+
+# Environment secrets and tokens
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Project Specific
 .coverage/
-*.tmp
 .internal/
-.DS_Store
 .local/
+*.tmp

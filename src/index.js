@@ -2,6 +2,7 @@ export * from "./bindings.js";
 export * from "./contracts.js";
 export * from "./descriptor.js";
 export * from "./discovery.js";
+export * from "./dispatcher-renderer.js";
 export * from "./errors.js";
 export * from "./fingerprint.js";
 export * from "./manager-collector.js";

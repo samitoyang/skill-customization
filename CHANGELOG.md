@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## 0.1.1 - 2026-08-15
+
+- Add helper contract 2 as the complete customization lifecycle, including one canonical validated dispatcher renderer with a matching CLI adapter and pre-execution effective-workflow composition.
+- Keep helper contract 1 compatible for existing dispatchers while new dispatchers and customization creation require contract 2.
+
 ## 0.1.0 - 2026-08-12
 
 - Add the dependency-free Node.js library and CLI for portable descriptor v1 validation, bounded source discovery, local bindings, fingerprints, preflight, reconciliation, and crash-safe atomic maintenance.
