@@ -5,7 +5,7 @@
     "live_file": "sha256:b4943bc08230564d6d54ade4976dacb10e961b43051099496cc8a89a7eeff953",
     "checkpoint_effective": "sha256:c9ad27e165f7c2013dc084ea340e6ccd21990f893e2f2eb28a5265a139164833",
     "live_effective": "sha256:9bd09cbecea4d76855433d03563ab91e1578028bfd84dbcd904d7806a129a81c",
-    "owned_payload": "sha256:412e297113a2d1050f7cece59863f7302a279f447f06e6ff29fda288f61ea3c7",
+    "owned_payload": "sha256:edd75c5e26f1170d3cff687603e90144d7e75360f0fff15fbdd71ab3bb6be74d",
     "checkpoint_tree": "sha256:ac7f37d2ee68856608872b231f6481f0c8646f4f64fd5260ff86b03528f2eb1e"
   },
   "fingerprint_exclusions": {
@@ -16,14 +16,13 @@
   "supports": {
     "compatible": true,
     "requested_contract": "1",
-    "supported_contracts": ["1"]
+    "supported_contracts": ["1", "2"]
   },
   "usage_lines": [
     "skill-customization supports <contract>",
     "skill-customization validate <customization.json> [--inventory inventory.json]",
     "skill-customization fingerprint <path>",
     "skill-customization payload-fingerprint <directory>",
-    "skill-customization render-dispatcher <semantic-overlay|fork> --name name --description text [metadata options]",
     "skill-customization discover [name|repository|path] [--root path] [--custom-path path]",
     "skill-customization bind <customization.json> --source path --context context [--scope global|workspace] [--state path] [--root path]",
     "skill-customization resolve <customization.json> --context context [--state path] [--root path]",
@@ -36,7 +35,7 @@
     "customization": "urn:skill-customization:contract-v1:review-local-archive",
     "type": "semantic-overlay",
     "sourceFingerprint": "sha256:c9ad27e165f7c2013dc084ea340e6ccd21990f893e2f2eb28a5265a139164833",
-    "customizationFingerprint": "sha256:412e297113a2d1050f7cece59863f7302a279f447f06e6ff29fda288f61ea3c7",
+    "customizationFingerprint": "sha256:edd75c5e26f1170d3cff687603e90144d7e75360f0fff15fbdd71ab3bb6be74d",
     "checkpointFingerprint": "sha256:c9ad27e165f7c2013dc084ea340e6ccd21990f893e2f2eb28a5265a139164833",
     "checkpointMatch": true,
     "stopped": false,

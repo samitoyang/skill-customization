@@ -19,7 +19,6 @@ import {
 } from "../src/bindings.js";
 import { discoverSkills } from "../src/discovery.js";
 import { readDescriptor, validateDescriptor } from "../src/descriptor.js";
-import { renderDispatcher } from "../src/dispatcher-renderer.js";
 import {
   fingerprintFile,
   fingerprintPath,
@@ -69,14 +68,10 @@ async function contractSourceCheckout(prefix) {
   };
 }
 
-test("helper contract 1: dispatcher fixture equals canonical renderer output", async () => {
-  assert.equal(
-    await readFile(path.join(customizationRoot, "SKILL.md"), "utf8"),
-    renderDispatcher("semantic-overlay", {
-      name: "review-local-archive",
-      description: "Review work and archive the result locally.",
-    }),
-  );
+test("helper contract 1: existing dispatcher remains compatible", async () => {
+  const dispatcher = await readFile(path.join(customizationRoot, "SKILL.md"), "utf8");
+  assert.match(dispatcher, /skill-customization supports 1/);
+  assert.doesNotMatch(dispatcher, /skill-customization supports 2|render-dispatcher/);
 });
 
 test("helper contract 1: descriptor v1 and fingerprint goldens remain stable", async () => {

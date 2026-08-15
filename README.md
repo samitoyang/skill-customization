@@ -242,7 +242,7 @@ Published descriptors keep stable identity and provenance portable. Concrete sou
 ## 📚 References
 
 - For direct helper use, read the [CLI reference](docs/cli.md); `skill-customization --help` is authoritative for commands and options.
-- For Node.js/npm prerequisites, helper negotiation, local-code execution approval, registry download/cache permission, package selection, and compatibility guarantees, read [Helper contract 1](docs/helper-contract-1.md).
+- For Node.js/npm prerequisites, lifecycle helper negotiation, canonical rendering, local-code execution approval, registry download/cache permission, package selection, and compatibility guarantees, read [Helper contract 2](docs/helper-contract-2.md). [Helper contract 1](docs/helper-contract-1.md) remains supported for existing dispatchers.
 - For publishable identity and activation fields, read [Descriptor v1](docs/descriptor-v1.md).
 - For roots, evidence order, source selection, and local state, read [Discovery and bindings](docs/discovery-and-bindings.md).
 - For overlay drift and fork-payload verification, read [Reconciliation](docs/reconciliation.md).

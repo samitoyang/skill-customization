@@ -1,6 +1,6 @@
 {
   "name": "skill-customization",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Portable discovery, binding, provenance, and reconciliation for skill customizations.",
   "keywords": [
     "agent-skills",
@@ -32,6 +32,7 @@
     "skills",
     "docs/cli.md",
     "docs/helper-contract-1.md",
+    "docs/helper-contract-2.md",
     "docs/descriptor-v1.md",
     "docs/discovery-and-bindings.md",
     "docs/library.md",

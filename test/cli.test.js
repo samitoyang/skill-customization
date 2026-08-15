@@ -639,24 +639,26 @@ test("CLI reports the package version", async () => {
   }
 });
 
-test("CLI reports supported helper contracts as structured JSON", async () => {
+test("CLI reports both supported helper contracts as structured JSON", async () => {
   const packageJson = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   );
-  const result = await run(["supports", "1"]);
-  assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stderr, "");
-  assert.deepEqual(JSON.parse(result.stdout), {
-    compatible: true,
-    requested_contract: "1",
-    supported_contracts: ["1"],
-    package_version: packageJson.version,
-  });
+  for (const contract of ["1", "2"]) {
+    const result = await run(["supports", contract]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(result.stdout), {
+      compatible: true,
+      requested_contract: contract,
+      supported_contracts: ["1", "2"],
+      package_version: packageJson.version,
+    });
+  }
 });
 
 test("CLI returns structured incompatibility for unsupported and malformed contracts", async () => {
   for (const [contract, diagnostic] of [
-    ["2", /unsupported/i],
+    ["3", /unsupported/i],
     ["1.0", /positive integer/i],
     ["01", /positive integer/i],
   ]) {
@@ -666,7 +668,7 @@ test("CLI returns structured incompatibility for unsupported and malformed contr
     const output = JSON.parse(result.stdout);
     assert.equal(output.compatible, false);
     assert.equal(output.requested_contract, contract);
-    assert.deepEqual(output.supported_contracts, ["1"]);
+    assert.deepEqual(output.supported_contracts, ["1", "2"]);
     assert.equal(typeof output.package_version, "string");
     assert.deepEqual(Object.keys(output), [
       "compatible",
@@ -685,7 +687,7 @@ test("CLI contract checks keep their JSON shape for missing and extra arguments"
     const output = JSON.parse(result.stdout);
     assert.equal(output.compatible, false);
     assert.ok(output.requested_contract === null || output.requested_contract === "1");
-    assert.deepEqual(output.supported_contracts, ["1"]);
+    assert.deepEqual(output.supported_contracts, ["1", "2"]);
     assert.equal(typeof output.package_version, "string");
   }
 });

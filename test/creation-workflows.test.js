@@ -167,6 +167,8 @@ choose the canary channel instead of the stable channel.
     renderDispatcher("semantic-overlay", metadata),
   );
   assert.doesNotMatch(dispatcher, /npx|@latest|\/workspace\/|creation-test/);
+  assert.match(dispatcher, /skill-customization supports 2/);
+  assert.doesNotMatch(dispatcher, /skill-customization supports 1/);
   assert.equal(
     (await resolveBinding({ descriptor, context, statePath, roots })).source.path,
     sourceRoot,
@@ -272,6 +274,8 @@ Review the change using the source checkout.
     renderDispatcher("fork", metadata),
   );
   assert.doesNotMatch(dispatcher, /npx|@latest|\/workspace\//);
+  assert.match(dispatcher, /skill-customization supports 2/);
+  assert.doesNotMatch(dispatcher, /skill-customization supports 1/);
   const preflight = await preflightCustomization({
     descriptorPath,
     context: "workspace:creation-test",

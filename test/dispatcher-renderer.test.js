@@ -20,8 +20,8 @@ disable-model-invocation: true
 
 # Managed dispatcher
 
-1. Run \`skill-customization supports 1\` and accept only a well-formed,
-   compatible contract-1 result. Otherwise delegate once to
+1. Run \`skill-customization supports 2\` and accept only a well-formed,
+   compatible contract-2 result. Otherwise delegate once to
    \`skill-overlay\` and execute no customization instructions.
 
 2. Run \`skill-customization preflight
@@ -50,8 +50,8 @@ description: "Review work with an independent local workflow."
 
 # Managed dispatcher
 
-1. Run \`skill-customization supports 1\` and accept only a well-formed,
-   compatible contract-1 result. Otherwise delegate once to
+1. Run \`skill-customization supports 2\` and accept only a well-formed,
+   compatible contract-2 result. Otherwise delegate once to
    \`skill-fork\` and execute no customization instructions.
 
 2. Run \`skill-customization preflight

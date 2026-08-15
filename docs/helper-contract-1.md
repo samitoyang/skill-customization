@@ -1,6 +1,6 @@
 # Helper contract 1
 
-Contract 1 is the compatibility boundary between generated dispatchers, maintenance skills, and the helper. A package reports support only while this behavior remains compatible.
+Contract 1 is the compatibility boundary retained for dispatchers generated before canonical rendering joined the lifecycle. A package reports support only while this behavior remains compatible. New dispatchers and customization creation use [helper contract 2](helper-contract-2.md).
 
 | Command | Contract-1 behavior |
 | --- | --- |
@@ -8,7 +8,6 @@ Contract 1 is the compatibility boundary between generated dispatchers, maintena
 | `validate` | Validate descriptor v1, owned relative artifacts, and runtime selectors covered by the owned-payload fingerprint. |
 | `fingerprint` | Fingerprint exact files or symlink-free directory trees; a top-level alias resolves to its canonical target, and case-insensitive `.git`, `.hg`, and `.svn` metadata is excluded at any depth. |
 | `payload-fingerprint` | Fingerprint runtime-owned files, excluding descriptor, `provenance/`, and version-control metadata, while rejecting symlinks. |
-| `render-dispatcher` | Render the canonical thin dispatcher for one customization type and approved skill metadata. |
 | `discover` | Search evidence-backed declared roots plus bounded ancestors and classify adjacent customizations. |
 | `bind` / `resolve` | Confirm or resolve context-local concrete source bindings. |
 | `reconcile` | Make one targeted overlay semantic or fork provenance decision. |

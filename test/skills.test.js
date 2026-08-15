@@ -14,7 +14,7 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.match(markdown, /compatibility: Requires Node\.js 18\+/);
     assert.match(markdown, /npm only for the on-demand fallback/);
     assert.doesNotMatch(markdown, /Node\.js 18\+, npm access/);
-    assert.match(markdown, /helper contract 1/);
+    assert.match(markdown, /helper contract 2/);
     assert.match(markdown, /thin dispatchers/);
     assert.match(markdown, /skill-customization preflight/);
     assert.match(markdown, /ready-with-advisory/);
@@ -110,17 +110,22 @@ test("published skills are independently installable", async () => {
   }
 });
 
+test("the default project customization root remains trackable", async () => {
+  const ignore = await read(".gitignore");
+  assert.doesNotMatch(ignore, /^\.agents\/?\s*$/m);
+});
+
 test("skill helper policy covers installed, linked, registry, and stopped paths", async () => {
   for (const skillName of ["skill-overlay", "skill-fork"]) {
     const markdown = await read(`skills/${skillName}/SKILL.md`);
-    const installed = markdown.indexOf("skill-customization supports 1");
+    const installed = markdown.indexOf("skill-customization supports 2");
     const linked = markdown.indexOf(
-      "npx --yes --package <checkout-root> skill-customization supports 1",
+      "npx --yes --package <checkout-root> skill-customization supports 2",
     );
     const linkedPermission = markdown.indexOf(
       "obtain permission to use it for this run",
     );
-    const registry = markdown.indexOf("npx --yes skill-customization@latest supports 1");
+    const registry = markdown.indexOf("npx --yes skill-customization@latest supports 2");
     assert.ok(
       installed >= 0
         && linkedPermission > installed
@@ -145,7 +150,7 @@ test("skill helper policy covers installed, linked, registry, and stopped paths"
     assert.match(markdown, /permission is declined/);
     assert.match(markdown, /Node\.js is missing/);
     assert.match(markdown, /fallback requires npm/);
-    assert.match(markdown, /contract 1 is unsupported/);
+    assert.match(markdown, /contract 2 is unsupported/);
     assert.doesNotMatch(markdown, /skill-customization@0\.1\.0/);
   }
 });
@@ -174,29 +179,20 @@ test("contract fixture dispatcher negotiates the helper and stops safely", async
   const dispatcher = await read(
     "test/fixtures/contract-v1/review-local-archive/SKILL.md",
   );
-  assert.match(dispatcher, /description: "Review work and archive the result locally\."/);
+  assert.match(dispatcher, /description: Review work and archive the result locally\./);
   assert.doesNotMatch(dispatcher, /description:.*preflight/);
   assert.match(dispatcher, /skill-customization supports 1/);
-  assert.match(dispatcher, /accept only a well-formed,\s+compatible contract-1 result/);
+  assert.match(dispatcher, /accepting only a compatible contract-1 result/);
   assert.match(
     dispatcher,
-    /delegate once to\s+`skill-overlay` and execute no customization instructions/,
+    /unavailable, incompatible, or malformed, delegate to `skill-overlay` and do not execute the customization/,
   );
-  assert.match(dispatcher, /`ready` or\s+`ready-with-advisory`/);
+  assert.match(dispatcher, /`ready` or `ready-with-advisory`/);
   assert.match(
     dispatcher,
-    /For `maintenance-required`, delegate once to its returned handler/,
+    /delegate `maintenance-required` to its maintenance handler/,
   );
-  assert.match(
-    dispatcher,
-    /load the complete plan, then compose its workflow\s+with deltas inner-to-outer/,
-  );
-  assert.match(dispatcher, /later deltas refine earlier instructions/);
-  assert.match(dispatcher, /execute only the effective workflow/);
-  assert.deepEqual(
-    [...dispatcher.matchAll(/^(\d+)\. /gm)].map((match) => match[1]),
-    ["1", "2", "3"],
-  );
+  assert.doesNotMatch(dispatcher, /supports 2|render-dispatcher/);
 });
 
 test("public maintenance references describe explicit fingerprint updates", async () => {
@@ -372,7 +368,9 @@ test("README combines public workflow design with contract-compatible helper beh
   assert.match(markdown, /Before artifacts are written or a binding is created/);
   assert.match(markdown, /one brief confirms the complete customization boundary/);
   assert.doesNotMatch(markdown, /## 🔌 Helper Compatibility/);
+  assert.match(markdown, /\[Helper contract 2\]\(docs\/helper-contract-2\.md\)/);
   assert.match(markdown, /\[Helper contract 1\]\(docs\/helper-contract-1\.md\)/);
+  assert.equal(markdown.match(/Helper contract 2/g)?.length, 1);
   assert.equal(markdown.match(/Helper contract 1/g)?.length, 1);
   assert.match(markdown, /\| Boundary \| Guarantee \|/);
   assert.match(markdown, /\| Helper execution \| Checkout metadata identifies but does not authenticate a local candidate/);
@@ -388,6 +386,7 @@ test("public documentation pointers resolve", async () => {
     "CONTRIBUTING.md",
     "docs/cli.md",
     "docs/helper-contract-1.md",
+    "docs/helper-contract-2.md",
     "docs/descriptor-v1.md",
     "docs/discovery-and-bindings.md",
     "docs/library.md",
@@ -413,6 +412,7 @@ test("the package uses a public-document allowlist and verifies its Node 18 floo
   assert.deepEqual(publicDocs, [
     "docs/cli.md",
     "docs/helper-contract-1.md",
+    "docs/helper-contract-2.md",
     "docs/descriptor-v1.md",
     "docs/discovery-and-bindings.md",
     "docs/library.md",

@@ -2,9 +2,10 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.1.1 - 2026-08-15
 
-- Add one canonical, validated dispatcher renderer with a matching CLI adapter and pre-execution effective-workflow composition.
+- Add helper contract 2 as the complete customization lifecycle, including one canonical validated dispatcher renderer with a matching CLI adapter and pre-execution effective-workflow composition.
+- Keep helper contract 1 compatible for existing dispatchers while new dispatchers and customization creation require contract 2.
 
 ## 0.1.0 - 2026-08-12
 

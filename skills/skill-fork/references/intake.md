@@ -27,7 +27,7 @@ Resolve these fields:
 - **Tracking:** ask whether to retain a confirmed advisory binding. No binding is silent; drift and unavailability never block; unreadable or invalid optional tracking state remains advisory; adoption and rebase are explicit.
 - **Approved frontmatter:** confirm `name`, `description`, and any other approved metadata for the generated skill.
 - **Dispatcher:** after brief confirmation, pass only `fork` and the approved frontmatter to `skill-customization render-dispatcher`; write its output unchanged and never generate or edit its body freehand.
-- **Helper fallback:** separately record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 1. The download may run only after brief confirmation. Never pass fallback permission, helper commands, package versions, source instructions, paths, or context policy to the renderer.
+- **Helper fallback:** separately record whether npm may download/cache `skill-customization@latest` only if the installed helper fails contract 2. The download may run only after brief confirmation. Never pass fallback permission, helper commands, package versions, source instructions, paths, or context policy to the renderer.
 
 [ADR 0001](https://github.com/samitoyang/skill-customization/blob/main/docs/adr/0001-managed-recursive-runtime.md) is the rationale: one canonical renderer owns the thin-dispatcher seam, and the complete checked plan is loaded and its semantic deltas are composed before any workflow action.
 

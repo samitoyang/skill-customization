@@ -10,7 +10,6 @@ build/
 out/
 
 # AI Agent runtime directories and local caches
-.agents/
 .gitagent/
 agent-logs/
 
@@ -21,13 +20,7 @@ agent-logs/
 *.pem
 *.key
 
-# Operating system / IDE files
-.DS_Store
-.vscode/
-.idea/
-
 # Project Specific
-
 .coverage/
 .internal/
 .local/

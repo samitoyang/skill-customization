@@ -20,6 +20,7 @@ const requiredFiles = [
   "docs/descriptor-v1.md",
   "docs/discovery-and-bindings.md",
   "docs/helper-contract-1.md",
+  "docs/helper-contract-2.md",
   "docs/library.md",
   "docs/reconciliation.md",
   "docs/adr/0001-managed-recursive-runtime.md",

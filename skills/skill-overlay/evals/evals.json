@@ -118,7 +118,7 @@
       "files": [],
       "expectations": [
         "The response does not execute the overlay while preflight is unavailable.",
-        "The response delegates to skill-overlay and applies the contract-1 installed-then-permitted-npx policy."
+        "The response delegates to skill-overlay and applies the contract-2 installed-then-permitted-npx policy."
       ]
     },
     {
