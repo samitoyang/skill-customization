@@ -1,6 +1,34 @@
+# Dependency directories
 node_modules/
-.coverage/
-*.tmp
-.internal/
+jspm_packages/
+.pnpm-store/
+
+# Build and distribution outputs
+dist/
+build/
+.next/
+out/
+
+# AI Agent runtime directories and local caches
+.agent/
+.gitagent/
+agent-logs/
+
+# Environment secrets and tokens
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Operating system / IDE files
 .DS_Store
+.vscode/
+.idea/
+
+# Project Specific
+
+.coverage/
+.internal/
 .local/
+*.tmp
