@@ -10,7 +10,7 @@ build/
 out/
 
 # AI Agent runtime directories and local caches
-.agent/
+.agents/
 .gitagent/
 agent-logs/
 
@@ -31,4 +31,5 @@ agent-logs/
 .coverage/
 .internal/
 .local/
+docs/agents/
 *.tmp
