@@ -31,5 +31,4 @@ agent-logs/
 .coverage/
 .internal/
 .local/
-docs/agents/
 *.tmp

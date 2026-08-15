@@ -18,6 +18,9 @@ test("private package path components are rejected at every depth", () => {
     "src/internal.js",
     "src/test-helper.js",
     "docs/agents.md",
+    "docs/agents/domain.md",
+    "docs/agents/issue-tracker.md",
+    "docs/agents/triage-labels.md",
     "skills/skill-overlay/references/context.md",
   ]) {
     assert.equal(isForbiddenPackagePath(file), false, file);

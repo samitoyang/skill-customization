@@ -392,6 +392,9 @@ test("public documentation pointers resolve", async () => {
     "docs/discovery-and-bindings.md",
     "docs/library.md",
     "docs/reconciliation.md",
+    "docs/agents/domain.md",
+    "docs/agents/issue-tracker.md",
+    "docs/agents/triage-labels.md",
     "docs/adr/0001-managed-recursive-runtime.md",
   ];
   for (const document of documents) {
