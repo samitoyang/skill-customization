@@ -10,6 +10,12 @@ Use Node.js 18 or newer and make one vertical slice at a time. Runtime code has 
 6. Check new dispatcher and creation compatibility with `skill-customization supports 2`, not an exact package version. Keep contract-1 checks only in existing dispatchers and compatibility tests.
 7. Run `npm run verify` before opening a pull request.
 
+## Releases
+
 Release selection and publication are separate maintainer decisions. The contract-2 release is `v0.1.1`; later compatibility changes do not authorize choosing another package version.
+
+For a publishable change, run `npm run changeset` and commit the generated file. Choose the semantic-version bump deliberately; documentation, tests, and internal maintenance do not always need a package release. Changes merged to `main` are collected into a version pull request. Review and merge that pull request to publish the prepared version and create its Git tag and GitHub release.
+
+Publication uses npm trusted publishing, not a long-lived npm token. Configure the `skill-customization` package on npm with GitHub Actions as its trusted publisher, repository `samitoyang/skill-customization`, workflow filename `release.yml`, and the `npm publish` action. The workflow uses a GitHub-hosted runner and requests `id-token: write`; do not add an `NPM_TOKEN`. Repository settings must also allow GitHub Actions to create pull requests.
 
 Bug reports should include the command, expected result, actual result, Node.js version, and a minimal descriptor with credentials and machine-local paths removed.

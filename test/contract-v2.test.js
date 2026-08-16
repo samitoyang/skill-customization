@@ -11,14 +11,14 @@ const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
 
-test("helper contract 2: v0.1.1 supports contracts 1 and 2", () => {
-  assert.equal(packageJson.version, "0.1.1");
+test("helper contract 2: the published helper supports contracts 1 and 2", () => {
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
   for (const contract of ["1", "2"]) {
     assert.deepEqual(helperContractSupport(contract, packageJson.version), {
       compatible: true,
       requested_contract: contract,
       supported_contracts: ["1", "2"],
-      package_version: "0.1.1",
+      package_version: packageJson.version,
     });
   }
 });

@@ -443,3 +443,32 @@ test("the package uses a public-document allowlist and verifies its Node 18 floo
   assert.match(workflow, /node:\s*\[18, 22, 24\]/);
   assert.match(workflow, /npm pack --dry-run/);
 });
+
+test("release automation uses Changesets with npm trusted publishing", async () => {
+  const packageJson = JSON.parse(await read("package.json"));
+  assert.equal(packageJson.scripts.changeset, "changeset");
+  assert.equal(packageJson.scripts.release, "changeset publish");
+  assert.match(
+    packageJson.scripts["version-packages"],
+    /^changeset version && npm install --package-lock-only/,
+  );
+  assert.ok(packageJson.devDependencies["@changesets/cli"]);
+  assert.ok(packageJson.devDependencies["@changesets/changelog-github"]);
+
+  const config = JSON.parse(await read(".changeset/config.json"));
+  assert.equal(config.access, "public");
+  assert.equal(config.baseBranch, "main");
+  assert.deepEqual(config.changelog, [
+    "@changesets/changelog-github",
+    { repo: "samitoyang/skill-customization" },
+  ]);
+
+  const workflow = await read(".github/workflows/release.yml");
+  assert.match(workflow, /id-token:\s*write/);
+  assert.match(workflow, /node-version:\s*24/);
+  assert.match(workflow, /package-manager-cache:\s*false/);
+  assert.match(workflow, /npm ci --ignore-scripts/);
+  assert.match(workflow, /publish:\s*npm run release/);
+  assert.match(workflow, /GITHUB_TOKEN:/);
+  assert.doesNotMatch(workflow, /NPM_TOKEN|NODE_AUTH_TOKEN/);
+});
