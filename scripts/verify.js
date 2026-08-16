@@ -15,8 +15,9 @@ async function filesBelow(directory) {
   return result;
 }
 
-if (Number(process.versions.node.split(".")[0]) < 18) {
-  throw new Error("Node.js 18 or newer is required");
+const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 14)) {
+  throw new Error("Node.js 22.14 or newer is required");
 }
 
 const javascript = (

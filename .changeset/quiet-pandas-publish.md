@@ -1,5 +1,5 @@
 ---
-"skill-customization": patch
+"skill-customization": minor
 ---
 
-Automate version pull requests and npm releases with Changesets and GitHub Actions trusted publishing.
+Require Node.js 22.14 or newer and automate npm trusted publishing with Changesets 3 and its least-privilege GitHub Actions workflow.

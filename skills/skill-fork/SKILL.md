@@ -2,7 +2,7 @@
 name: skill-fork
 description: Create or maintain an independent skill that owns its complete workflow, provenance, license, snapshot directory, and diff. Use for natural-language fork requests, existing fork maintenance stops, and ambiguous customization requests that need routing among fork, overlay, replacement, and companion.
 license: MIT
-compatibility: Requires Node.js 18+ and skill-customization helper contract 2; npm only for the on-demand fallback.
+compatibility: Requires Node.js 22.14+ and skill-customization helper contract 2; npm only for the on-demand fallback.
 ---
 
 # Skill Fork
