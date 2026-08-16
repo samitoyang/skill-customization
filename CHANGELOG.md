@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+### Minor Changes
+
+- [#7](https://github.com/samitoyang/skill-customization/pull/7) [`db1a4c4`](https://github.com/samitoyang/skill-customization/commit/db1a4c46ed62cfa2f1e8f12050385872b2963e6e) Thanks [@samitoyang](https://github.com/samitoyang)! - Require Node.js 22.14 or newer and automate npm trusted publishing with Changesets 3 and its least-privilege GitHub Actions workflow.
+
 All notable changes to this project are documented here.
 
 ## 0.1.1 - 2026-08-15
