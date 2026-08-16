@@ -1,6 +1,6 @@
 # Library reference
 
-Import public functions from `skill-customization`; the package root is the supported Node.js 18+, zero-runtime-dependency API. The schema is exported as `skill-customization/schema`.
+Import public functions from `skill-customization`; the package root is the supported Node.js 22.14+, zero-runtime-dependency API. The schema is exported as `skill-customization/schema`.
 
 Primary seams are descriptor validation that keeps runtime selectors inside the reviewed payload, normalization and naming, canonical-target and owned-payload fingerprints that exclude clone-local version-control metadata and reject internal symlinks, bounded discovery and manager records, context bindings, targeted reconciliation with entrypoint-derived local identity and recursively checked customization-source identity, recursive `preflightCustomization`, explicit `acceptMaintenanceUpdate`, and canonically contained locked atomic file/JSON updates.
 

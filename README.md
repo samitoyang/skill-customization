@@ -114,7 +114,7 @@ Optionally pre-install the helper:
 npm install --global skill-customization@latest
 ```
 
-The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 18 or newer. Compatibility is checked before use. Approval when selecting an on-demand helper covers subsequent helper commands while its recorded identity and state remain unchanged.
+The helper is a dependency-free Node.js package for deterministic checks and requires Node.js 22.14 or newer. Compatibility is checked before use. Approval when selecting an on-demand helper covers subsequent helper commands while its recorded identity and state remain unchanged.
 
 ## 🌐 Ecosystem Compatibility
 

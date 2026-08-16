@@ -2,7 +2,7 @@
 name: skill-overlay
 description: Create or maintain a live-source skill customization that keeps receiving upstream improvements. Use for natural-language overlay requests, existing overlay maintenance stops, and ambiguous customization requests that need routing among overlay, fork, replacement, and companion.
 license: MIT
-compatibility: Requires Node.js 18+ and skill-customization helper contract 2; npm only for the on-demand fallback.
+compatibility: Requires Node.js 22.14+ and skill-customization helper contract 2; npm only for the on-demand fallback.
 ---
 
 # Skill Overlay

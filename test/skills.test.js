@@ -11,9 +11,9 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
     assert.ok(markdown.split("\n").length < 80);
     assert.match(markdown, new RegExp(`^---\\nname: ${skillName}\\n`));
     assert.match(markdown, /license: MIT/);
-    assert.match(markdown, /compatibility: Requires Node\.js 18\+/);
+    assert.match(markdown, /compatibility: Requires Node\.js 22\.14\+/);
     assert.match(markdown, /npm only for the on-demand fallback/);
-    assert.doesNotMatch(markdown, /Node\.js 18\+, npm access/);
+    assert.doesNotMatch(markdown, /Node\.js 22\.14\+, npm access/);
     assert.match(markdown, /helper contract 2/);
     assert.match(markdown, /thin dispatchers/);
     assert.match(markdown, /skill-customization preflight/);
@@ -406,7 +406,7 @@ test("public documentation pointers resolve", async () => {
   }
 });
 
-test("the package uses a public-document allowlist and verifies its Node 18 floor in CI", async () => {
+test("the package uses a public-document allowlist and verifies its Node 22.14 floor in CI", async () => {
   const packageJson = JSON.parse(await read("package.json"));
   const publicDocs = packageJson.files.filter((file) => file.startsWith("docs/"));
   assert.deepEqual(publicDocs, [
@@ -420,7 +420,7 @@ test("the package uses a public-document allowlist and verifies its Node 18 floo
     "docs/adr/0001-managed-recursive-runtime.md",
   ]);
   assert.ok(publicDocs.every((file) => !file.includes("*")));
-  assert.equal(packageJson.engines.node, ">=18");
+  assert.equal(packageJson.engines.node, ">=22.14.0");
   assert.equal(packageJson.publishConfig.access, "public");
   assert.ok(packageJson.files.includes("CONTRIBUTING.md"));
   assert.ok(packageJson.files.includes("SECURITY.md"));
@@ -440,6 +440,39 @@ test("the package uses a public-document allowlist and verifies its Node 18 floo
     "git+https://github.com/samitoyang/skill-customization.git",
   );
   const workflow = await read(".github/workflows/ci.yml");
-  assert.match(workflow, /node:\s*\[18, 22, 24\]/);
+  assert.match(workflow, /node:\s*\["22\.14\.0", "24", "26"\]/);
   assert.match(workflow, /npm pack --dry-run/);
+  assert.match(await read("scripts/verify.js"), /Node\.js 22\.14 or newer/);
+});
+
+test("release automation uses Changesets with npm trusted publishing", async () => {
+  const packageJson = JSON.parse(await read("package.json"));
+  assert.equal(packageJson.scripts.changeset, "changeset");
+  assert.equal(packageJson.scripts.release, "changeset publish");
+  assert.match(
+    packageJson.scripts["version-packages"],
+    /^changeset version && npm install --package-lock-only/,
+  );
+  assert.ok(packageJson.devDependencies["@changesets/cli"]);
+  assert.ok(packageJson.devDependencies["@changesets/changelog-github"]);
+
+  const config = JSON.parse(await read(".changeset/config.json"));
+  assert.equal(config.access, "public");
+  assert.equal(config.baseBranch, "main");
+  assert.deepEqual(config.changelog, [
+    "@changesets/changelog-github",
+    { repo: "samitoyang/skill-customization" },
+  ]);
+
+  const workflow = await read(".github/workflows/release.yml");
+  assert.match(workflow, /id-token:\s*write/);
+  assert.match(workflow, /node-version:\s*24/);
+  assert.match(workflow, /package-manager-cache:\s*false/);
+  assert.match(workflow, /npm ci --ignore-scripts/);
+  assert.match(workflow, /changesets\/action\/select-mode@v2/);
+  assert.match(workflow, /changesets\/action\/version@v2/);
+  assert.match(workflow, /changesets\/action\/pack@v2/);
+  assert.match(workflow, /changesets\/action\/publish@v2/);
+  assert.equal(workflow.match(/id-token:\s*write/g)?.length, 1);
+  assert.doesNotMatch(workflow, /GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN/);
 });
