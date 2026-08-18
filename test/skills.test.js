@@ -395,6 +395,7 @@ test("public documentation pointers resolve", async () => {
     "docs/agents/issue-tracker.md",
     "docs/agents/triage-labels.md",
     "docs/adr/0001-managed-recursive-runtime.md",
+    "docs/adr/0002-bounded-plugin-provenance-discovery.md",
   ];
   for (const document of documents) {
     const markdown = await read(document);
@@ -418,6 +419,7 @@ test("the package uses a public-document allowlist and verifies its Node 22.14 f
     "docs/library.md",
     "docs/reconciliation.md",
     "docs/adr/0001-managed-recursive-runtime.md",
+    "docs/adr/0002-bounded-plugin-provenance-discovery.md",
   ]);
   assert.ok(publicDocs.every((file) => !file.includes("*")));
   assert.equal(packageJson.engines.node, ">=22.14.0");

@@ -127,7 +127,10 @@ The [checkpointed agent registry](https://github.com/vercel-labs/skills/blob/305
 | Shared project | `.agents/skills` |
 | Host-specific project | `.claude/skills`, `.github/skills`, `.cursor/skills`, `.windsurf/skills` |
 | Personal | `~/.agents/skills`, `~/.claude/skills`, `$CODEX_HOME/skills` |
+| Plugin-backed | Claude `~/.claude/plugins/cache/.../skills`, Codex `$CODEX_HOME/plugins/cache/.../skills`, Gemini `~/.gemini/extensions/.../skills`, Cursor `~/.cursor/plugins/local/.../skills` |
 | Configured | Claude `additionalDirectories`, `COPILOT_SKILLS_DIRS`, manager-owned roots, explicit custom paths |
+
+Plugin discovery is manifest-aware and bounded to documented host paths. It includes Claude synced skills under `~/.claude/skills/synced` only when `CLAUDE_CODE_SYNC_SKILLS=1`; cache versions are provenance evidence rather than source identity, and plugin-only identities remain local.
 
 ### Skill managers
 
@@ -248,4 +251,5 @@ Published descriptors keep stable identity and provenance portable. Concrete sou
 - For overlay drift and fork-payload verification, read [Reconciliation](docs/reconciliation.md).
 - For embedding the engine in another Node.js tool, read the [Library reference](docs/library.md).
 - For the runtime decision, read [ADR 0001](docs/adr/0001-managed-recursive-runtime.md).
+- For bounded plugin provenance discovery, read [ADR 0002](docs/adr/0002-bounded-plugin-provenance-discovery.md).
 - For vulnerability reporting and release history, see [Security](SECURITY.md) and the [Changelog](CHANGELOG.md).

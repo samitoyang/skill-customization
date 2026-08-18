@@ -13,7 +13,7 @@ An overlay keeps a live source workflow and adds one semantic delta. Generated o
 
 1. Inventory installed skills and adjacent customization metadata. For an existing overlay execution request, try the dispatcher fast path before intake. **Gate:** one descriptor and current host/workspace context are identified, or the request is classified as new maintenance work.
 2. Select one contract-2 helper, then run `skill-customization preflight <customization.json> --context <context>`. **Gate:** the result is checked and no runtime file has executed early.
-3. On `ready`, follow every execution step in order. On `ready-with-advisory`, report the advisory and follow the same steps. If preflight names another maintenance handler, delegate to it. **Gate:** execution completes from the checked plan or stops at one handler.
+3. On `ready`, follow every execution step in order. On `ready-with-advisory`, report the advisory and follow the same steps. If preflight names another maintenance handler, **Call the Skill tool with the returned handler.** **Gate:** execution completes from the checked plan or stops at one handler.
 4. For `maintenance-required`, explicit maintenance, or creation, use the matching branch below. Treat the source as read-only and write only inside the customization or local state paths. **Gate:** accepted changes are recorded atomically and preflight reruns `ready` or `ready-with-advisory`, or the result stops with one action.
 
 ## Select the helper
@@ -37,4 +37,4 @@ Read [Overlay intake](references/intake.md), confirm one brief, then create:
 - a portable v1 descriptor with reviewed owned-payload and full-source or customization-source effective fingerprints;
 - one confirmed context-scoped source binding.
 
-Route to `skill-fork` when runtime independence is required, and to a companion when the new skill only calls or consumes the source. `replace` requires separate confirmation and deterministic customization-first precedence.
+When runtime independence is required, **Call the Skill tool with "skill-fork".** If the new skill only calls or consumes the source, use a companion skill. `replace` requires separate confirmation and deterministic customization-first precedence.

@@ -13,7 +13,7 @@ A fork is a runtime leaf whose `CUSTOMIZATION.md` is the complete independent wo
 
 1. Inventory installed skills and adjacent customization metadata. For an existing fork execution request, try the dispatcher fast path before intake. **Gate:** one descriptor and current host/workspace context are identified, or the request is classified as new maintenance work.
 2. Select one contract-2 helper, then run `skill-customization preflight <customization.json> --context <context>`. **Gate:** the result is checked and no runtime file has executed early.
-3. On `ready`, follow the workflow step. On `ready-with-advisory`, report the optional tracking advisory and run the fork unchanged; adoption or rebase remains explicit. If preflight names another maintenance handler, delegate to it. **Gate:** execution completes from the checked plan or stops at one handler.
+3. On `ready`, follow the workflow step. On `ready-with-advisory`, report the optional tracking advisory and run the fork unchanged; adoption or rebase remains explicit. If preflight names another maintenance handler, **Call the Skill tool with the returned handler.** **Gate:** execution completes from the checked plan or stops at one handler.
 4. For `maintenance-required`, explicit maintenance, or creation, use the matching branch below. Treat the source as read-only and write only inside the fork or local state paths. **Gate:** accepted changes are recorded atomically and preflight reruns `ready` or `ready-with-advisory`, or the result stops with one action.
 
 ## Select the helper
@@ -39,4 +39,4 @@ Read [Fork intake](references/intake.md), confirm one brief, then create:
 - a relative, symlink-free snapshot directory and unified diff beneath reserved `provenance/` that reconstruct every runtime-owned file;
 - a portable v1 descriptor with own/source licenses, reviewed owned-payload, snapshot, diff, and source effective fingerprints.
 
-When the source is an overlay chain, materialize its checked base-plus-deltas result as a snapshot directory and record the chain effective fingerprint, concrete snapshot fingerprint, review time, and review evidence before diffing. A verified fork may be the source of another customization. Route to `skill-overlay` for automatic upstream changes and to a companion when the source behavior remains unchanged.
+When the source is an overlay chain, materialize its checked base-plus-deltas result as a snapshot directory and record the chain effective fingerprint, concrete snapshot fingerprint, review time, and review evidence before diffing. A verified fork may be the source of another customization. When automatic upstream changes are required, **Call the Skill tool with "skill-overlay".** If the source behavior remains unchanged, use a companion skill.
