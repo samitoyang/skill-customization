@@ -352,7 +352,10 @@ async function scanRoot(rootInfo) {
     };
   }
   const directories = [];
-  if (await exists(path.join(rootInfo.path, "SKILL.md"))) directories.push(rootInfo.path);
+  if (
+    (rootInfo.singleSkill || rootInfo.includeRootSkill !== false)
+    && await exists(path.join(rootInfo.path, "SKILL.md"))
+  ) directories.push(rootInfo.path);
   if (!rootInfo.singleSkill) {
     for (const entry of entries) {
       if (entry.isDirectory() || entry.isSymbolicLink()) {

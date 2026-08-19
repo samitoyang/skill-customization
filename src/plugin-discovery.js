@@ -39,8 +39,11 @@ const CURSOR_MANIFEST_POLICY = Object.freeze({
   description: "Cursor plugin metadata",
   requiredFields: ["name"],
   skipInvalidExtension: true,
+  manifestOverridesDeclaration: true,
   declaredSkillDirectoriesReplaceDefault: true,
   includeRootSkillFallback: true,
+  includeDefaultSkillRoot: false,
+  manifestNamePattern: /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
 });
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
@@ -115,28 +118,30 @@ function repositoryValue(value, seen = new Set()) {
   return undefined;
 }
 
-function sourceMetadata(manifest, declaration = {}, installationMetadata = {}) {
-  const source = declaration.source && typeof declaration.source === "object"
-    ? declaration.source
-    : manifest?.source && typeof manifest.source === "object"
-      ? manifest.source
-      : {};
-  const declarationSourceRepository = declaration.source && typeof declaration.source === "object"
-    ? repositoryValue(declaration.source)
-    : undefined;
-  const manifestSourceRepository = manifest?.source && typeof manifest.source === "object"
-    ? repositoryValue(manifest.source)
-    : undefined;
-  const repository = repositoryValue(
-    declaration.repository
-      ?? declaration.repository_url
-      ?? declaration.repositoryUrl
-      ?? declarationSourceRepository
-      ?? manifest?.repository
-      ?? manifest?.repository_url
-      ?? manifest?.repositoryUrl
-      ?? manifestSourceRepository,
-  );
+function sourceMetadata(
+  manifest,
+  declaration = {},
+  installationMetadata = {},
+  { manifestOverridesDeclaration = false } = {},
+) {
+  const containers = manifestOverridesDeclaration
+    ? [manifest, declaration]
+    : [declaration, manifest];
+  const firstDefined = (values) => values.find((value) => value !== undefined && value !== null);
+  const repository = repositoryValue(firstDefined(containers.flatMap((container) => {
+    const sourceValue = container?.source;
+    const sourceRepository = sourceValue
+      && typeof sourceValue === "object"
+      && !Array.isArray(sourceValue)
+      ? repositoryValue(sourceValue)
+      : undefined;
+    return [
+      container?.repository,
+      container?.repository_url,
+      container?.repositoryUrl,
+      sourceRepository,
+    ];
+  })));
   const installationRepository = ["git", "github-release"].includes(installationMetadata.type)
     ? installationMetadata.source
     : undefined;
@@ -148,12 +153,16 @@ function sourceMetadata(manifest, declaration = {}, installationMetadata = {}) {
     }
     : undefined;
   const upstreamPath = normalizeUpstreamEntrypoint(
-    declaration.upstream_path
-      ?? declaration.upstreamPath
-      ?? source.upstream_path
-      ?? source.upstreamPath
-      ?? manifest?.upstream_path
-      ?? manifest?.upstreamPath,
+    firstDefined(containers.flatMap((container) => [
+      container?.upstream_path,
+      container?.upstreamPath,
+      container?.source && typeof container.source === "object" && !Array.isArray(container.source)
+        ? container.source.upstream_path
+        : undefined,
+      container?.source && typeof container.source === "object" && !Array.isArray(container.source)
+        ? container.source.upstreamPath
+        : undefined,
+    ])),
   );
   return { repository: repositoryWithInstallation, upstreamPath, installation };
 }
@@ -496,8 +505,11 @@ async function addPluginInstall({
     installationFile: installationMetadataFile,
     nameMatchesDirectory = false,
     skipInvalidExtension = false,
+    manifestOverridesDeclaration = false,
     declaredSkillDirectoriesReplaceDefault = false,
     includeRootSkillFallback = false,
+    includeDefaultSkillRoot = true,
+    manifestNamePattern,
   } = manifestPolicy;
   const initialMetadata = metadataFor({
     host,
@@ -549,6 +561,23 @@ async function addPluginInstall({
     }
   }
   if (
+    manifestNamePattern
+    && manifest
+    && stringValue(manifestValue.name)
+    && !manifestNamePattern.test(stringValue(manifestValue.name))
+  ) {
+    invalidManifest = true;
+    context.diagnostics.push(
+      diagnostic({
+        host,
+        path: manifest.path,
+        code: "INVALID_PLUGIN_METADATA",
+        message: `${manifestDescription} has an invalid plugin name: ${manifest.path}`,
+        metadata: initialMetadata,
+      }),
+    );
+  }
+  if (
     nameMatchesDirectory
     && manifest
     && stringValue(manifestValue.name)
@@ -595,16 +624,24 @@ async function addPluginInstall({
     );
   }
   // Local/link sources identify an external origin; preserve that evidence without traversing or writing it.
+  const manifestField = (field) => manifestOverridesDeclaration
+    ? manifestValue?.[field] ?? declaration[field]
+    : declaration[field] ?? manifestValue?.[field];
   const metadata = metadataFor({
     host,
-    marketplace: declaration.marketplace ?? manifestValue?.marketplace ?? marketplace,
-    name: declaration.name ?? manifestValue?.name ?? name,
-    version: declaration.version ?? manifestValue?.version ?? version,
+    marketplace: manifestField("marketplace") ?? marketplace,
+    name: manifestField("name") ?? name,
+    version: manifestField("version") ?? version,
     root: safeInstallRoot,
     manifestPath: manifest?.path,
     source: declaration.sourceType,
   });
-  const provenanceSource = sourceMetadata(manifestValue, declaration, installationMetadata);
+  const provenanceSource = sourceMetadata(
+    manifestValue,
+    declaration,
+    installationMetadata,
+    { manifestOverridesDeclaration },
+  );
   const evidenceResult = pluginEvidence({ metadata, source: provenanceSource });
   if (evidenceResult.repository) {
     context.diagnostics.push(
@@ -703,7 +740,9 @@ async function addPluginInstall({
       { declared: value !== defaultSkillDirectory },
     );
     if (!skillRoot) continue;
-    context.roots.push(pluginRootInfo(skillRoot));
+    context.roots.push(pluginRootInfo(skillRoot, {
+      includeRootSkill: relativeDirectory !== defaultSkillDirectory || includeDefaultSkillRoot,
+    }));
   }
 }
 

@@ -365,6 +365,17 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     JSON.stringify({ name: "root-skill-plugin" }),
   );
 
+  const defaultRootSkillPlugin = path.join(localRoot, "default-root-skill-plugin");
+  await mkdir(path.join(defaultRootSkillPlugin, "skills"), { recursive: true });
+  await writeFile(
+    path.join(defaultRootSkillPlugin, "skills", "SKILL.md"),
+    "---\nname: cursor-undocumented-default-review\ndescription: Fixture\n---\nUse this skill.\n",
+  );
+  await writeFile(
+    path.join(defaultRootSkillPlugin, "plugin.json"),
+    JSON.stringify({ name: "default-root-skill-plugin" }),
+  );
+
   const marketplaceRoot = localRoot;
   const marketplacePlugin = path.join(marketplaceRoot, "plugins", "market-plugin");
   const marketplaceSkill = await writeSkill(
@@ -384,8 +395,11 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
       name: "team-marketplace",
       metadata: { pluginRoot: "plugins" },
       plugins: [{
-        name: "market-plugin",
+        name: "marketplace-entry-name",
         source: "market-plugin",
+        version: "9.9.9",
+        repository: "https://github.com/example/marketplace-entry",
+        upstream_path: "marketplace/review",
         skills: "marketplace-skills",
       }],
     }),
@@ -395,8 +409,10 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     path.join(marketplacePlugin, ".cursor-plugin", "plugin.json"),
     JSON.stringify({
       name: "market-plugin",
+      version: "1.2.3",
       skills: "custom-skills",
       repository: "https://github.com/example/market-plugin",
+      upstream_path: "skills/review",
     }),
   );
 
@@ -414,10 +430,24 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
   assert.equal(byName.has("cursor-fallback-review"), false);
   assert.equal(byName.get("cursor-root-review").copies[0].path, rootSkillPlugin);
   assert.equal(byName.get("cursor-market-review").copies[0].path, marketplaceSkill);
+  assert.deepEqual(byName.get("cursor-market-review").copies[0].pluginMetadata, {
+    host: "cursor",
+    marketplace: "team-marketplace",
+    name: "market-plugin",
+    version: "1.2.3",
+    root: marketplacePlugin,
+    manifestPath: path.join(marketplacePlugin, ".cursor-plugin", "plugin.json"),
+    source: "marketplace",
+  });
   assert.deepEqual(byName.get("cursor-market-review").provenance, [
-    "repository:https://github.com/example/market-plugin",
+    "repository:https://github.com/example/market-plugin#skills/review/SKILL.md",
   ]);
+  assert.equal(
+    byName.get("cursor-market-review").copies[0].evidence[0].upstream_path,
+    "skills/review/SKILL.md",
+  );
   assert.equal(byName.has("cursor-marketplace-only-review"), false);
+  assert.equal(byName.has("cursor-undocumented-default-review"), false);
 });
 
 test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", async () => {
@@ -448,6 +478,13 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   await writeFile(
     path.join(invalidPlugin, "plugin.json"),
     JSON.stringify({ name: 42 }),
+  );
+
+  const invalidNamePlugin = path.join(localRoot, "invalid-name-plugin");
+  await writeSkill(path.join(invalidNamePlugin, "skills"), "invalid-name-review");
+  await writeFile(
+    path.join(invalidNamePlugin, "plugin.json"),
+    JSON.stringify({ name: "Invalid Plugin" }),
   );
 
   const emptySkillsPlugin = path.join(localRoot, "empty-skills-plugin");
@@ -488,6 +525,9 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   assert.equal(result.groups[0].copies[0].path, validSkill);
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_METADATA"));
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "INVALID_PLUGIN_METADATA"));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, message }) => code === "INVALID_PLUGIN_METADATA" && message.includes("invalid plugin name"),
+  ));
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_SKILL_DIRECTORY_INVALID"));
   assert.equal(result.groups.some(({ name }) => name === "escaped-review"), false);
