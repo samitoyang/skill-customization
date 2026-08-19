@@ -156,17 +156,24 @@ test("skill helper policy covers installed, linked, registry, and stopped paths"
 });
 
 test("contract-2 maintenance text uses Skill-tool routing and keeps human examples", async () => {
-  const [overlay, fork, reconciliation, readme] = await Promise.all([
+  const [overlay, fork, reconciliation, adr, overlayEvals, forkEvals, readme] = await Promise.all([
     read("skills/skill-overlay/SKILL.md"),
     read("skills/skill-fork/SKILL.md"),
     read("docs/reconciliation.md"),
+    read("docs/adr/0001-managed-recursive-runtime.md"),
+    read("skills/skill-overlay/evals/evals.json"),
+    read("skills/skill-fork/evals/evals.json"),
     read("README.md"),
   ]);
   for (const markdown of [overlay, fork]) {
-    assert.match(markdown, /Call the Skill tool with/);
+    assert.match(markdown, /A dispatcher must Call the Skill tool with this skill/);
     assert.doesNotMatch(markdown, /A dispatcher delegates here/);
   }
   assert.match(reconciliation, /Call the Skill tool with `skill-overlay`/);
+  assert.match(adr, /Call the Skill tool with exactly one maintenance skill/);
+  for (const evals of [overlayEvals, forkEvals]) {
+    assert.match(evals, /Call the Skill tool with/);
+  }
   assert.match(readme, /\/skill-overlay customize/);
   assert.match(readme, /\/skill-fork make/);
 });
