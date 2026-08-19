@@ -33,6 +33,16 @@ function run(args, { env = process.env } = {}) {
   });
 }
 
+async function writeSkill(root, folder, name = folder) {
+  const directory = path.join(root, folder);
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, "SKILL.md"),
+    `---\nname: ${name}\ndescription: Fixture\n---\nUse this skill.\n`,
+  );
+  return directory;
+}
+
 async function runInteractive(args, answers) {
   const stdin = new PassThrough();
   stdin.isTTY = true;
@@ -535,6 +545,40 @@ test("CLI discovery loads bounded Claude additionalDirectories", async () => {
   assert.equal(discovery.groups[0].name, "claude-cli-fixture");
   assert.equal(discovery.groups[0].copies[0].owner, "claude-additional");
   assert.equal(discovery.settingsEvidence.length, 1);
+});
+
+test("CLI discovery uses ambient Claude plugins and supports the deterministic opt-out", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cli-claude-plugin-"));
+  const home = path.join(root, "home");
+  const pluginRoot = path.join(
+    home,
+    ".claude",
+    "plugins",
+    "cache",
+    "official",
+    "cli-reviewer",
+    "1",
+  );
+  const skill = await writeSkill(path.join(pluginRoot, "skills"), "cli-plugin-review");
+  await mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name: "cli-reviewer" }),
+  );
+
+  const environment = { ...process.env, HOME: home, PATH: "" };
+  const discovered = await run(["discover", "cli-plugin-review"], { env: environment });
+  assert.equal(discovered.code, 0, discovered.stderr);
+  const result = JSON.parse(discovered.stdout);
+  assert.equal(result.groups[0].copies[0].path, skill);
+  assert.equal(result.groups[0].copies[0].plugin.name, "cli-reviewer");
+
+  const disabled = await run(
+    ["discover", "cli-plugin-review", "--include-plugins", "false"],
+    { env: environment },
+  );
+  assert.equal(disabled.code, 1);
+  assert.match(disabled.stderr, /NO_LOCAL_COPY/);
 });
 
 test("CLI accepts an explicit owned-payload maintenance update atomically", async () => {

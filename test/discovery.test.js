@@ -39,6 +39,419 @@ test("host roots include Codex, Claude additions, and Copilot env without a home
   assert.equal(paths.some((value) => value === home), false);
 });
 
+test("ambient discovery finds Claude plugin cache roots with manifest provenance", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-plugin-"));
+  const home = path.join(root, "home");
+  const pluginRoot = path.join(
+    home,
+    ".claude",
+    "plugins",
+    "cache",
+    "official",
+    "reviewer",
+    "1.2.3",
+  );
+  const skill = await writeSkill(path.join(pluginRoot, "skills"), "review");
+  await mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "reviewer",
+      version: "1.2.3",
+      repository: "https://github.com/example/reviewer",
+    }),
+  );
+
+  const result = await discoverSkills({
+    input: "review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].copies[0].path, skill);
+  assert.equal(result.groups[0].copies[0].owner, "plugin:claude-code");
+  assert.deepEqual(result.groups[0].copies[0].plugin, {
+    host: "claude-code",
+    marketplace: "official",
+    name: "reviewer",
+    version: "1.2.3",
+  });
+  assert.deepEqual(
+    result.groups[0].evidence.map(({ kind }) => kind),
+    ["plugin"],
+  );
+  assert.deepEqual(result.groups[0].provenance, [
+    "repository:https://github.com/example/reviewer",
+  ]);
+});
+
+test("ambient plugin discovery is opt-out and explicit roots remain authoritative", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-policy-"));
+  const home = path.join(root, "home");
+  await writeSkill(
+    path.join(home, ".claude", "plugins", "cache", "official", "reviewer", "1", "skills"),
+    "review",
+  );
+
+  const disabled = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    includePlugins: false,
+    managerRecords: [],
+  });
+  assert.equal(disabled.groups.length, 0);
+  assert.equal(disabled.searchedRoots.some(({ owner }) => owner.startsWith("plugin:")), false);
+
+  const explicit = await discoverSkills({
+    roots: [],
+    additionalRoots: [path.join(home, ".claude", "plugins")],
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  assert.equal(explicit.groups.length, 0);
+  assert.equal(explicit.searchedRoots.length, 0);
+});
+
+test("Claude sync discovery is gated and manifest directories stay bounded", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-bounded-"));
+  const home = path.join(root, "home");
+  const pluginRoot = path.join(
+    home,
+    ".claude",
+    "plugins",
+    "cache",
+    "team",
+    "custom",
+    "1",
+  );
+  await writeSkill(path.join(pluginRoot, "custom-skills"), "manifest-review");
+  await mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "custom",
+      skills: ["custom-skills", "../outside"],
+    }),
+  );
+  await writeSkill(
+    path.join(home, ".claude", "skills", "synced"),
+    "synced-review",
+  );
+  await writeSkill(path.join(home, "unlisted"), "home-only");
+
+  await assert.rejects(
+    discoverSkills({
+      input: "synced-review",
+      home,
+      cwd: path.join(root, "workspace"),
+      env: {},
+      managerRecords: [],
+    }),
+    (error) => error.code === "NO_LOCAL_COPY",
+  );
+
+  const result = await discoverSkills({
+    input: "manifest-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CLAUDE_CODE_SYNC_SKILLS: "1" },
+    managerRecords: [],
+  });
+  assert.equal(result.groups[0].name, "manifest-review");
+  assert.equal(result.groups[0].copies[0].plugin.name, "custom");
+  assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
+  assert.equal(result.groups.some(({ name }) => name === "home-only"), false);
+
+  const synced = await discoverSkills({
+    input: "synced-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CLAUDE_CODE_SYNC_SKILLS: "1" },
+    managerRecords: [],
+  });
+  assert.equal(synced.groups[0].copies[0].plugin.marketplace, "synced");
+});
+
+test("Claude synced skills remain discoverable when no plugin cache exists", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-sync-only-"));
+  const home = path.join(root, "home");
+  await writeSkill(path.join(home, ".claude", "skills", "synced"), "sync-only");
+
+  const result = await discoverSkills({
+    input: "sync-only",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CLAUDE_CODE_SYNC_SKILLS: "1" },
+    managerRecords: [],
+  });
+  assert.equal(result.groups[0].name, "sync-only");
+});
+
+test("invalid plugin siblings and escaping aliases are isolated from valid candidates", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-diagnostics-"));
+  const home = path.join(root, "home");
+  const cache = path.join(home, ".claude", "plugins", "cache", "team");
+  const valid = path.join(cache, "valid", "1");
+  const malformed = path.join(cache, "malformed", "1");
+  await writeSkill(path.join(valid, "skills"), "valid-review");
+  await mkdir(path.join(valid, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(valid, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name: "valid" }),
+  );
+  await writeSkill(path.join(malformed, "skills"), "malformed-review");
+  await mkdir(path.join(malformed, ".claude-plugin"), { recursive: true });
+  await writeFile(path.join(malformed, ".claude-plugin", "plugin.json"), "{broken\n");
+  const outside = path.join(root, "outside");
+  await mkdir(outside, { recursive: true });
+  await symlink(outside, path.join(cache, "escaped"), "dir");
+
+  const result = await discoverSkills({
+    input: "valid-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  assert.equal(result.groups[0].name, "valid-review");
+  assert.ok(result.pluginDiagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_METADATA"));
+  assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
+});
+
+test("plugin host roots require canonical containment", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-alias-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, "codex");
+  const outsidePlugins = path.join(root, "outside-plugins");
+  await writeSkill(path.join(outsidePlugins, "untrusted", "skills"), "escaped-host");
+  await mkdir(codexHome, { recursive: true });
+  await symlink(outsidePlugins, path.join(codexHome, "plugins"), "dir");
+
+  const result = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: codexHome },
+    managerRecords: [],
+  });
+  assert.equal(result.groups.length, 0);
+  assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
+});
+
+test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plugin layouts", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-hosts-"));
+  const home = path.join(root, "home");
+  const repository = path.join(root, "repository");
+  const nested = path.join(repository, "packages", "app");
+  await mkdir(path.join(repository, ".git"), { recursive: true });
+  await mkdir(nested, { recursive: true });
+
+  const codexCache = path.join(
+    home,
+    ".codex",
+    "plugins",
+    "cache",
+    "market",
+    "codex-plugin",
+    "2",
+    "skills",
+  );
+  await writeSkill(codexCache, "codex-review");
+  const workspacePlugin = path.join(repository, ".agents", "plugins", "local-plugin");
+  await writeSkill(path.join(workspacePlugin, "custom"), "workspace-review");
+  await mkdir(path.dirname(workspacePlugin), { recursive: true });
+  await writeFile(
+    path.join(repository, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "workspace-market",
+      plugins: [
+        { name: "invalid-plugin", path: { directory: "../outside" } },
+        { name: "local-plugin", path: "./local-plugin", skills: ["custom"] },
+      ],
+    }),
+  );
+
+  const gemini = path.join(home, ".gemini", "extensions", "gemini-plugin");
+  await writeSkill(path.join(gemini, "skills"), "gemini-review");
+  await writeFile(
+    path.join(gemini, "gemini-extension.json"),
+    JSON.stringify({
+      name: "gemini-plugin",
+      repository: "https://github.com/example/gemini-plugin",
+    }),
+  );
+
+  const cursor = path.join(home, ".cursor", "plugins", "local", "cursor-plugin");
+  await writeSkill(path.join(cursor, "skills"), "cursor-review");
+  const cursorLocal = path.join(home, ".cursor", "plugins", "local");
+  const declaredCursor = path.join(cursorLocal, "declared-plugin");
+  await writeSkill(path.join(declaredCursor, "custom"), "cursor-manifest-review");
+  await writeFile(
+    path.join(cursorLocal, "marketplace.json"),
+    JSON.stringify({
+      plugins: [{
+        name: "declared-plugin",
+        path: "./declared-plugin",
+        skills: ["custom"],
+        repository: { type: "git", url: "git+https://github.com/example/cursor-plugin.git" },
+      }],
+    }),
+  );
+  const unlistedWorkspacePlugin = path.join(repository, ".agents", "plugins", "unlisted");
+  await writeSkill(unlistedWorkspacePlugin, "unlisted-plugin-review");
+
+  const discovery = await discoverSkills({
+    home,
+    cwd: nested,
+    env: {},
+    managerRecords: [],
+  });
+  const byName = new Map(discovery.groups.map((group) => [group.name, group]));
+  assert.equal(byName.get("codex-review").copies[0].plugin.host, "codex");
+  assert.equal(byName.get("workspace-review").copies[0].plugin.marketplace, "workspace-market");
+  assert.equal(byName.get("gemini-review").copies[0].plugin.host, "gemini-cli");
+  assert.equal(byName.get("cursor-review").copies[0].plugin.host, "cursor");
+  assert.equal(byName.get("cursor-manifest-review").copies[0].plugin.host, "cursor");
+  assert.deepEqual(byName.get("cursor-manifest-review").provenance, [
+    "repository:https://github.com/example/cursor-plugin",
+  ]);
+  assert.equal(byName.has("unlisted-plugin-review"), false);
+  assert.ok(discovery.pluginDiagnostics.some(({ code }) => code === "PLUGIN_DECLARATION_INVALID_PATH"));
+  assert.deepEqual(byName.get("gemini-review").provenance, [
+    "repository:https://github.com/example/gemini-plugin",
+  ]);
+});
+
+test("plugin host specifications extend discovery without changing candidate policy", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-seam-"));
+  const home = path.join(root, "home");
+  const skill = await writeSkill(path.join(root, "future-plugin", "skills"), "future-review");
+  const identity = "local:plugin:future-host:local:future";
+  const plugin = {
+    host: "future-host",
+    marketplace: "local",
+    name: "future",
+  };
+
+  const result = await discoverSkills({
+    input: "future-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+    pluginOptions: {
+      hostSpecifications: [{
+        host: "future-host",
+        discover: async (context) => {
+          context.roots.push({
+            path: path.dirname(skill),
+            owner: "plugin:future-host",
+            owners: ["plugin:future-host"],
+            scope: "global",
+            origin: "plugin",
+            host: "future-host",
+            plugin,
+            pluginIdentity: identity,
+            pluginEvidence: [{
+              kind: "plugin",
+              ...plugin,
+              identity,
+              provenance: { kind: "plugin", ...plugin },
+            }],
+          });
+        },
+      }],
+    },
+  });
+
+  assert.equal(result.groups[0].copies[0].path, skill);
+  assert.equal(result.groups[0].copies[0].plugin.host, "future-host");
+  assert.deepEqual(result.groups[0].provenance, [identity]);
+});
+
+test("plugin cache versions preserve every copy without making version part of identity", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-versions-"));
+  const home = path.join(root, "home");
+  const cacheRoot = path.join(home, ".claude", "plugins", "cache", "official", "reviewer");
+  await writeSkill(path.join(cacheRoot, "1", "skills"), "review");
+  await writeSkill(path.join(cacheRoot, "2", "skills"), "review");
+
+  const result = await discoverSkills({
+    input: "review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].copies.length, 2);
+  assert.deepEqual(result.groups[0].provenance, [
+    "local:plugin:claude-code:official:reviewer",
+  ]);
+});
+
+test("plugin identities escape delimiter-bearing names without collisions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-identities-"));
+  const home = path.join(root, "home");
+  const cacheRoot = path.join(home, ".claude", "plugins", "cache", "official");
+  await writeSkill(path.join(cacheRoot, "a:b", "1", "skills"), "review");
+  await writeSkill(path.join(cacheRoot, "a%3Ab", "1", "skills"), "review");
+
+  const result = await discoverSkills({
+    input: "review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  assert.equal(result.groups.length, 1);
+  assert.deepEqual(result.groups[0].provenance, [
+    "local:plugin:claude-code:official:a%253Ab",
+    "local:plugin:claude-code:official:a%3Ab",
+  ]);
+  assert.equal(result.groups[0].conflict, true);
+});
+
+test("Claude marketplace manifests contribute repository provenance", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-marketplace-"));
+  const home = path.join(root, "home");
+  const marketplace = path.join(home, ".claude", "plugins", "marketplaces", "team");
+  await writeSkill(path.join(marketplace, "plugins", "reviewer", "skills"), "market-review");
+  await mkdir(path.join(marketplace, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(marketplace, ".claude-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "team",
+      plugins: [{
+        name: "reviewer",
+        source: "./plugins/reviewer",
+        repository: "https://github.com/example/team-skills",
+      }],
+    }),
+  );
+
+  const result = await discoverSkills({
+    input: "market-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  assert.equal(result.groups.length, 1);
+  assert.deepEqual(result.groups[0].provenance, [
+    "repository:https://github.com/example/team-skills",
+  ]);
+  assert.equal(
+    result.pluginDiagnostics.some(({ code }) => code === "INVALID_PLUGIN_REPOSITORY"),
+    false,
+  );
+});
+
 test("host roots include bounded Git ancestors as workspace roots", async () => {
   const base = await mkdtemp(path.join(os.tmpdir(), "host-roots-"));
   const repository = path.join(base, "repository");

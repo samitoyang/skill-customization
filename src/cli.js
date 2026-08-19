@@ -22,10 +22,7 @@ import {
 import { renderDispatcher } from "./dispatcher-renderer.js";
 import { DiscoveryError } from "./errors.js";
 import { fingerprintPath, payloadFingerprint } from "./fingerprint.js";
-import {
-  collectManagerRecords,
-  managerSkillRoots,
-} from "./manager-collector.js";
+import { collectManagerRecords } from "./manager-collector.js";
 import { reconcileCustomization } from "./reconcile.js";
 import { preflightCustomization } from "./preflight.js";
 import { acceptMaintenanceUpdate } from "./maintenance.js";
@@ -37,7 +34,7 @@ function usage() {
   skill-customization fingerprint <path>
   skill-customization payload-fingerprint <directory>
   skill-customization render-dispatcher <semantic-overlay|fork> --name name --description text [metadata options]
-  skill-customization discover [name|repository|path] [--root path] [--custom-path path]
+  skill-customization discover [name|repository|path] [--root path] [--custom-path path] [--include-plugins true|false]
   skill-customization bind <customization.json> --source path --context context [--scope global|workspace] [--state path] [--root path]
   skill-customization resolve <customization.json> --context context [--state path] [--root path]
   skill-customization reconcile <customization.json> --context context [--state path] [--root path] [--cache path] [--decision compatible|absorbed|incompatible|ambiguous] [--evidence text] [--absorbed-delta text]
@@ -73,7 +70,7 @@ const COMMAND_OPTIONS = Object.freeze({
     "disable-model-invocation",
     "user-invocable",
   ]),
-  discover: new Set(["root", "custom-path"]),
+  discover: new Set(["root", "custom-path", "include-plugins"]),
   bind: new Set(["source", "context", "scope", "state", "root"]),
   resolve: new Set(["context", "state", "root"]),
   reconcile: new Set([
@@ -261,6 +258,8 @@ async function discoveryContext(options = {}) {
       managerDiagnostics: [],
       hostDiagnostics: [],
       settingsEvidence: [],
+      additionalRoots: [],
+      includePlugins: false,
     };
   }
   const [configured, collected] = await Promise.all([
@@ -268,7 +267,9 @@ async function discoveryContext(options = {}) {
     collectManagerRecords(),
   ]);
   return {
-    roots: [...configured.roots, ...managerSkillRoots(collected.records)],
+    roots: undefined,
+    additionalRoots: configured.roots,
+    includePlugins: parseBooleanOption(options["include-plugins"], "include-plugins") ?? true,
     managerRecords: collected.records,
     managerDiagnostics: collected.diagnostics,
     hostDiagnostics: configured.diagnostics,
@@ -276,11 +277,24 @@ async function discoveryContext(options = {}) {
   };
 }
 
-async function discoverInventory(context) {
-  const discovery = await discoverSkills({
-    roots: context.roots,
+function discoveryOptions(context) {
+  return {
+    ...(context.roots === undefined ? {} : { roots: context.roots }),
+    ...(context.additionalRoots?.length > 0
+      ? { additionalRoots: context.additionalRoots }
+      : {}),
+    includePlugins: context.includePlugins,
     managerRecords: context.managerRecords,
-  });
+  };
+}
+
+function discoveryRoots(context) {
+  return context.discoveryRoots ?? context.roots ?? context.additionalRoots;
+}
+
+async function discoverInventory(context) {
+  const discovery = await discoverSkills(discoveryOptions(context));
+  context.discoveryRoots = discovery.searchedRoots;
   return { discovery, activeSkills: activeSkillInventory(discovery) };
 }
 
@@ -367,10 +381,10 @@ async function commandDiscover(input, options, io) {
   const context = await discoveryContext(options);
   const discovery = await discoverSkills({
     input,
-    roots: context.roots,
-    managerRecords: context.managerRecords,
+    ...discoveryOptions(context),
     customPath: options["custom-path"],
   });
+  context.discoveryRoots = discovery.searchedRoots;
   discovery.managerDiagnostics = context.managerDiagnostics;
   discovery.hostDiagnostics = context.hostDiagnostics;
   discovery.settingsEvidence = context.settingsEvidence;
@@ -396,6 +410,7 @@ async function commandDiscover(input, options, io) {
         input: custom,
         roots: discovery.searchedRoots,
         managerRecords: context.managerRecords,
+        includePlugins: false,
       });
       if (customDiscovery.groups.length !== 1) {
         throw new DiscoveryError("custom path did not resolve one concrete skill", {
@@ -443,8 +458,7 @@ async function commandBind(descriptorPath, options, io) {
   if (io.stdin.isTTY) {
     const sourceDiscovery = await discoverSkills({
       input: sourcePath,
-      roots: context.roots,
-      managerRecords: context.managerRecords,
+      ...discoveryOptions(context),
     });
     const group = sourceDiscovery.groups[0];
     if (group?.conflict) {
@@ -472,7 +486,10 @@ async function commandBind(descriptorPath, options, io) {
   let requestedScope = options.scope;
   if (!requestedScope && io.stdin.isTTY) {
     try {
-      await classifyBindingScope({ sourcePath, roots: context.roots });
+      await classifyBindingScope({
+        sourcePath,
+        roots: discoveryRoots(context),
+      });
     } catch (error) {
       if (error.code !== "BINDING_SCOPE_REQUIRED") throw error;
       requestedScope = await ttyBindingScope(io);
@@ -485,7 +502,7 @@ async function commandBind(descriptorPath, options, io) {
       sourcePath,
       context: bindingContext,
       statePath: options.state,
-      roots: context.roots,
+      roots: discoveryRoots(context),
       requestedScope,
       interactive: io.stdin.isTTY,
       confirm: async () => ttyConfirmation(io, `Bind ${descriptor.name} to ${sourcePath}?`),
@@ -518,7 +535,7 @@ async function commandResolve(descriptorPath, options, io) {
       descriptor,
       context: requireValue(options.context, "--context is required"),
       statePath: options.state,
-      roots: context.roots,
+      roots: discoveryRoots(context),
       managerRecords: context.managerRecords,
       activeSkills,
     }),
@@ -553,7 +570,7 @@ async function commandReconcile(descriptorPath, options, io) {
       descriptor,
       context: bindingContext,
       statePath: options.state,
-      roots: context.roots,
+      roots: discoveryRoots(context),
       managerRecords: context.managerRecords,
       activeSkills,
     });
@@ -563,7 +580,7 @@ async function commandReconcile(descriptorPath, options, io) {
         descriptorPath: path.join(binding.source.target, "customization.json"),
         context: bindingContext,
         statePath: options.state,
-        roots: context.roots,
+        roots: discoveryRoots(context),
         managerRecords: context.managerRecords,
         activeSkills,
       });
@@ -622,7 +639,7 @@ async function commandPreflight(descriptorPath, options, io) {
     descriptorPath: resolvedDescriptorPath,
     context: contextValue,
     statePath: options.state,
-    roots: context.roots,
+    roots: discoveryRoots(context),
     managerRecords: context.managerRecords,
     activeSkills,
   });

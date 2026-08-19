@@ -24,6 +24,7 @@ import {
   normalizeUpstreamEntrypoint,
 } from "./normalization.js";
 import { parseSkillMetadata } from "./skill-metadata.js";
+import { discoverPluginSkillRoots } from "./plugin-discovery.js";
 import { registrySkillRoots } from "./skill-root-registry.js";
 import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 
@@ -31,9 +32,10 @@ const execFile = promisify(execFileCallback);
 const EVIDENCE_ORDER = new Map([
   ["explicit", 0],
   ["git", 1],
-  ["manager", 2],
-  ["embedded", 3],
-  ["confirmation", 4],
+  ["plugin", 2],
+  ["manager", 3],
+  ["embedded", 4],
+  ["confirmation", 5],
 ]);
 
 function root(pathname, owner, scope, origin = owner, metadata = {}) {
@@ -83,6 +85,26 @@ function uniqueRoots(roots) {
       existing.scopes = [
         ...new Set([...(existing.scopes ?? [existing.scope]), normalized.scope]),
       ];
+    }
+    existing.pluginEvidence = [
+      ...new Map([
+        ...(existing.pluginEvidence ?? []).map((value) => [JSON.stringify(value), value]),
+        ...(normalized.pluginEvidence ?? []).map((value) => [JSON.stringify(value), value]),
+      ]).values(),
+    ];
+    existing.pluginIdentities = [
+      ...new Set([
+        ...(existing.pluginIdentities ?? []).filter(Boolean),
+        existing.pluginIdentity,
+        ...(normalized.pluginIdentities ?? []).filter(Boolean),
+        normalized.pluginIdentity,
+      ]),
+    ].filter(Boolean);
+    if (!existing.pluginMetadata && normalized.pluginMetadata) {
+      existing.pluginMetadata = structuredClone(normalized.pluginMetadata);
+    }
+    if (!existing.plugin && normalized.plugin) {
+      existing.plugin = structuredClone(normalized.plugin);
     }
   }
   return [...byPath.values()];
@@ -312,8 +334,22 @@ async function scanRoot(rootInfo) {
   let entries;
   try {
     entries = await readdir(rootInfo.path, { withFileTypes: true });
-  } catch {
-    return { candidates: [], failures: [] };
+  } catch (error) {
+    if (rootInfo.origin !== "plugin") return { candidates: [], failures: [], diagnostics: [] };
+    return {
+      candidates: [],
+      failures: [],
+      diagnostics: [{
+        kind: "plugin",
+        host: rootInfo.host,
+        path: path.resolve(rootInfo.path),
+        code: "PLUGIN_ROOT_UNREADABLE",
+        message: `cannot read plugin skill root ${rootInfo.path}: ${error.message}`,
+        ...(rootInfo.plugin
+          ? { plugin: structuredClone(rootInfo.plugin) }
+          : {}),
+      }],
+    };
   }
   const directories = [];
   if (await exists(path.join(rootInfo.path, "SKILL.md"))) directories.push(rootInfo.path);
@@ -334,6 +370,7 @@ async function scanRoot(rootInfo) {
       result.status === "rejected"
         ? [{ directory: directories[index], error: result.reason }]
         : []),
+    diagnostics: [],
   };
 }
 
@@ -449,6 +486,14 @@ async function candidateFromDirectory(directory, rootInfo) {
     owners: rootInfo.owners ?? [rootInfo.owner],
     scope: rootInfo.scope,
     origin: rootInfo.origin,
+    ...(rootInfo.plugin ? { plugin: structuredClone(rootInfo.plugin) } : {}),
+    ...(rootInfo.pluginMetadata
+      ? { pluginMetadata: structuredClone(rootInfo.pluginMetadata) }
+      : {}),
+    ...(rootInfo.pluginIdentity ? { pluginIdentity: rootInfo.pluginIdentity } : {}),
+    ...(rootInfo.pluginEvidence
+      ? { pluginEvidence: structuredClone(rootInfo.pluginEvidence) }
+      : {}),
     fingerprint: customization?.owned_payload.reviewed_fingerprint
       ?? await fingerprintPath(directory),
     classification: customization ? "customization" : "skill",
@@ -463,7 +508,7 @@ async function candidateFromDirectory(directory, rootInfo) {
           },
         }
       : {}),
-    evidence: [],
+    evidence: [...(rootInfo.pluginEvidence ?? [])],
   };
 }
 
@@ -593,6 +638,11 @@ function groupCandidates(candidates) {
       owners: candidate.owners,
       scope: candidate.scope,
       origin: candidate.origin,
+      ...(candidate.plugin ? { plugin: structuredClone(candidate.plugin) } : {}),
+      ...(candidate.pluginMetadata
+        ? { pluginMetadata: structuredClone(candidate.pluginMetadata) }
+        : {}),
+      ...(candidate.pluginIdentity ? { pluginIdentity: candidate.pluginIdentity } : {}),
       evidence: copyEvidence,
       provenance: copyProvenance.identities,
       conflict: copyProvenance.conflict,
@@ -620,7 +670,13 @@ function groupCandidates(candidates) {
 export async function discoverSkills({
   input,
   cwd = process.cwd(),
+  home = os.homedir(),
+  env = process.env,
   roots,
+  additionalRoots = [],
+  includePlugins = true,
+  pluginDiscovery = discoverPluginSkillRoots,
+  pluginOptions,
   managerRecords,
   managerOptions,
   managerCollector = collectManagerRecords,
@@ -628,12 +684,29 @@ export async function discoverSkills({
 } = {}) {
   let managerDiagnostics = [];
   if (managerRecords === undefined) {
-    const collected = await managerCollector({ cwd, ...managerOptions });
+    const collected = await managerCollector({ home, cwd, env, ...managerOptions });
     managerRecords = collected.records;
     managerDiagnostics = collected.diagnostics;
   }
+  const rootsAreExplicit = roots !== undefined;
+  // An omitted roots option is the ambient mode; an explicit empty array is intentionally deterministic.
+  let pluginRoots = [];
+  let pluginDiagnostics = [];
+  if (!rootsAreExplicit && includePlugins !== false) {
+    const plugins = await pluginDiscovery({
+      home,
+      cwd,
+      env,
+      ...pluginOptions,
+    });
+    pluginRoots = plugins.roots ?? [];
+    pluginDiagnostics = plugins.diagnostics ?? [];
+  }
+  // Manager records and customPath are explicit evidence sources; roots controls ambient host/plugin roots.
   const declaredRoots = [
-    ...(roots ?? hostSkillRoots({ cwd })),
+    ...(rootsAreExplicit ? roots : hostSkillRoots({ home, cwd, env })),
+    ...(rootsAreExplicit ? [] : additionalRoots),
+    ...pluginRoots,
     ...managerSkillRoots(managerRecords),
     ...(customPath ? [{ path: customPath, owner: "custom", scope: "custom" }] : []),
   ];
@@ -653,6 +726,8 @@ export async function discoverSkills({
     rootCandidates
   );
   const candidateFailures = scans.flatMap(({ failures }) => failures);
+  const scanDiagnostics = scans.flatMap(({ diagnostics = [] }) => diagnostics);
+  pluginDiagnostics.push(...scanDiagnostics.filter(({ kind }) => kind === "plugin"));
   const explicitTarget = explicitDirectory
     ? await realpath(explicitDirectory).catch(() => path.resolve(explicitDirectory))
     : undefined;
@@ -700,11 +775,15 @@ export async function discoverSkills({
       if (failureTarget === explicitTarget) throw failure.error;
     }
   }
-  const candidateDiagnostics = candidateFailures.map(({ directory, error }) => ({
-    path: path.resolve(directory),
-    code: error?.code ?? "INVALID_DISCOVERY_CANDIDATE",
-    message: error?.message ?? String(error),
-  }));
+  const candidateDiagnostics = [
+    ...pluginDiagnostics,
+    ...scanDiagnostics.filter(({ kind }) => kind !== "plugin"),
+    ...candidateFailures.map(({ directory, error }) => ({
+      path: path.resolve(directory),
+      code: error?.code ?? "INVALID_DISCOVERY_CANDIDATE",
+      message: error?.message ?? String(error),
+    })),
+  ];
 
   let selected = enrichedCandidates;
   if (input) {
@@ -761,6 +840,7 @@ export async function discoverSkills({
     ],
     searchedRoots: normalizedRoots,
     managerDiagnostics,
+    pluginDiagnostics,
     candidateDiagnostics,
     unresolvedManagerRecords: managerRecords.filter(({ path: managerPath }) => !managerPath),
   };
