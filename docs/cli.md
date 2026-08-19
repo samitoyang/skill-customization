@@ -28,3 +28,5 @@ Maintenance remains explicit. `reconcile` targets one semantic or provenance dec
 Discovery is bounded and evidence-based. Concrete source paths are written only by `bind`; direct source overrides cannot bypass an overlay binding. Fork bindings are optional tracking state and never runtime requirements.
 
 The `discover` command enables ambient plugin discovery by default; pass `--include-plugins false` for a deterministic scan, or pass `--root` to make explicit roots authoritative.
+
+Codex discovery includes config-declared local marketplace roots, personal and workspace marketplace declarations, installed versioned caches, and bounded synchronized or bundled marketplace snapshots. The JSON result keeps each concrete cache copy and its plugin metadata visible; malformed marketplace metadata is reported in `pluginDiagnostics` while valid candidates remain selectable.

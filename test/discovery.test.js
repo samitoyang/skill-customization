@@ -327,6 +327,269 @@ test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plug
   ]);
 });
 
+test("Codex personal marketplaces discover .codex-plugin custom skill directories", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-personal-marketplace-"));
+  const home = path.join(root, "home");
+  const plugin = path.join(home, "plugins", "personal-plugin");
+  await writeSkill(plugin, "custom", "personal-review");
+  await mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(plugin, ".codex-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "personal-plugin",
+      version: "1.0.0",
+      repository: "https://github.com/example/personal-plugin",
+      skills: "./custom",
+    }),
+  );
+  await mkdir(path.join(home, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(home, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "personal",
+      plugins: [{
+        name: "personal-plugin",
+        source: { source: "local", path: "./plugins/personal-plugin" },
+      }],
+    }),
+  );
+
+  const result = await discoverSkills({
+    input: "personal-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: path.join(home, ".codex") },
+    managerRecords: [],
+  });
+
+  const copy = result.groups[0].copies[0];
+  assert.equal(copy.path, path.join(plugin, "custom"));
+  assert.deepEqual(copy.plugin, {
+    host: "codex",
+    marketplace: "personal",
+    name: "personal-plugin",
+    version: "1.0.0",
+  });
+  assert.match(copy.pluginMetadata.manifestPath, /\.codex-plugin[\\/]plugin\.json$/);
+  assert.deepEqual(result.groups[0].provenance, [
+    "repository:https://github.com/example/personal-plugin",
+  ]);
+});
+
+test("Codex config.toml local marketplaces discover bounded external roots", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-config-marketplace-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, ".codex");
+  const marketplaceRoot = path.join(root, "configured-marketplace");
+  const plugin = path.join(marketplaceRoot, "plugins", "configured-plugin");
+  await writeSkill(plugin, "custom", "configured-review");
+  await mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(plugin, ".codex-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "configured-plugin",
+      skills: "./custom",
+      repository: "https://github.com/example/configured-plugin",
+    }),
+  );
+  await mkdir(path.join(marketplaceRoot, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "configured-marketplace",
+      plugins: [{
+        name: "configured-plugin",
+        source: { source: "local", path: "./plugins/configured-plugin" },
+      }],
+    }),
+  );
+  await mkdir(codexHome, { recursive: true });
+  await writeFile(
+    path.join(codexHome, "config.toml"),
+    `[marketplaces."configured-marketplace"]\nsource_type = "local"\nsource = "${marketplaceRoot}"\n\n[marketplaces."broken-marketplace"]\nsource_type = local\nsource = "${marketplaceRoot}"\n`,
+  );
+
+  const result = await discoverSkills({
+    input: "configured-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: codexHome },
+    managerRecords: [],
+  });
+
+  const copy = result.groups[0].copies[0];
+  assert.equal(copy.path, path.join(plugin, "custom"));
+  assert.deepEqual(copy.plugin, {
+    host: "codex",
+    marketplace: "configured-marketplace",
+    name: "configured-plugin",
+  });
+  assert.deepEqual(result.groups[0].provenance, [
+    "repository:https://github.com/example/configured-plugin",
+  ]);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "MALFORMED_PLUGIN_CONFIGURATION"
+      && diagnosticPath === path.join(codexHome, "config.toml"),
+  ));
+});
+
+test("Codex cache versions and synced or bundled marketplace copies remain auditable", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-cache-layouts-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, ".codex");
+  const directPlugin = path.join(codexHome, "plugins", "direct-plugin");
+  await writeSkill(directPlugin, "skills", "direct-review");
+  const cachePlugin = path.join(codexHome, "plugins", "cache", "official", "versioned");
+  for (const version of ["1.0.0", "2.0.0"]) {
+    const install = path.join(cachePlugin, version);
+    await writeSkill(install, "skills", "versioned-review");
+    await mkdir(path.join(install, ".codex-plugin"), { recursive: true });
+    await writeFile(
+      path.join(install, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        name: "versioned",
+        version,
+        repository: "https://github.com/example/versioned",
+      }),
+    );
+  }
+  await writeFile(
+    path.join(cachePlugin, ".codex-remote-plugin-install.json"),
+    JSON.stringify({ schema_version: 1, remote_plugin_id: "fixture" }),
+  );
+
+  const syncedRoot = path.join(codexHome, ".tmp", "plugins");
+  const syncedPlugin = path.join(syncedRoot, "plugins", "synced-plugin");
+  await writeSkill(syncedPlugin, "custom", "synced-review");
+  await mkdir(path.join(syncedPlugin, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(syncedPlugin, ".codex-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "synced-plugin",
+      skills: "./custom",
+      repository: "https://github.com/example/synced-plugin",
+    }),
+  );
+  await mkdir(path.join(syncedRoot, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(syncedRoot, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "synced-marketplace",
+      plugins: [
+        {
+          name: "synced-plugin",
+          source: { source: "local", path: "./plugins/synced-plugin" },
+        },
+        {
+          name: "escaped-plugin",
+          source: { source: "local", path: "../../../../outside" },
+        },
+      ],
+    }),
+  );
+
+  const bundledRoot = path.join(codexHome, ".tmp", "bundled-marketplaces", "official-bundled");
+  const bundledPlugin = path.join(bundledRoot, "plugins", "bundled-plugin");
+  await writeSkill(bundledPlugin, "custom", "bundled-review");
+  await mkdir(path.join(bundledPlugin, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(bundledPlugin, ".codex-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "bundled-plugin",
+      skills: "./custom",
+      repository: "https://github.com/example/bundled-plugin",
+    }),
+  );
+  await mkdir(path.join(bundledRoot, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(bundledRoot, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "bundled-marketplace",
+      plugins: [{
+        name: "bundled-plugin",
+        source: { source: "local", path: "./plugins/bundled-plugin" },
+      }],
+    }),
+  );
+
+  const options = {
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: codexHome },
+    managerRecords: [],
+  };
+  const direct = await discoverSkills({ input: "direct-review", ...options });
+  assert.equal(direct.groups[0].copies[0].plugin.host, "codex");
+  assert.equal(direct.groups[0].copies[0].plugin.name, "direct-plugin");
+
+  const cached = await discoverSkills({ input: "versioned-review", ...options });
+  assert.equal(cached.groups[0].copies.length, 2);
+  assert.deepEqual(
+    cached.groups[0].copies.map(({ plugin }) => plugin.version),
+    ["1.0.0", "2.0.0"],
+  );
+  assert.equal(
+    cached.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_NOT_DIRECTORY"),
+    false,
+  );
+
+  const synced = await discoverSkills({ input: "synced-review", ...options });
+  assert.equal(synced.groups[0].copies[0].plugin.marketplace, "synced-marketplace");
+  assert.deepEqual(synced.groups[0].provenance, [
+    "repository:https://github.com/example/synced-plugin",
+  ]);
+  assert.ok(synced.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
+
+  const bundled = await discoverSkills({ input: "bundled-review", ...options });
+  assert.equal(bundled.groups[0].copies[0].plugin.marketplace, "bundled-marketplace");
+  assert.deepEqual(bundled.groups[0].provenance, [
+    "repository:https://github.com/example/bundled-plugin",
+  ]);
+});
+
+test("malformed Codex marketplace metadata is isolated from valid cache candidates", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-malformed-marketplace-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, ".codex");
+  const install = path.join(codexHome, "plugins", "cache", "official", "valid", "1.0.0");
+  await writeSkill(install, "skills", "valid-codex-review");
+  await mkdir(path.join(install, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(install, ".codex-plugin", "plugin.json"),
+    JSON.stringify({ name: "valid", version: "1.0.0" }),
+  );
+  await mkdir(path.join(home, ".agents", "plugins"), { recursive: true });
+  const marketplacePath = path.join(home, ".agents", "plugins", "marketplace.json");
+  await writeFile(marketplacePath, "{broken\n");
+  const invalidEntriesPath = path.join(home, ".agents", "plugins", "plugins.json");
+  await writeFile(invalidEntriesPath, JSON.stringify({ plugins: "invalid" }));
+  const missingEntriesPath = path.join(home, ".agents", "plugins", "manifest.json");
+  await writeFile(missingEntriesPath, JSON.stringify({ name: "missing-entries" }));
+
+  const result = await discoverSkills({
+    input: "valid-codex-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: codexHome },
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups[0].name, "valid-codex-review");
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "MALFORMED_PLUGIN_METADATA" && diagnosticPath === marketplacePath,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_MARKETPLACE_INVALID_ENTRIES" && diagnosticPath === invalidEntriesPath,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_MARKETPLACE_MISSING_ENTRIES" && diagnosticPath === missingEntriesPath,
+  ));
+});
+
 test("plugin host specifications extend discovery without changing candidate policy", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-seam-"));
   const home = path.join(root, "home");

@@ -17,6 +17,7 @@ const PLUGIN_OWNER_PREFIX = "plugin:";
 const MANIFEST_FILES = [
   ".claude-plugin/plugin.json",
   ".cursor-plugin/plugin.json",
+  ".codex-plugin/plugin.json",
   "plugin.json",
   "manifest.json",
   "gemini-extension.json",
@@ -489,6 +490,8 @@ async function pluginDirectories(root, context, metadata, filter = () => true) {
   const entries = await directoryEntries(root, context, metadata);
   const result = [];
   for (const entry of entries) {
+    // Cache directories contain metadata sidecars; only directory entries can host a plugin.
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
     if (!filter(entry)) continue;
     const candidate = await safeDirectory(
       path.join(root, entry.name),
@@ -598,6 +601,113 @@ function marketplaceEntries(value) {
   return Object.entries(plugins).map(([name, entry]) =>
     typeof entry === "string" ? { name, path: entry } : { name, ...entry },
   );
+}
+
+function tomlQuotedValue(quote, value) {
+  if (quote === "'") return value;
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch {
+    return undefined;
+  }
+}
+
+function codexMarketplaceConfigEntries(contents) {
+  const entries = [];
+  const invalid = [];
+  let current;
+  for (const [index, line] of contents.split(/\r?\n/).entries()) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const section = trimmed.match(
+      /^\[marketplaces\.(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\]\s*$/,
+    );
+    if (section) {
+      current = {
+        name: stringValue(
+          section[1] !== undefined
+            ? tomlQuotedValue('"', section[1])
+            : section[2] !== undefined
+              ? tomlQuotedValue("'", section[2])
+              : section[3],
+        ),
+      };
+      entries.push(current);
+      continue;
+    }
+    if (trimmed.startsWith("[")) {
+      if (trimmed.startsWith("[marketplaces")) {
+        invalid.push(index + 1);
+      }
+      current = undefined;
+      continue;
+    }
+    if (!current) continue;
+    const assignment = trimmed.match(
+      /^(source_type|source)\s*=\s*(?:"((?:\\.|[^"])*)"|'([^']*)')\s*(?:#.*)?$/,
+    );
+    if (!assignment) {
+      const key = trimmed.match(/^([A-Za-z0-9_-]+)\s*=/)?.[1];
+      if (key === "source" || key === "source_type") invalid.push(index + 1);
+      continue;
+    }
+    current[assignment[1]] = tomlQuotedValue(
+      assignment[2] !== undefined ? '"' : "'",
+      assignment[2] ?? assignment[3],
+    );
+  }
+  return { entries, invalid };
+}
+
+async function codexMarketplaceDeclarations(codexHome, context) {
+  const file = path.join(codexHome, "config.toml");
+  let contents;
+  try {
+    contents = await readFile(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    context.diagnostics.push(
+      diagnostic({
+        host: "codex",
+        path: file,
+        code: "PLUGIN_METADATA_UNREADABLE",
+        message: `cannot read Codex configuration ${file}: ${error.message}`,
+      }),
+    );
+    return [];
+  }
+
+  const parsed = codexMarketplaceConfigEntries(contents);
+  for (const line of parsed.invalid) {
+    context.diagnostics.push(
+      diagnostic({
+        host: "codex",
+        path: file,
+        code: "MALFORMED_PLUGIN_CONFIGURATION",
+        message: `malformed Codex marketplace configuration at ${file}:${line}`,
+      }),
+    );
+  }
+
+  const declarations = [];
+  for (const entry of parsed.entries) {
+    if (entry.source_type !== "local") continue;
+    const source = stringValue(entry.source);
+    if (!source) {
+      context.diagnostics.push(
+        diagnostic({
+          host: "codex",
+          path: file,
+          code: "PLUGIN_DECLARATION_MISSING_PATH",
+          message: `Codex local marketplace declaration has no source: ${file}`,
+          metadata: { host: "codex", marketplace: entry.name },
+        }),
+      );
+      continue;
+    }
+    declarations.push({ marketplace: entry.name, source });
+  }
+  return declarations;
 }
 
 async function discoverClaude(context) {
@@ -732,47 +842,109 @@ async function discoverCodex(context) {
     context,
     { host: "codex", source: "plugins" },
   );
-  if (!safePluginsRoot) return;
-  for (const plugin of await pluginDirectories(
-    safePluginsRoot,
-    context,
-    { host: "codex", source: "plugin" },
-    (entry) => entry.name !== "cache",
-  )) {
-    await addPluginInstall({
-      installRoot: plugin.path,
-      boundary: safePluginsRoot,
-      host: "codex",
-      marketplace: "local",
-      name: plugin.entry.name,
-      scope: "global",
-      source: {},
+  if (safePluginsRoot) {
+    for (const plugin of await pluginDirectories(
+      safePluginsRoot,
       context,
-    });
+      { host: "codex", source: "plugin" },
+      (entry) => entry.name !== "cache",
+    )) {
+      await addPluginInstall({
+        installRoot: plugin.path,
+        boundary: safePluginsRoot,
+        host: "codex",
+        marketplace: "local",
+        name: plugin.entry.name,
+        scope: "global",
+        source: {},
+        context,
+      });
+    }
+    const cacheRoot = path.join(safePluginsRoot, "cache");
+    const safeCacheRoot = await safeDirectory(
+      cacheRoot,
+      safePluginsRoot,
+      context,
+      { host: "codex", source: "cache" },
+    );
+    if (safeCacheRoot) {
+      await discoverVersionedPluginCache({
+        cacheRoot: safeCacheRoot,
+        boundary: safeCacheRoot,
+        context,
+        host: "codex",
+        scope: "global",
+      });
+    }
   }
-  const cacheRoot = path.join(safePluginsRoot, "cache");
-  const safeCacheRoot = await safeDirectory(
-    cacheRoot,
-    safePluginsRoot,
+  await discoverMarketplaceManifests({
+    base: path.join(home, ".agents", "plugins"),
+    boundary: home,
     context,
-    { host: "codex", source: "cache" },
-  );
-  if (safeCacheRoot) {
-    await discoverVersionedPluginCache({
-      cacheRoot: safeCacheRoot,
-      boundary: safeCacheRoot,
+    host: "codex",
+    scope: "global",
+    marketplaceName: "personal",
+  });
+  const syncedMarketplaceRoot = path.join(codexHome, ".tmp", "plugins");
+  await discoverMarketplaceManifests({
+    base: path.join(syncedMarketplaceRoot, ".agents", "plugins"),
+    boundary: syncedMarketplaceRoot,
+    context,
+    host: "codex",
+    scope: "global",
+  });
+  const bundledMarketplacesRoot = path.join(codexHome, ".tmp", "bundled-marketplaces");
+  for (const marketplace of await pluginDirectories(
+    bundledMarketplacesRoot,
+    context,
+    { host: "codex", source: "bundled-marketplace" },
+  )) {
+    await discoverMarketplaceManifests({
+      base: path.join(marketplace.path, ".agents", "plugins"),
+      boundary: marketplace.path,
       context,
       host: "codex",
       scope: "global",
+      marketplaceName: marketplace.entry.name,
     });
   }
   for (const workspace of context.workspaceDirectories) {
     await discoverMarketplaceManifests({
       base: path.join(workspace, ".agents", "plugins"),
-      boundary: path.join(workspace, ".agents"),
+      boundary: workspace,
       context,
       host: "codex",
       scope: "workspace",
+    });
+  }
+  // Configured local marketplaces are explicit roots; only their declared plugin trees are searched.
+  for (const declaration of await codexMarketplaceDeclarations(codexHome, context)) {
+    const configuredSource = declaration.source === "~"
+      ? home
+      : declaration.source.startsWith("~/")
+        ? path.join(home, declaration.source.slice(2))
+        : path.isAbsolute(declaration.source)
+          ? declaration.source
+          : path.resolve(codexHome, declaration.source);
+    const configuredRoot = await safeDirectory(
+      configuredSource,
+      configuredSource,
+      context,
+      {
+        host: "codex",
+        source: "configured-marketplace",
+        marketplace: declaration.marketplace,
+      },
+      { declared: true },
+    );
+    if (!configuredRoot) continue;
+    await discoverMarketplaceManifests({
+      base: path.join(configuredRoot, ".agents", "plugins"),
+      boundary: configuredRoot,
+      context,
+      host: "codex",
+      scope: "global",
+      marketplaceName: declaration.marketplace,
     });
   }
 }
@@ -865,6 +1037,33 @@ async function discoverCursor(context) {
   }
 }
 
+function marketplaceSourceBase(file, safeBase) {
+  const marketplaceDirectory = path.dirname(file);
+  if (
+    path.basename(marketplaceDirectory) === "plugins"
+    && path.basename(path.dirname(marketplaceDirectory)) === ".agents"
+  ) {
+    return path.dirname(path.dirname(marketplaceDirectory));
+  }
+  if ([".claude-plugin", ".cursor-plugin"].includes(path.basename(marketplaceDirectory))) {
+    return path.dirname(marketplaceDirectory);
+  }
+  return safeBase;
+}
+
+function marketplacePluginPath(configuredPath, file, safeBase) {
+  if (path.isAbsolute(configuredPath)) return configuredPath;
+  const sourceBase = marketplaceSourceBase(file, safeBase);
+  const normalized = configuredPath.replaceAll("\\", "/");
+  const usesMarketplaceRoot = sourceBase !== safeBase && (
+    normalized === "."
+    || normalized === "./"
+    || normalized === "./plugins"
+    || normalized.startsWith("./plugins/")
+  );
+  return path.resolve(usesMarketplaceRoot ? sourceBase : safeBase, configuredPath);
+}
+
 async function readMarketplaceManifest(file, context, host) {
   return readJsonObject(file, context, {
     host,
@@ -898,8 +1097,51 @@ async function discoverMarketplaceManifests({
     const manifest = await readMarketplaceManifest(file, context, host);
     if (!manifest) continue;
     const marketplace = stringValue(manifest.name) ?? marketplaceName ?? path.basename(safeBase);
+    const entriesField = ["plugins", "extensions", "entries"].find((field) =>
+      Object.hasOwn(manifest, field),
+    );
+    if (!entriesField) {
+      context.diagnostics.push(
+        diagnostic({
+          host,
+          path: file,
+          code: "PLUGIN_MARKETPLACE_MISSING_ENTRIES",
+          message: `marketplace metadata has no plugin entries: ${file}`,
+          metadata: { host, marketplace },
+        }),
+      );
+      continue;
+    }
+    const configuredEntries = manifest[entriesField];
+    if (
+      configuredEntries !== undefined
+      && !Array.isArray(configuredEntries)
+      && (!configuredEntries || typeof configuredEntries !== "object")
+    ) {
+      context.diagnostics.push(
+        diagnostic({
+          host,
+          path: file,
+          code: "PLUGIN_MARKETPLACE_INVALID_ENTRIES",
+          message: `marketplace plugin entries must be an array or object: ${file}`,
+          metadata: { host, marketplace },
+        }),
+      );
+      continue;
+    }
     for (const entry of marketplaceEntries(manifest)) {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        context.diagnostics.push(
+          diagnostic({
+            host,
+            path: file,
+            code: "PLUGIN_DECLARATION_INVALID",
+            message: `marketplace plugin declaration is not an object: ${file}`,
+            metadata: { host, marketplace },
+          }),
+        );
+        continue;
+      }
       const source = entry.source;
       const sourcePath = typeof source === "string"
         ? source
@@ -928,15 +1170,8 @@ async function discoverMarketplaceManifests({
         );
         continue;
       }
-      const declarationBase = [".claude-plugin", ".cursor-plugin"].includes(
-        path.basename(path.dirname(file)),
-      )
-        ? path.dirname(path.dirname(file))
-        : path.dirname(file);
       await addPluginInstall({
-        installRoot: path.isAbsolute(configuredPath)
-          ? configuredPath
-          : path.resolve(declarationBase, configuredPath),
+        installRoot: marketplacePluginPath(configuredPath, file, safeBase),
         boundary: boundary ?? safeBase,
         host,
         marketplace,

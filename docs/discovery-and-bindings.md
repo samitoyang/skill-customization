@@ -11,11 +11,11 @@ When callers omit roots, plugin discovery is enabled by default. Explicit roots 
 Plugin discovery is manifest-aware and limited to documented host paths:
 
 - Claude Code: `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills`, marketplace installation roots, and `~/.claude/skills/synced` when `CLAUDE_CODE_SYNC_SKILLS=1`.
-- Codex: `$CODEX_HOME/plugins/<plugin>/skills`, `$CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills`, and plugin locations declared by bounded `.agents/plugins` marketplace manifests.
+- Codex: `$CODEX_HOME/plugins/<plugin>/skills`, `$CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills`, local marketplace roots declared by `$CODEX_HOME/config.toml`, the personal `~/.agents/plugins/marketplace.json` with `~/plugins/<plugin>`, synchronized `$CODEX_HOME/.tmp/plugins` marketplaces, bundled `$CODEX_HOME/.tmp/bundled-marketplaces/<marketplace>` snapshots, and plugin locations declared by bounded workspace `.agents/plugins` marketplace manifests.
 - Gemini CLI: `${GEMINI_CLI_HOME:-~/.gemini}/extensions/<extension>/skills`.
 - Cursor: `~/.cursor/plugins/local/<plugin>/skills` and other manifest-declared local plugin roots.
 
-Host adapters may declare custom skill directories through supported manifests. Every valid copy under an exact plugin path is eligible, including multiple cache versions. Discovery does not choose a latest version. Identical fingerprints are grouped into one candidate; conflicting fingerprints or provenance identities remain separate. A cache version describes the evidence but does not identify the source.
+Host adapters may declare custom skill directories through supported manifests, including Codex's `.codex-plugin/plugin.json`. Every valid copy under an exact plugin path is eligible, including multiple cache versions. Discovery does not choose a latest version. Identical fingerprints are grouped into one candidate; conflicting fingerprints or provenance identities remain separate. A cache version describes the evidence but does not identify the source.
 
 Plugin-only sources receive a local plugin identity for grouping and diagnostics. That identity never becomes repository provenance or enters a portable descriptor. Repository identity requires repository-bearing evidence; an absolute cache path is never enough. Plugin roots may be symlinked only when canonical-path containment is proven. Source trees retain the existing symlink-free fingerprint rules.
 

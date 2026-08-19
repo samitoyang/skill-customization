@@ -581,6 +581,104 @@ test("CLI discovery uses ambient Claude plugins and supports the deterministic o
   assert.match(disabled.stderr, /NO_LOCAL_COPY/);
 });
 
+test("CLI discovery finds Codex personal marketplace skills with plugin provenance", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cli-codex-marketplace-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, ".codex");
+  const plugin = path.join(home, "plugins", "cli-plugin");
+  const skill = await writeSkill(plugin, "custom", "cli-codex-review");
+  await mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(plugin, ".codex-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "cli-plugin",
+      version: "1.0.0",
+      repository: "https://github.com/example/cli-plugin",
+      skills: "./custom",
+    }),
+  );
+  await mkdir(path.join(home, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(home, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "personal",
+      plugins: [{
+        name: "cli-plugin",
+        source: { source: "local", path: "./plugins/cli-plugin" },
+      }],
+    }),
+  );
+
+  const result = await run(["discover", "cli-codex-review"], {
+    env: {
+      ...process.env,
+      HOME: home,
+      CODEX_HOME: codexHome,
+      PATH: "",
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  const discovery = JSON.parse(result.stdout);
+  assert.equal(discovery.groups[0].copies[0].path, skill);
+  assert.equal(discovery.groups[0].copies[0].plugin.host, "codex");
+  assert.equal(discovery.groups[0].copies[0].plugin.marketplace, "personal");
+  assert.deepEqual(discovery.groups[0].provenance, [
+    "repository:https://github.com/example/cli-plugin",
+  ]);
+});
+
+test("CLI discovery finds Codex config.toml marketplace skills", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cli-codex-config-marketplace-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, ".codex");
+  const marketplaceRoot = path.join(root, "configured-marketplace");
+  const plugin = path.join(marketplaceRoot, "plugins", "cli-config-plugin");
+  const skill = await writeSkill(plugin, "custom", "cli-config-review");
+  await mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(plugin, ".codex-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "cli-config-plugin",
+      skills: "./custom",
+      repository: "https://github.com/example/cli-config-plugin",
+    }),
+  );
+  await mkdir(path.join(marketplaceRoot, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "configured-marketplace",
+      plugins: [{
+        name: "cli-config-plugin",
+        source: { source: "local", path: "./plugins/cli-config-plugin" },
+      }],
+    }),
+  );
+  await mkdir(codexHome, { recursive: true });
+  await writeFile(
+    path.join(codexHome, "config.toml"),
+    `[marketplaces."configured-marketplace"]\nsource_type = "local"\nsource = "${marketplaceRoot}"\n`,
+  );
+
+  const result = await run(["discover", "cli-config-review"], {
+    env: {
+      ...process.env,
+      HOME: home,
+      CODEX_HOME: codexHome,
+      PATH: "",
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  const discovery = JSON.parse(result.stdout);
+  assert.equal(discovery.groups[0].copies[0].path, skill);
+  assert.equal(discovery.groups[0].copies[0].plugin.marketplace, "configured-marketplace");
+  assert.deepEqual(discovery.groups[0].provenance, [
+    "repository:https://github.com/example/cli-config-plugin",
+  ]);
+});
+
 test("CLI accepts an explicit owned-payload maintenance update atomically", async () => {
   const item = await fixture();
   await writeFile(
