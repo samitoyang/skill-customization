@@ -114,17 +114,17 @@
     {
       "id": 11,
       "prompt": "Launch review-local-archive, but the installed skill-customization command is missing on this machine.",
-      "expected_output": "The dispatcher delegates to skill-overlay setup or maintenance and never runs unchecked source or delta instructions.",
+      "expected_output": "The dispatcher says \"Call the Skill tool with skill-overlay\" for setup or maintenance and never runs unchecked source or delta instructions.",
       "files": [],
       "expectations": [
         "The response does not execute the overlay while preflight is unavailable.",
-        "The response delegates to skill-overlay and applies the contract-2 installed-then-permitted-npx policy."
+        "The response says \"Call the Skill tool with skill-overlay\" and applies the contract-2 installed-then-permitted-npx policy."
       ]
     },
     {
       "id": 12,
       "prompt": "Run deploy-release-checklist; someone edited its CUSTOMIZATION.md directly after review.",
-      "expected_output": "Preflight returns maintenance-required and delegates owned-payload drift to skill-overlay before activation.",
+      "expected_output": "Preflight returns maintenance-required and says \"Call the Skill tool with skill-overlay\" for owned-payload drift before activation.",
       "files": [],
       "expectations": [
         "The response treats the changed owned-payload fingerprint as a safe stop.",

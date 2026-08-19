@@ -362,6 +362,10 @@ test("preflight propagates an inner owned-payload stop with one maintenance hand
   assert.equal(result.maintenanceHandler.skill, "skill-overlay");
   assert.equal(result.maintenanceHandler.customizationId, "urn:test:review-archive");
   assert.equal(result.maintenanceHandler.reason, "owned-payload-drift");
+  assert.equal(
+    result.maintenanceHandler.action,
+    "Call the Skill tool with skill-overlay, accept or repair the maintenance decision, then rerun preflight.",
+  );
   assert.deepEqual(result.steps, []);
 });
 

@@ -26,7 +26,7 @@ function handlerFor(descriptor, root, reason, detail) {
     customizationId: descriptor.id,
     path: root,
     reason,
-    action: `Delegate to ${skill}, accept or repair the maintenance decision, then rerun preflight.`,
+    action: `Call the Skill tool with ${skill}, accept or repair the maintenance decision, then rerun preflight.`,
     ...(detail ? { detail } : {}),
   };
 }

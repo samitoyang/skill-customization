@@ -124,7 +124,7 @@
     {
       "id": 12,
       "prompt": "Run review-standalone; a helper file inside the fork was edited directly after provenance review.",
-      "expected_output": "Preflight delegates owned fork payload or provenance drift to skill-fork and executes nothing until accepted maintenance is rechecked.",
+      "expected_output": "Preflight says \"Call the Skill tool with skill-fork\" for owned fork payload or provenance drift and executes nothing until accepted maintenance is rechecked.",
       "files": [],
       "expectations": [
         "The changed owned-payload fingerprint produces maintenance-required with skill-fork as the handler.",
