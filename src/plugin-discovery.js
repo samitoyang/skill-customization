@@ -229,6 +229,25 @@ function declaredSkillDirectories(manifest, declaration = {}) {
   return unique(values.map((value) => value.trim()).filter(Boolean));
 }
 
+function hasDeclaredSkillDirectoryField(value) {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && DECLARED_SKILL_DIRECTORY_FIELDS.some((field) => Object.hasOwn(value, field)),
+  );
+}
+
+function effectiveDeclaredSkillDirectories(
+  manifest,
+  declaration,
+  { manifestOverridesDeclaration = false } = {},
+) {
+  if (!manifestOverridesDeclaration) return declaredSkillDirectories(manifest, declaration);
+  if (hasDeclaredSkillDirectoryField(manifest)) return declaredSkillDirectories(manifest);
+  return declaredSkillDirectories({}, declaration);
+}
+
 function declaredDirectoryValueIsValid(value) {
   if (typeof value === "string") return Boolean(value.trim());
   if (!Array.isArray(value)) return false;
@@ -617,11 +636,9 @@ async function addPluginInstall({
     // Hosts that reject invalid plugin metadata retain diagnostics without exposing its skills.
     return;
   }
-  const hasDeclaredSkillDirectory = [manifestValue, declaration].some((value) =>
-    value
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && Object.hasOwn(value, "skills"));
+  const hasDeclaredSkillDirectory =
+    hasDeclaredSkillDirectoryField(manifestValue)
+    || hasDeclaredSkillDirectoryField(declaration);
   let rootSkillFallback = false;
   if (includeRootSkillFallback && !hasDeclaredSkillDirectory) {
     let hasDefaultSkillDirectory = false;
@@ -640,7 +657,11 @@ async function addPluginInstall({
       }
     }
   }
-  const declaredDirectories = unique(declaredSkillDirectories(manifestValue, declaration));
+  const declaredDirectories = unique(effectiveDeclaredSkillDirectories(
+    manifestValue,
+    declaration,
+    { manifestOverridesDeclaration: declaredSkillDirectoriesReplaceDefault },
+  ));
   const directories = [
     ...(includeDefaultSkillDirectory
       && (!declaredSkillDirectoriesReplaceDefault || !hasDeclaredSkillDirectory)

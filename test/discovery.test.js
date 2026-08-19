@@ -372,13 +372,22 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     "custom-skills",
     "cursor-market-review",
   );
+  await writeSkill(
+    marketplacePlugin,
+    "marketplace-skills",
+    "cursor-marketplace-only-review",
+  );
   await mkdir(path.join(marketplaceRoot, ".cursor-plugin"), { recursive: true });
   await writeFile(
     path.join(marketplaceRoot, ".cursor-plugin", "marketplace.json"),
     JSON.stringify({
       name: "team-marketplace",
       metadata: { pluginRoot: "plugins" },
-      plugins: [{ name: "market-plugin", source: "market-plugin" }],
+      plugins: [{
+        name: "market-plugin",
+        source: "market-plugin",
+        skills: "marketplace-skills",
+      }],
     }),
   );
   await mkdir(path.join(marketplacePlugin, ".cursor-plugin"), { recursive: true });
@@ -408,6 +417,7 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
   assert.deepEqual(byName.get("cursor-market-review").provenance, [
     "repository:https://github.com/example/market-plugin",
   ]);
+  assert.equal(byName.has("cursor-marketplace-only-review"), false);
 });
 
 test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", async () => {
