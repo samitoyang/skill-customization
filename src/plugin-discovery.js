@@ -12,6 +12,7 @@ import {
   normalizeRepositoryUrl,
   normalizeUpstreamEntrypoint,
 } from "./normalization.js";
+import { isPathContained } from "./paths.js";
 import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 
 const PLUGIN_OWNER_PREFIX = "plugin:";
@@ -61,11 +62,6 @@ const DECLARED_SKILL_DIRECTORY_FIELDS = [
 
 function unique(values) {
   return [...new Set(values.filter((value) => value !== undefined && value !== null))];
-}
-
-function contains(rootPath, targetPath) {
-  const relative = path.relative(path.resolve(rootPath), path.resolve(targetPath));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function stringValue(value) {
@@ -324,7 +320,7 @@ async function canonicalContained(target, boundary) {
       realpath(target),
       realpath(boundary),
     ]);
-    return contains(canonicalBoundary, canonicalTarget);
+    return isPathContained(canonicalBoundary, canonicalTarget);
   } catch {
     return false;
   }
@@ -333,7 +329,7 @@ async function canonicalContained(target, boundary) {
 async function safeDirectory(target, boundary, context, metadata, { declared = false } = {}) {
   const resolvedTarget = path.resolve(target);
   const resolvedBoundary = path.resolve(boundary);
-  if (!contains(resolvedBoundary, resolvedTarget)) {
+  if (!isPathContained(resolvedBoundary, resolvedTarget)) {
     context.diagnostics.push(
       diagnostic({
         host: context.host,

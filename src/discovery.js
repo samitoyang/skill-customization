@@ -25,6 +25,7 @@ import {
 } from "./normalization.js";
 import { parseSkillMetadata } from "./skill-metadata.js";
 import { discoverPluginSkillRoots } from "./plugin-discovery.js";
+import { isPathContained } from "./paths.js";
 import { registrySkillRoots } from "./skill-root-registry.js";
 import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 
@@ -47,11 +48,6 @@ function root(pathname, owner, scope, origin = owner, metadata = {}) {
     scope,
     origin,
   };
-}
-
-function containsPath(rootPath, targetPath) {
-  const relative = path.relative(path.resolve(rootPath), path.resolve(targetPath));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function uniqueRoots(roots) {
@@ -364,7 +360,7 @@ async function scanRoot(rootInfo) {
   const isContainedPluginDirectory = async (directory) => {
     if (!canonicalPluginRoot || rootInfo.origin !== "plugin") return true;
     const canonicalDirectory = await realpath(directory).catch(() => undefined);
-    if (!canonicalDirectory || containsPath(canonicalPluginRoot, canonicalDirectory)) return true;
+    if (!canonicalDirectory || isPathContained(canonicalPluginRoot, canonicalDirectory)) return true;
     diagnostics.push({
       kind: "plugin",
       host: rootInfo.host,

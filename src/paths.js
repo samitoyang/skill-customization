@@ -13,8 +13,8 @@ export function isMachineAbsolutePath(value) {
   );
 }
 
-function contains(root, target) {
-  const relative = path.relative(root, target);
+export function isPathContained(root, target) {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
@@ -46,7 +46,7 @@ export async function resolveOwnedPath(
   const canonicalRoot = await realpath(root);
   const unresolved = path.join(root, relativePath);
   const canonicalTarget = await realpath(unresolved);
-  if (!contains(canonicalRoot, canonicalTarget)) {
+  if (!isPathContained(canonicalRoot, canonicalTarget)) {
     throw new Error(`${relativePath} resolves outside its customization folder`);
   }
   const canonicalRelative = path
