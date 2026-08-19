@@ -45,6 +45,7 @@ const CURSOR_MANIFEST_POLICY = Object.freeze({
   includeDefaultSkillRoot: false,
   manifestNamePattern: /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
 });
+const CURSOR_MARKETPLACE_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
   "skillDirectories",
@@ -690,8 +691,23 @@ async function addPluginInstall({
     }
     if (!hasDefaultSkillDirectory) {
       try {
-        const rootSkillInfo = await lstat(path.join(safeInstallRoot, "SKILL.md"));
-        rootSkillFallback = rootSkillInfo.isFile() || rootSkillInfo.isSymbolicLink();
+        const rootSkillPath = path.join(safeInstallRoot, "SKILL.md");
+        const rootSkillInfo = await lstat(rootSkillPath);
+        if (rootSkillInfo.isFile() || rootSkillInfo.isSymbolicLink()) {
+          if (await canonicalContained(rootSkillPath, safeInstallRoot)) {
+            rootSkillFallback = true;
+          } else {
+            context.diagnostics.push(
+              diagnostic({
+                host,
+                path: rootSkillPath,
+                code: "PLUGIN_ROOT_ESCAPE",
+                message: `root plugin skill resolves outside its plugin root: ${rootSkillPath}`,
+                metadata: initialMetadata,
+              }),
+            );
+          }
+        }
       } catch {
         rootSkillFallback = false;
       }
@@ -1485,8 +1501,48 @@ async function discoverMarketplaceManifests({
   for (const file of unique(manifestFiles)) {
     const manifest = await readMarketplaceManifest(file, context, host, safeBase);
     if (!manifest) continue;
-    discovered = true;
     const marketplace = stringValue(manifest.name) ?? marketplaceName ?? path.basename(safeBase);
+    let validCursorMarketplace = true;
+    if (
+      host === "cursor"
+      && (
+        typeof manifest.name !== "string"
+        || !CURSOR_MARKETPLACE_NAME_PATTERN.test(manifest.name)
+      )
+    ) {
+      validCursorMarketplace = false;
+      context.diagnostics.push(
+        diagnostic({
+          host,
+          path: file,
+          code: "PLUGIN_MARKETPLACE_INVALID_NAME",
+          message: `Cursor marketplace name is invalid: ${file}`,
+          metadata: { host, marketplace },
+        }),
+      );
+    }
+    const owner = manifest.owner;
+    if (
+      host === "cursor"
+      && (
+        !owner
+        || typeof owner !== "object"
+        || Array.isArray(owner)
+        || typeof owner.name !== "string"
+        || !owner.name.trim()
+      )
+    ) {
+      validCursorMarketplace = false;
+      context.diagnostics.push(
+        diagnostic({
+          host,
+          path: file,
+          code: "PLUGIN_MARKETPLACE_INVALID_OWNER",
+          message: `Cursor marketplace owner is invalid: ${file}`,
+          metadata: { host, marketplace },
+        }),
+      );
+    }
     const pluginRoot = host === "cursor" ? manifest.metadata?.pluginRoot : undefined;
     if (
       host === "cursor"
@@ -1503,9 +1559,11 @@ async function discoverMarketplaceManifests({
         }),
       );
     }
-    const entriesField = ["plugins", "extensions", "entries"].find((field) =>
-      Object.hasOwn(manifest, field),
-    );
+    const entriesField = host === "cursor"
+      ? (Object.hasOwn(manifest, "plugins") ? "plugins" : undefined)
+      : ["plugins", "extensions", "entries"].find((field) =>
+        Object.hasOwn(manifest, field),
+      );
     if (!entriesField) {
       context.diagnostics.push(
         diagnostic({
@@ -1520,9 +1578,13 @@ async function discoverMarketplaceManifests({
     }
     const configuredEntries = manifest[entriesField];
     if (
-      configuredEntries !== undefined
-      && !Array.isArray(configuredEntries)
-      && (!configuredEntries || typeof configuredEntries !== "object")
+      (host === "cursor" && !Array.isArray(configuredEntries))
+      || (
+        host !== "cursor"
+        && configuredEntries !== undefined
+        && !Array.isArray(configuredEntries)
+        && (!configuredEntries || typeof configuredEntries !== "object")
+      )
     ) {
       context.diagnostics.push(
         diagnostic({
@@ -1535,6 +1597,8 @@ async function discoverMarketplaceManifests({
       );
       continue;
     }
+    if (host === "cursor" && !validCursorMarketplace) continue;
+    discovered = true;
     for (const entry of marketplaceEntries(manifest)) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
         context.diagnostics.push(

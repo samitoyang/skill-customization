@@ -305,6 +305,8 @@ test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plug
   await writeFile(
     path.join(cursorLocal, "marketplace.json"),
     JSON.stringify({
+      name: "cursor-local-marketplace",
+      owner: { name: "fixture" },
       plugins: [{
         name: "declared-plugin",
         path: "./declared-plugin",
@@ -376,6 +378,7 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     path.join(nestedMarketplaceRoot, ".cursor-plugin", "marketplace.json"),
     JSON.stringify({
       name: "nested-marketplace",
+      owner: { name: "fixture" },
       plugins: [{ name: "nested-entry", source: "nested-plugin" }],
     }),
   );
@@ -413,6 +416,7 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     path.join(marketplaceRoot, ".cursor-plugin", "marketplace.json"),
     JSON.stringify({
       name: "team-marketplace",
+      owner: { name: "fixture" },
       metadata: { pluginRoot: "plugins" },
       plugins: [{
         name: "marketplace-entry-name",
@@ -547,6 +551,40 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
     JSON.stringify({ name: "escaping-skills-root-plugin" }),
   );
 
+  const brokenMarketplacePlugin = path.join(localRoot, "broken-marketplace-plugin");
+  await writeSkill(
+    path.join(brokenMarketplacePlugin, "skills"),
+    "cursor-broken-marketplace-review",
+  );
+  await mkdir(path.join(brokenMarketplacePlugin, ".cursor-plugin"), { recursive: true });
+  const brokenMarketplacePath = path.join(
+    brokenMarketplacePlugin,
+    ".cursor-plugin",
+    "marketplace.json",
+  );
+  await writeFile(
+    brokenMarketplacePath,
+    JSON.stringify({ name: "broken_marketplace" }),
+  );
+  await writeFile(
+    path.join(brokenMarketplacePlugin, "plugin.json"),
+    JSON.stringify({ name: "broken-marketplace-plugin" }),
+  );
+
+  const escapingRootSkillPlugin = path.join(localRoot, "escaping-root-skill-plugin");
+  await mkdir(escapingRootSkillPlugin, { recursive: true });
+  const outsideRootSkill = path.join(root, "outside-root-skill.md");
+  await writeFile(
+    outsideRootSkill,
+    "---\nname: cursor-escaping-root-review\ndescription: Fixture\n---\nUse this skill.\n",
+  );
+  const escapingRootSkillPath = path.join(escapingRootSkillPlugin, "SKILL.md");
+  await symlink(outsideRootSkill, escapingRootSkillPath, "file");
+  await writeFile(
+    path.join(escapingRootSkillPlugin, "plugin.json"),
+    JSON.stringify({ name: "escaping-root-skill-plugin" }),
+  );
+
   const defaultEscapingPlugin = path.join(localRoot, "default-escaping-plugin");
   const defaultOutsideSkill = await writeSkill(
     root,
@@ -587,6 +625,7 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
     path.join(localRoot, ".cursor-plugin", "marketplace.json"),
     JSON.stringify({
       name: "invalid-marketplace",
+      owner: { name: "fixture" },
       metadata: { pluginRoot: "../outside-marketplace" },
       plugins: [{ name: "escaped-market", source: "plugin" }],
     }),
@@ -628,6 +667,26 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
       code === "PLUGIN_ROOT_ESCAPE"
       && diagnosticPath === path.join(escapingSkillsRootPlugin, "skills"),
   ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_MARKETPLACE_INVALID_NAME"
+      && diagnosticPath === brokenMarketplacePath,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_MARKETPLACE_INVALID_OWNER"
+      && diagnosticPath === brokenMarketplacePath,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_MARKETPLACE_MISSING_ENTRIES"
+      && diagnosticPath === brokenMarketplacePath,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_ROOT_ESCAPE"
+      && diagnosticPath === escapingRootSkillPath,
+  ));
 
   const escapedMarketplacePath = path.join(
     home,
@@ -657,6 +716,14 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   assert.equal(
     inventory.groups.some(({ name }) => name === "cursor-root-after-escape"),
     true,
+  );
+  assert.equal(
+    inventory.groups.some(({ name }) => name === "cursor-broken-marketplace-review"),
+    true,
+  );
+  assert.equal(
+    inventory.groups.some(({ name }) => name === "cursor-escaping-root-review"),
+    false,
   );
 });
 
