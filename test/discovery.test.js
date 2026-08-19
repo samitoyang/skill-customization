@@ -485,18 +485,65 @@ test("Gemini validates metadata containment, required fields, and install proven
     JSON.stringify({ name: "different-extension", version: "1.0.0", skills: 42 }),
   );
 
+  const invalidInstallExtension = path.join(extensions, "invalid-install-extension");
+  await writeSkill(path.join(invalidInstallExtension, "skills"), "invalid-install-gemini-review");
+  await writeFile(
+    path.join(invalidInstallExtension, "gemini-extension.json"),
+    JSON.stringify({ name: "invalid-install-extension", version: "1.0.0" }),
+  );
+  const invalidInstallMetadata = path.join(
+    invalidInstallExtension,
+    ".gemini-extension-install.json",
+  );
+  await writeFile(
+    invalidInstallMetadata,
+    JSON.stringify({ source: "https://github.com/example/invalid-install", type: "unknown" }),
+  );
+
+  const invalidDeclaredExtension = path.join(extensions, "invalid-declared-extension");
+  await writeSkill(path.join(invalidDeclaredExtension, "skills"), "invalid-declared-gemini-review");
+  const invalidDeclaredManifest = path.join(
+    invalidDeclaredExtension,
+    "gemini-extension.json",
+  );
+  await writeFile(
+    invalidDeclaredManifest,
+    JSON.stringify({ name: "invalid-declared-extension", version: "1.0.0", skills: 42 }),
+  );
+
+  const linkedOrigin = path.join(root, "linked-origin");
+  await writeSkill(linkedOrigin, "unwanted-linked-origin-review");
+  const linkedExtension = path.join(extensions, "linked-extension");
+  await writeSkill(path.join(linkedExtension, "skills"), "linked-gemini-review");
+  await writeFile(
+    path.join(linkedExtension, "gemini-extension.json"),
+    JSON.stringify({ name: "linked-extension", version: "1.0.0" }),
+  );
+  await writeFile(
+    path.join(linkedExtension, ".gemini-extension-install.json"),
+    JSON.stringify({ source: linkedOrigin, type: "link" }),
+  );
+
   const result = await discoverSkills({
-    input: "installed-gemini-review",
     home,
     cwd: path.join(root, "workspace"),
     env: {},
     managerRecords: [],
   });
 
-  assert.deepEqual(result.groups[0].provenance, [
+  const installedGroup = result.groups.find(({ name }) => name === "installed-gemini-review");
+  assert.deepEqual(installedGroup.provenance, [
     "repository:https://github.com/example/installed-extension",
   ]);
   assert.equal(result.groups.some(({ name }) => name === "invalid-gemini-review"), false);
+  assert.equal(result.groups.some(({ name }) => name === "invalid-install-gemini-review"), true);
+  assert.equal(result.groups.some(({ name }) => name === "invalid-declared-gemini-review"), true);
+  assert.equal(result.groups.some(({ name }) => name === "unwanted-linked-origin-review"), false);
+  const linkedGroup = result.groups.find(({ name }) => name === "linked-gemini-review");
+  assert.deepEqual(linkedGroup.copies[0].evidence[0].installation, {
+    source: linkedOrigin,
+    type: "link",
+  });
   assert.ok(result.pluginDiagnostics.some(
     ({ code, path: diagnosticPath }) =>
       code === "PLUGIN_METADATA_ESCAPE" && diagnosticPath === escapedManifest,
@@ -514,6 +561,14 @@ test("Gemini validates metadata containment, required fields, and install proven
   assert.ok(result.pluginDiagnostics.some(
     ({ code, path: diagnosticPath }) =>
       code === "PLUGIN_SKILL_DIRECTORY_INVALID" && diagnosticPath === invalidManifest,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "INVALID_PLUGIN_INSTALL_METADATA" && diagnosticPath === invalidInstallMetadata,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_SKILL_DIRECTORY_INVALID" && diagnosticPath === invalidDeclaredManifest,
   ));
 });
 

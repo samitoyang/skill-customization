@@ -32,7 +32,7 @@ const GEMINI_MANIFEST_POLICY = Object.freeze({
   requiredFields: GEMINI_REQUIRED_MANIFEST_FIELDS,
   installationFile: GEMINI_INSTALL_METADATA_FILE,
   nameMatchesDirectory: true,
-  skipInvalidManifest: true,
+  skipInvalidExtension: true,
 });
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
@@ -133,6 +133,12 @@ function sourceMetadata(manifest, declaration = {}, installationMetadata = {}) {
     ? installationMetadata.source
     : undefined;
   const repositoryWithInstallation = repository ?? repositoryValue(installationRepository);
+  const installation = stringValue(installationMetadata.type) && stringValue(installationMetadata.source)
+    ? {
+      type: stringValue(installationMetadata.type),
+      source: stringValue(installationMetadata.source),
+    }
+    : undefined;
   const upstreamPath = normalizeUpstreamEntrypoint(
     declaration.upstream_path
       ?? declaration.upstreamPath
@@ -141,7 +147,7 @@ function sourceMetadata(manifest, declaration = {}, installationMetadata = {}) {
       ?? manifest?.upstream_path
       ?? manifest?.upstreamPath,
   );
-  return { repository: repositoryWithInstallation, upstreamPath };
+  return { repository: repositoryWithInstallation, upstreamPath, installation };
 }
 
 function pluginEvidence({ metadata, source }) {
@@ -164,6 +170,7 @@ function pluginEvidence({ metadata, source }) {
     ...(source.upstreamPath
       ? { upstream_path: source.upstreamPath, upstreamPath: source.upstreamPath }
       : {}),
+    ...(source.installation ? { installation: source.installation } : {}),
     provenance: {
       kind: "plugin",
       host: metadata.host,
@@ -172,9 +179,16 @@ function pluginEvidence({ metadata, source }) {
       ...(metadata.version ? { version: metadata.version } : {}),
       ...(repository ? { repository } : {}),
       ...(source.upstreamPath ? { upstream_path: source.upstreamPath } : {}),
+      ...(source.installation ? { installation: source.installation } : {}),
     },
   };
   return { evidence, repository: Boolean(source.repository) && !repository };
+}
+
+function declaredDirectoryItemValues(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+  return [item.path, item.directory, item.root, item.skills]
+    .filter((candidate) => typeof candidate === "string");
 }
 
 function declaredDirectoryValues(value) {
@@ -182,13 +196,7 @@ function declaredDirectoryValues(value) {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     if (typeof item === "string") return [item];
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    return [
-      item.path,
-      item.directory,
-      item.root,
-      item.skills,
-    ].filter((candidate) => typeof candidate === "string");
+    return declaredDirectoryItemValues(item);
   });
 }
 
@@ -218,9 +226,7 @@ function declaredDirectoryValueIsValid(value) {
   if (!Array.isArray(value)) return false;
   return value.every((item) => {
     if (typeof item === "string") return Boolean(item.trim());
-    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
-    return [item.path, item.directory, item.root, item.skills]
-      .some((candidate) => typeof candidate === "string" && candidate.trim());
+    return declaredDirectoryItemValues(item).some((candidate) => candidate.trim());
   });
 }
 
@@ -462,7 +468,7 @@ async function addPluginInstall({
     requiredFields: requiredManifestFields = [],
     installationFile: installationMetadataFile,
     nameMatchesDirectory = false,
-    skipInvalidManifest = false,
+    skipInvalidExtension = false,
   } = manifestPolicy;
   const initialMetadata = metadataFor({
     host,
@@ -530,8 +536,11 @@ async function addPluginInstall({
       }),
     );
   }
-  const installationMetadata = installationMetadataFile
-    ? await readJsonObject(path.join(safeInstallRoot, installationMetadataFile), context, {
+  const installationMetadataPath = installationMetadataFile
+    ? path.join(safeInstallRoot, installationMetadataFile)
+    : undefined;
+  const installationMetadata = installationMetadataPath
+    ? await readJsonObject(installationMetadataPath, context, {
       host,
       metadata: initialMetadata,
       description: "Gemini extension installation metadata",
@@ -549,14 +558,14 @@ async function addPluginInstall({
     context.diagnostics.push(
       diagnostic({
         host,
-        path: path.join(safeInstallRoot, installationMetadataFile),
+        path: installationMetadataPath,
         code: "INVALID_PLUGIN_INSTALL_METADATA",
-        message: `invalid Gemini extension installation metadata: ${path.join(safeInstallRoot, installationMetadataFile)}`,
+        message: `invalid Gemini extension installation metadata: ${installationMetadataPath}`,
         metadata: initialMetadata,
       }),
     );
   }
-  // Local/link sources identify an external origin; discovery never traverses or writes them.
+  // Local/link sources identify an external origin; preserve that evidence without traversing or writing it.
   const metadata = metadataFor({
     host,
     marketplace: declaration.marketplace ?? manifestValue?.marketplace ?? marketplace,
@@ -579,7 +588,8 @@ async function addPluginInstall({
       }),
     );
   }
-  for (const field of invalidDeclaredSkillDirectoryFields(manifestValue, declaration)) {
+  const invalidDeclaredFields = invalidDeclaredSkillDirectoryFields(manifestValue, declaration);
+  for (const field of invalidDeclaredFields) {
     context.diagnostics.push(
       diagnostic({
         host,
@@ -590,7 +600,10 @@ async function addPluginInstall({
       }),
     );
   }
-  if (skipInvalidManifest && invalidManifest) {
+  if (
+    skipInvalidExtension
+    && invalidManifest
+  ) {
     // Gemini CLI skips extensions it cannot load; retain diagnostics without exposing their skills.
     return;
   }
