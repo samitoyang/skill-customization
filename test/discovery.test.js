@@ -540,11 +540,11 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
     "---\nname: cursor-root-after-escape\ndescription: Fixture\n---\nUse this skill.\n",
   );
   const outsideSkillsRoot = path.join(root, "outside-skills-root");
-  await mkdir(outsideSkillsRoot, { recursive: true });
+  await writeFile(outsideSkillsRoot, "not a directory\n");
   await symlink(
     outsideSkillsRoot,
     path.join(escapingSkillsRootPlugin, "skills"),
-    "dir",
+    "file",
   );
   await writeFile(
     path.join(escapingSkillsRootPlugin, "plugin.json"),
@@ -569,6 +569,60 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   await writeFile(
     path.join(brokenMarketplacePlugin, "plugin.json"),
     JSON.stringify({ name: "broken-marketplace-plugin" }),
+  );
+
+  const invalidEntryMarketplacePlugin = path.join(
+    localRoot,
+    "invalid-entry-marketplace-plugin",
+  );
+  await writeSkill(
+    path.join(invalidEntryMarketplacePlugin, "skills"),
+    "cursor-invalid-entry-fallback-review",
+  );
+  await mkdir(path.join(invalidEntryMarketplacePlugin, ".cursor-plugin"), { recursive: true });
+  const invalidEntryMarketplacePath = path.join(
+    invalidEntryMarketplacePlugin,
+    ".cursor-plugin",
+    "marketplace.json",
+  );
+  await writeFile(
+    invalidEntryMarketplacePath,
+    JSON.stringify({
+      name: "invalid-entry-marketplace",
+      owner: { name: "fixture" },
+      plugins: [{ name: "BAD_NAME", source: "missing-plugin" }],
+    }),
+  );
+  await writeFile(
+    path.join(invalidEntryMarketplacePlugin, "plugin.json"),
+    JSON.stringify({ name: "invalid-entry-marketplace-plugin" }),
+  );
+
+  const tooManyEntriesPlugin = path.join(localRoot, "too-many-entries-plugin");
+  await writeSkill(
+    path.join(tooManyEntriesPlugin, "skills"),
+    "cursor-too-many-entries-fallback-review",
+  );
+  await mkdir(path.join(tooManyEntriesPlugin, ".cursor-plugin"), { recursive: true });
+  const tooManyEntriesMarketplacePath = path.join(
+    tooManyEntriesPlugin,
+    ".cursor-plugin",
+    "marketplace.json",
+  );
+  await writeFile(
+    tooManyEntriesMarketplacePath,
+    JSON.stringify({
+      name: "too-many-entries-marketplace",
+      owner: { name: "fixture" },
+      plugins: Array.from({ length: 501 }, (_, index) => ({
+        name: `plugin-${index}`,
+        source: `missing-plugin-${index}`,
+      })),
+    }),
+  );
+  await writeFile(
+    path.join(tooManyEntriesPlugin, "plugin.json"),
+    JSON.stringify({ name: "too-many-entries-plugin" }),
   );
 
   const escapingRootSkillPlugin = path.join(localRoot, "escaping-root-skill-plugin");
@@ -684,6 +738,16 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   ));
   assert.ok(result.pluginDiagnostics.some(
     ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_DECLARATION_INVALID_NAME"
+      && diagnosticPath === invalidEntryMarketplacePath,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_MARKETPLACE_TOO_MANY_ENTRIES"
+      && diagnosticPath === tooManyEntriesMarketplacePath,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
       code === "PLUGIN_ROOT_ESCAPE"
       && diagnosticPath === escapingRootSkillPath,
   ));
@@ -719,6 +783,14 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   );
   assert.equal(
     inventory.groups.some(({ name }) => name === "cursor-broken-marketplace-review"),
+    true,
+  );
+  assert.equal(
+    inventory.groups.some(({ name }) => name === "cursor-invalid-entry-fallback-review"),
+    true,
+  );
+  assert.equal(
+    inventory.groups.some(({ name }) => name === "cursor-too-many-entries-fallback-review"),
     true,
   );
   assert.equal(

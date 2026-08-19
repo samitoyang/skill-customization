@@ -3,6 +3,7 @@ import {
   readFile,
   readdir,
   realpath,
+  stat,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -387,6 +388,35 @@ async function safeDirectory(target, boundary, context, metadata, { declared = f
     );
     return undefined;
   }
+  if (info.isSymbolicLink()) {
+    let targetInfo;
+    try {
+      targetInfo = await stat(resolvedTarget);
+    } catch (error) {
+      context.diagnostics.push(
+        diagnostic({
+          host: context.host,
+          path: resolvedTarget,
+          code: "PLUGIN_ROOT_UNREADABLE",
+          message: `cannot inspect plugin skill root ${resolvedTarget}: ${error.message}`,
+          metadata,
+        }),
+      );
+      return undefined;
+    }
+    if (!targetInfo.isDirectory()) {
+      context.diagnostics.push(
+        diagnostic({
+          host: context.host,
+          path: resolvedTarget,
+          code: "PLUGIN_ROOT_NOT_DIRECTORY",
+          message: `plugin skill root is not a directory: ${resolvedTarget}`,
+          metadata,
+        }),
+      );
+      return undefined;
+    }
+  }
   return resolvedTarget;
 }
 
@@ -525,7 +555,7 @@ async function addPluginInstall({
     context,
     initialMetadata,
   );
-  if (!safeInstallRoot) return;
+  if (!safeInstallRoot) return false;
 
   const manifest = await readManifest(safeInstallRoot, context, initialMetadata, {
     files: manifestFiles,
@@ -672,19 +702,22 @@ async function addPluginInstall({
     && invalidManifest
   ) {
     // Hosts that reject invalid plugin metadata retain diagnostics without exposing its skills.
-    return;
+    return false;
   }
   const hasDeclaredSkillDirectory =
     hasDeclaredSkillDirectoryField(manifestValue)
     || hasDeclaredSkillDirectoryField(declaration);
   let rootSkillFallback = false;
+  let addedRoot = false;
   if (includeRootSkillFallback && !hasDeclaredSkillDirectory) {
     let hasDefaultSkillDirectory = false;
     try {
       const defaultSkillRoot = path.join(safeInstallRoot, defaultSkillDirectory);
       const defaultSkillInfo = await lstat(defaultSkillRoot);
+      const defaultSkillIsDirectory = defaultSkillInfo.isDirectory()
+        || (defaultSkillInfo.isSymbolicLink() && (await stat(defaultSkillRoot)).isDirectory());
       hasDefaultSkillDirectory =
-        (defaultSkillInfo.isDirectory() || defaultSkillInfo.isSymbolicLink())
+        defaultSkillIsDirectory
         && await canonicalContained(defaultSkillRoot, safeInstallRoot);
     } catch {
       // A missing default directory is the normal root-skill fallback case.
@@ -747,6 +780,7 @@ async function addPluginInstall({
   });
   if (rootSkillFallback) {
     context.roots.push(pluginRootInfo(safeInstallRoot, { singleSkill: true }));
+    addedRoot = true;
   }
   for (const relativeDirectory of unique(directories)) {
     const value = stringValue(relativeDirectory);
@@ -762,7 +796,9 @@ async function addPluginInstall({
     context.roots.push(pluginRootInfo(skillRoot, {
       includeRootSkill: relativeDirectory !== defaultSkillDirectory || includeDefaultSkillRoot,
     }));
+    addedRoot = true;
   }
+  return addedRoot;
 }
 
 async function addSyncedRoot({ root: syncedRoot, context }) {
@@ -1597,8 +1633,19 @@ async function discoverMarketplaceManifests({
       );
       continue;
     }
+    if (host === "cursor" && configuredEntries.length > 500) {
+      context.diagnostics.push(
+        diagnostic({
+          host,
+          path: file,
+          code: "PLUGIN_MARKETPLACE_TOO_MANY_ENTRIES",
+          message: `Cursor marketplace has more than 500 plugins: ${file}`,
+          metadata: { host, marketplace },
+        }),
+      );
+      continue;
+    }
     if (host === "cursor" && !validCursorMarketplace) continue;
-    discovered = true;
     for (const entry of marketplaceEntries(manifest)) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
         context.diagnostics.push(
@@ -1608,6 +1655,24 @@ async function discoverMarketplaceManifests({
             code: "PLUGIN_DECLARATION_INVALID",
             message: `marketplace plugin declaration is not an object: ${file}`,
             metadata: { host, marketplace },
+          }),
+        );
+        continue;
+      }
+      if (
+        host === "cursor"
+        && (
+          typeof entry.name !== "string"
+          || !CURSOR_MARKETPLACE_NAME_PATTERN.test(entry.name)
+        )
+      ) {
+        context.diagnostics.push(
+          diagnostic({
+            host,
+            path: file,
+            code: "PLUGIN_DECLARATION_INVALID_NAME",
+            message: `Cursor marketplace plugin name is invalid: ${file}`,
+            metadata: { host, marketplace, name: entry.name },
           }),
         );
         continue;
@@ -1640,7 +1705,7 @@ async function discoverMarketplaceManifests({
         );
         continue;
       }
-      await addPluginInstall({
+      const added = await addPluginInstall({
         installRoot: marketplacePluginPath(configuredPath, file, safeBase, pluginRoot),
         boundary: host === "cursor" ? safeBase : boundary ?? safeBase,
         host,
@@ -1657,6 +1722,7 @@ async function discoverMarketplaceManifests({
         context,
         ...(manifestPolicy ? { manifestPolicy } : {}),
       });
+      discovered ||= added;
     }
   }
   return discovered;
