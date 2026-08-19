@@ -446,6 +446,68 @@ test("Gemini extension diagnostics isolate malformed metadata and escaping skill
   ));
 });
 
+test("Gemini validates metadata containment, required fields, and install provenance", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-gemini-metadata-"));
+  const home = path.join(root, "home");
+  const extensions = path.join(home, ".gemini", "extensions");
+
+  const installedExtension = path.join(extensions, "installed-extension");
+  await writeSkill(path.join(installedExtension, "skills"), "installed-gemini-review");
+  await writeFile(
+    path.join(installedExtension, "gemini-extension.json"),
+    JSON.stringify({ name: "installed-extension", version: "1.0.0" }),
+  );
+  await writeFile(
+    path.join(installedExtension, ".gemini-extension-install.json"),
+    JSON.stringify({
+      source: "https://github.com/example/installed-extension",
+      type: "git",
+    }),
+  );
+
+  const outsideManifest = path.join(root, "outside-gemini-extension.json");
+  await writeFile(
+    outsideManifest,
+    JSON.stringify({ name: "escaped-extension", version: "1.0.0" }),
+  );
+  const escapedExtension = path.join(extensions, "escaped-extension");
+  await writeSkill(path.join(escapedExtension, "skills"), "escaped-gemini-review");
+  const escapedManifest = path.join(escapedExtension, "gemini-extension.json");
+  await symlink(outsideManifest, escapedManifest, "file");
+
+  const invalidExtension = path.join(extensions, "invalid-extension");
+  await writeSkill(path.join(invalidExtension, "skills"), "invalid-gemini-review");
+  const invalidManifest = path.join(invalidExtension, "gemini-extension.json");
+  await writeFile(
+    invalidManifest,
+    JSON.stringify({ name: "invalid-extension", skills: 42 }),
+  );
+
+  const result = await discoverSkills({
+    input: "installed-gemini-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.deepEqual(result.groups[0].provenance, [
+    "repository:https://github.com/example/installed-extension",
+  ]);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_METADATA_ESCAPE" && diagnosticPath === escapedManifest,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "INVALID_PLUGIN_METADATA" && diagnosticPath === invalidManifest,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_SKILL_DIRECTORY_INVALID" && diagnosticPath === invalidManifest,
+  ));
+});
+
 test("Codex personal marketplaces discover .codex-plugin custom skill directories", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-personal-marketplace-"));
   const home = path.join(root, "home");

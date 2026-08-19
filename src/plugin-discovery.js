@@ -23,6 +23,9 @@ const MANIFEST_FILES = [
   "gemini-extension.json",
   "package.json",
 ];
+const GEMINI_MANIFEST_FILES = ["gemini-extension.json"];
+const GEMINI_INSTALL_METADATA_FILE = ".gemini-extension-install.json";
+const GEMINI_REQUIRED_MANIFEST_FIELDS = ["name", "version"];
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
   "skillDirectories",
@@ -96,7 +99,7 @@ function repositoryValue(value, seen = new Set()) {
   return undefined;
 }
 
-function sourceMetadata(manifest, declaration = {}) {
+function sourceMetadata(manifest, declaration = {}, installationMetadata = {}) {
   const source = declaration.source && typeof declaration.source === "object"
     ? declaration.source
     : manifest?.source && typeof manifest.source === "object"
@@ -118,6 +121,10 @@ function sourceMetadata(manifest, declaration = {}) {
       ?? manifest?.repositoryUrl
       ?? manifestSourceRepository,
   );
+  const installationRepository = ["git", "github-release"].includes(installationMetadata.type)
+    ? installationMetadata.source
+    : undefined;
+  const repositoryWithInstallation = repository ?? repositoryValue(installationRepository);
   const upstreamPath = normalizeUpstreamEntrypoint(
     declaration.upstream_path
       ?? declaration.upstreamPath
@@ -126,7 +133,7 @@ function sourceMetadata(manifest, declaration = {}) {
       ?? manifest?.upstream_path
       ?? manifest?.upstreamPath,
   );
-  return { repository, upstreamPath };
+  return { repository: repositoryWithInstallation, upstreamPath };
 }
 
 function pluginEvidence({ metadata, source }) {
@@ -196,6 +203,36 @@ function declaredSkillDirectories(manifest, declaration = {}) {
     }
   }
   return unique(values.map((value) => value.trim()).filter(Boolean));
+}
+
+function declaredDirectoryValueIsValid(value) {
+  if (typeof value === "string") return Boolean(value.trim());
+  if (!Array.isArray(value)) return false;
+  return value.every((item) => {
+    if (typeof item === "string") return Boolean(item.trim());
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    return [item.path, item.directory, item.root, item.skills]
+      .some((candidate) => typeof candidate === "string" && candidate.trim());
+  });
+}
+
+function invalidDeclaredSkillDirectoryFields(manifest, declaration = {}) {
+  const containers = [
+    ["declaration", declaration],
+    ["manifest", manifest],
+    ["declaration.layout", declaration?.layout],
+    ["manifest.layout", manifest?.layout],
+    ["declaration.components", declaration?.components],
+    ["manifest.components", manifest?.components],
+  ];
+  return unique(
+    containers.flatMap(([location, value]) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      return DECLARED_SKILL_DIRECTORY_FIELDS
+        .filter((field) => Object.hasOwn(value, field) && !declaredDirectoryValueIsValid(value[field]))
+        .map((field) => `${location}.${field}`);
+    }),
+  );
 }
 
 async function directoryEntries(target, context, metadata, { reportMissing = false } = {}) {
@@ -305,8 +342,42 @@ async function safeDirectory(target, boundary, context, metadata, { declared = f
 async function readJsonObject(
   file,
   context,
-  { host = context.host, metadata, description = "plugin metadata" } = {},
+  {
+    host = context.host,
+    metadata,
+    description = "plugin metadata",
+    boundary,
+  } = {},
 ) {
+  if (boundary) {
+    try {
+      await lstat(file);
+    } catch (error) {
+      if (error.code === "ENOENT") return undefined;
+      context.diagnostics.push(
+        diagnostic({
+          host,
+          path: file,
+          code: "PLUGIN_METADATA_UNREADABLE",
+          message: `cannot inspect ${description} ${file}: ${error.message}`,
+          metadata,
+        }),
+      );
+      return undefined;
+    }
+    if (!(await canonicalContained(file, boundary))) {
+      context.diagnostics.push(
+        diagnostic({
+          host,
+          path: file,
+          code: "PLUGIN_METADATA_ESCAPE",
+          message: `${description} resolves outside its extension root: ${file}`,
+          metadata,
+        }),
+      );
+      return undefined;
+    }
+  }
   let contents;
   try {
     contents = await readFile(file, "utf8");
@@ -343,12 +414,19 @@ async function readJsonObject(
   }
 }
 
-async function readManifest(installRoot, context, metadata) {
-  for (const relative of MANIFEST_FILES) {
+async function readManifest(
+  installRoot,
+  context,
+  metadata,
+  { files = MANIFEST_FILES, description = "plugin metadata" } = {},
+) {
+  for (const relative of files) {
     const file = path.join(installRoot, relative);
     const value = await readJsonObject(file, context, {
       host: context.host,
       metadata,
+      description,
+      boundary: installRoot,
     });
     if (value) return { value, path: file };
   }
@@ -368,6 +446,10 @@ async function addPluginInstall({
   context,
   defaultSkillDirectory = "skills",
   includeDefaultSkillDirectory = true,
+  manifestFiles = MANIFEST_FILES,
+  manifestDescription = "plugin metadata",
+  requiredManifestFields = [],
+  installationMetadataFile,
 }) {
   const initialMetadata = metadataFor({
     host,
@@ -384,8 +466,63 @@ async function addPluginInstall({
   );
   if (!safeInstallRoot) return;
 
-  const manifest = await readManifest(safeInstallRoot, context, initialMetadata);
+  const manifest = await readManifest(safeInstallRoot, context, initialMetadata, {
+    files: manifestFiles,
+    description: manifestDescription,
+  });
   const manifestValue = manifest?.value;
+  if (requiredManifestFields.length > 0) {
+    if (!manifest) {
+      context.diagnostics.push(
+        diagnostic({
+          host,
+          path: safeInstallRoot,
+          code: "MISSING_PLUGIN_METADATA",
+          message: `missing ${manifestDescription} in ${safeInstallRoot}`,
+          metadata: initialMetadata,
+        }),
+      );
+    } else {
+      for (const field of requiredManifestFields) {
+        if (stringValue(manifestValue[field])) continue;
+        context.diagnostics.push(
+          diagnostic({
+            host,
+            path: manifest.path,
+            code: "INVALID_PLUGIN_METADATA",
+            message: `${manifestDescription} is missing a valid ${field}: ${manifest.path}`,
+            metadata: initialMetadata,
+          }),
+        );
+      }
+    }
+  }
+  const installationMetadata = installationMetadataFile
+    ? await readJsonObject(path.join(safeInstallRoot, installationMetadataFile), context, {
+      host,
+      metadata: initialMetadata,
+      description: "Gemini extension installation metadata",
+      boundary: safeInstallRoot,
+    })
+    : undefined;
+  if (
+    installationMetadataFile
+    && installationMetadata
+    && (
+      !stringValue(installationMetadata.source)
+      || !["git", "github-release", "local", "link"].includes(installationMetadata.type)
+    )
+  ) {
+    context.diagnostics.push(
+      diagnostic({
+        host,
+        path: path.join(safeInstallRoot, installationMetadataFile),
+        code: "INVALID_PLUGIN_INSTALL_METADATA",
+        message: `invalid Gemini extension installation metadata: ${path.join(safeInstallRoot, installationMetadataFile)}`,
+        metadata: initialMetadata,
+      }),
+    );
+  }
   const metadata = metadataFor({
     host,
     marketplace: declaration.marketplace ?? manifestValue?.marketplace ?? marketplace,
@@ -395,7 +532,7 @@ async function addPluginInstall({
     manifestPath: manifest?.path,
     source: declaration.sourceType,
   });
-  const provenanceSource = sourceMetadata(manifestValue, declaration);
+  const provenanceSource = sourceMetadata(manifestValue, declaration, installationMetadata);
   const evidenceResult = pluginEvidence({ metadata, source: provenanceSource });
   if (evidenceResult.repository) {
     context.diagnostics.push(
@@ -404,6 +541,17 @@ async function addPluginInstall({
         path: manifest?.path ?? safeInstallRoot,
         code: "INVALID_PLUGIN_REPOSITORY",
         message: `plugin repository metadata is invalid for ${metadata.name}`,
+        metadata,
+      }),
+    );
+  }
+  for (const field of invalidDeclaredSkillDirectoryFields(manifestValue, declaration)) {
+    context.diagnostics.push(
+      diagnostic({
+        host,
+        path: manifest?.path ?? safeInstallRoot,
+        code: "PLUGIN_SKILL_DIRECTORY_INVALID",
+        message: `declared skill directory ${field} is invalid: ${manifest?.path ?? safeInstallRoot}`,
         metadata,
       }),
     );
@@ -956,6 +1104,10 @@ async function discoverDirectExtensionRoots({
   scope,
   context,
   marketplace = "local",
+  manifestFiles,
+  manifestDescription,
+  requiredManifestFields,
+  installationMetadataFile,
 }) {
   const safeRoot = await safeDirectory(
     root,
@@ -978,6 +1130,10 @@ async function discoverDirectExtensionRoots({
       scope,
       source: {},
       context,
+      ...(manifestFiles ? { manifestFiles } : {}),
+      ...(manifestDescription ? { manifestDescription } : {}),
+      ...(requiredManifestFields ? { requiredManifestFields } : {}),
+      ...(installationMetadataFile ? { installationMetadataFile } : {}),
     });
   }
 }
@@ -993,6 +1149,10 @@ async function discoverGemini(context) {
     host: "gemini-cli",
     scope: "global",
     context,
+    manifestFiles: GEMINI_MANIFEST_FILES,
+    manifestDescription: "Gemini extension metadata",
+    requiredManifestFields: GEMINI_REQUIRED_MANIFEST_FIELDS,
+    installationMetadataFile: GEMINI_INSTALL_METADATA_FILE,
   });
   for (const workspace of context.workspaceDirectories) {
     await discoverDirectExtensionRoots({
@@ -1001,6 +1161,10 @@ async function discoverGemini(context) {
       host: "gemini-cli",
       scope: "workspace",
       context,
+      manifestFiles: GEMINI_MANIFEST_FILES,
+      manifestDescription: "Gemini extension metadata",
+      requiredManifestFields: GEMINI_REQUIRED_MANIFEST_FIELDS,
+      installationMetadataFile: GEMINI_INSTALL_METADATA_FILE,
     });
   }
 }
@@ -1073,10 +1237,11 @@ function marketplacePluginPath(configuredPath, file, safeBase) {
   return path.resolve(usesMarketplaceRoot ? sourceBase : safeBase, configuredPath);
 }
 
-async function readMarketplaceManifest(file, context, host) {
+async function readMarketplaceManifest(file, context, host, boundary) {
   return readJsonObject(file, context, {
     host,
     description: "marketplace metadata",
+    boundary,
   });
 }
 
@@ -1103,7 +1268,7 @@ async function discoverMarketplaceManifests({
     "manifest.json",
   ].map((file) => path.join(safeBase, file));
   for (const file of unique(manifestFiles)) {
-    const manifest = await readMarketplaceManifest(file, context, host);
+    const manifest = await readMarketplaceManifest(file, context, host, safeBase);
     if (!manifest) continue;
     const marketplace = stringValue(manifest.name) ?? marketplaceName ?? path.basename(safeBase);
     const entriesField = ["plugins", "extensions", "entries"].find((field) =>
