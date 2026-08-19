@@ -680,8 +680,11 @@ async function addPluginInstall({
   if (includeRootSkillFallback && !hasDeclaredSkillDirectory) {
     let hasDefaultSkillDirectory = false;
     try {
-      const defaultSkillInfo = await lstat(path.join(safeInstallRoot, defaultSkillDirectory));
-      hasDefaultSkillDirectory = defaultSkillInfo.isDirectory() || defaultSkillInfo.isSymbolicLink();
+      const defaultSkillRoot = path.join(safeInstallRoot, defaultSkillDirectory);
+      const defaultSkillInfo = await lstat(defaultSkillRoot);
+      hasDefaultSkillDirectory =
+        (defaultSkillInfo.isDirectory() || defaultSkillInfo.isSymbolicLink())
+        && await canonicalContained(defaultSkillRoot, safeInstallRoot);
     } catch {
       // A missing default directory is the normal root-skill fallback case.
     }
@@ -804,12 +807,16 @@ async function pluginDirectories(root, context, metadata, filter = () => true) {
   return result;
 }
 
-async function hasCursorMarketplaceManifest(root) {
+async function cursorMarketplaceManifestStatus(root) {
+  const file = path.join(root, ".cursor-plugin", "marketplace.json");
   try {
-    const info = await lstat(path.join(root, ".cursor-plugin", "marketplace.json"));
-    return info.isFile() || info.isSymbolicLink();
+    await lstat(file);
+    return {
+      present: true,
+      contained: await canonicalContained(file, root),
+    };
   } catch {
-    return false;
+    return { present: false, contained: false };
   }
 }
 
@@ -831,9 +838,10 @@ async function discoverCursorLocalPluginRoots({
     context,
     { host: "cursor", source: "extension" },
   )) {
-    if (await hasCursorMarketplaceManifest(extension.path)) {
+    const marketplaceManifest = await cursorMarketplaceManifestStatus(extension.path);
+    if (marketplaceManifest.present) {
       // A direct child can itself be a documented multi-plugin repository.
-      await discoverMarketplaceManifests({
+      const discoveredMarketplace = await discoverMarketplaceManifests({
         base: extension.path,
         boundary: safeRoot,
         context,
@@ -842,7 +850,7 @@ async function discoverCursorLocalPluginRoots({
         marketplaceName: "local",
         manifestPolicy: CURSOR_MANIFEST_POLICY,
       });
-      continue;
+      if (marketplaceManifest.contained && discoveredMarketplace) continue;
     }
     await addPluginInstall({
       installRoot: extension.path,
@@ -1465,7 +1473,8 @@ async function discoverMarketplaceManifests({
     context,
     { host, source: "marketplace" },
   );
-  if (!safeBase) return;
+  if (!safeBase) return false;
+  let discovered = false;
   const manifestFiles = [
     ".claude-plugin/marketplace.json",
     ".cursor-plugin/marketplace.json",
@@ -1476,6 +1485,7 @@ async function discoverMarketplaceManifests({
   for (const file of unique(manifestFiles)) {
     const manifest = await readMarketplaceManifest(file, context, host, safeBase);
     if (!manifest) continue;
+    discovered = true;
     const marketplace = stringValue(manifest.name) ?? marketplaceName ?? path.basename(safeBase);
     const pluginRoot = host === "cursor" ? manifest.metadata?.pluginRoot : undefined;
     if (
@@ -1585,6 +1595,7 @@ async function discoverMarketplaceManifests({
       });
     }
   }
+  return discovered;
 }
 
 function normalizeWorkspaceDirectories({ cwd, home, workspaceDirectories }) {

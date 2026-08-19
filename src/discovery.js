@@ -12,7 +12,7 @@ import path from "node:path";
 
 import { validateDescriptor } from "./descriptor.js";
 import { DiscoveryError } from "./errors.js";
-import { fingerprintPath } from "./fingerprint.js";
+import { fingerprintFile, fingerprintPath } from "./fingerprint.js";
 import {
   collectManagerRecords,
   managerSkillRoots,
@@ -526,7 +526,9 @@ async function candidateFromDirectory(directory, rootInfo) {
       ? { pluginEvidence: structuredClone(rootInfo.pluginEvidence) }
       : {}),
     fingerprint: customization?.owned_payload.reviewed_fingerprint
-      ?? await fingerprintPath(directory),
+      ?? (rootInfo.singleSkill
+        ? await fingerprintFile(entrypoint)
+        : await fingerprintPath(directory)),
     classification: customization ? "customization" : "skill",
     ...(customization
       ? {

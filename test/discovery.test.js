@@ -508,6 +508,45 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
     JSON.stringify({ name: " invalid-name-plugin " }),
   );
 
+  const escapingMarketplacePlugin = path.join(localRoot, "escaping-marketplace-plugin");
+  await writeSkill(
+    path.join(escapingMarketplacePlugin, "skills"),
+    "cursor-escaping-marketplace-review",
+  );
+  await mkdir(path.join(escapingMarketplacePlugin, ".cursor-plugin"), { recursive: true });
+  const outsideMarketplaceManifest = path.join(root, "outside-marketplace.json");
+  await writeFile(
+    outsideMarketplaceManifest,
+    JSON.stringify({ name: "outside-marketplace", plugins: [] }),
+  );
+  await symlink(
+    outsideMarketplaceManifest,
+    path.join(escapingMarketplacePlugin, ".cursor-plugin", "marketplace.json"),
+    "file",
+  );
+  await writeFile(
+    path.join(escapingMarketplacePlugin, "plugin.json"),
+    JSON.stringify({ name: "escaping-marketplace-plugin" }),
+  );
+
+  const escapingSkillsRootPlugin = path.join(localRoot, "escaping-skills-root-plugin");
+  await mkdir(escapingSkillsRootPlugin, { recursive: true });
+  await writeFile(
+    path.join(escapingSkillsRootPlugin, "SKILL.md"),
+    "---\nname: cursor-root-after-escape\ndescription: Fixture\n---\nUse this skill.\n",
+  );
+  const outsideSkillsRoot = path.join(root, "outside-skills-root");
+  await mkdir(outsideSkillsRoot, { recursive: true });
+  await symlink(
+    outsideSkillsRoot,
+    path.join(escapingSkillsRootPlugin, "skills"),
+    "dir",
+  );
+  await writeFile(
+    path.join(escapingSkillsRootPlugin, "plugin.json"),
+    JSON.stringify({ name: "escaping-skills-root-plugin" }),
+  );
+
   const defaultEscapingPlugin = path.join(localRoot, "default-escaping-plugin");
   const defaultOutsideSkill = await writeSkill(
     root,
@@ -575,6 +614,20 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
       code === "PLUGIN_ROOT_ESCAPE"
       && diagnosticPath === path.join(defaultEscapingPlugin, "skills", "linked"),
   ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_METADATA_ESCAPE"
+      && diagnosticPath === path.join(
+        escapingMarketplacePlugin,
+        ".cursor-plugin",
+        "marketplace.json",
+      ),
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_ROOT_ESCAPE"
+      && diagnosticPath === path.join(escapingSkillsRootPlugin, "skills"),
+  ));
 
   const escapedMarketplacePath = path.join(
     home,
@@ -597,6 +650,14 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   });
   assert.equal(inventory.groups.some(({ name }) => name === "empty-fallback-review"), false);
   assert.equal(inventory.groups.some(({ name }) => name === "invalid-fallback-review"), false);
+  assert.equal(
+    inventory.groups.some(({ name }) => name === "cursor-escaping-marketplace-review"),
+    true,
+  );
+  assert.equal(
+    inventory.groups.some(({ name }) => name === "cursor-root-after-escape"),
+    true,
+  );
 });
 
 test("Gemini CLI discovers configured user and bounded workspace extensions", async () => {
