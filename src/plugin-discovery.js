@@ -32,6 +32,7 @@ const GEMINI_MANIFEST_POLICY = Object.freeze({
   requiredFields: GEMINI_REQUIRED_MANIFEST_FIELDS,
   installationFile: GEMINI_INSTALL_METADATA_FILE,
   nameMatchesDirectory: true,
+  skipInvalidManifest: true,
 });
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
@@ -461,6 +462,7 @@ async function addPluginInstall({
     requiredFields: requiredManifestFields = [],
     installationFile: installationMetadataFile,
     nameMatchesDirectory = false,
+    skipInvalidManifest = false,
   } = manifestPolicy;
   const initialMetadata = metadataFor({
     host,
@@ -482,8 +484,10 @@ async function addPluginInstall({
     description: manifestDescription,
   });
   const manifestValue = manifest?.value;
+  let invalidManifest = false;
   if (requiredManifestFields.length > 0) {
     if (!manifest) {
+      invalidManifest = true;
       context.diagnostics.push(
         diagnostic({
           host,
@@ -496,6 +500,7 @@ async function addPluginInstall({
     } else {
       for (const field of requiredManifestFields) {
         if (stringValue(manifestValue[field])) continue;
+        invalidManifest = true;
         context.diagnostics.push(
           diagnostic({
             host,
@@ -514,6 +519,7 @@ async function addPluginInstall({
     && stringValue(manifestValue.name)
     && stringValue(manifestValue.name) !== path.basename(safeInstallRoot)
   ) {
+    invalidManifest = true;
     context.diagnostics.push(
       diagnostic({
         host,
@@ -550,6 +556,7 @@ async function addPluginInstall({
       }),
     );
   }
+  // Local/link sources identify an external origin; discovery never traverses or writes them.
   const metadata = metadataFor({
     host,
     marketplace: declaration.marketplace ?? manifestValue?.marketplace ?? marketplace,
@@ -582,6 +589,10 @@ async function addPluginInstall({
         metadata,
       }),
     );
+  }
+  if (skipInvalidManifest && invalidManifest) {
+    // Gemini CLI skips extensions it cannot load; retain diagnostics without exposing their skills.
+    return;
   }
   const directories = [
     ...(includeDefaultSkillDirectory ? [defaultSkillDirectory] : []),

@@ -282,6 +282,7 @@ test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plug
     path.join(gemini, "gemini-extension.json"),
     JSON.stringify({
       name: "gemini-plugin",
+      version: "1.0.0",
       repository: "https://github.com/example/gemini-plugin",
     }),
   );
@@ -436,6 +437,7 @@ test("Gemini extension diagnostics isolate malformed metadata and escaping skill
   });
 
   assert.equal(result.groups[0].name, "valid-gemini-review");
+  assert.equal(result.groups.some(({ name }) => name === "malformed-gemini-review"), false);
   assert.ok(result.pluginDiagnostics.some(
     ({ code, path: diagnosticPath }) =>
       code === "MALFORMED_PLUGIN_METADATA" && diagnosticPath === malformedManifest,
@@ -494,6 +496,7 @@ test("Gemini validates metadata containment, required fields, and install proven
   assert.deepEqual(result.groups[0].provenance, [
     "repository:https://github.com/example/installed-extension",
   ]);
+  assert.equal(result.groups.some(({ name }) => name === "invalid-gemini-review"), false);
   assert.ok(result.pluginDiagnostics.some(
     ({ code, path: diagnosticPath }) =>
       code === "PLUGIN_METADATA_ESCAPE" && diagnosticPath === escapedManifest,
