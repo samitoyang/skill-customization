@@ -619,6 +619,39 @@ test("CLI discovery finds Gemini skills from the configured CLI home", async () 
   ]);
 });
 
+test("CLI discovery finds Cursor local plugin skills with manifest provenance", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cli-cursor-local-plugin-"));
+  const home = path.join(root, "home");
+  const plugin = path.join(home, ".cursor", "plugins", "local", "cli-plugin");
+  const skill = await writeSkill(plugin, "custom", "cli-cursor-review");
+  await mkdir(path.join(plugin, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(plugin, ".cursor-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "cli-plugin",
+      skills: "custom",
+      repository: "https://github.com/example/cli-plugin",
+    }),
+  );
+
+  const result = await run(["discover", "cli-cursor-review"], {
+    env: {
+      ...process.env,
+      HOME: home,
+      CURSOR_HOME: path.join(home, ".cursor"),
+      PATH: "",
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  const discovery = JSON.parse(result.stdout);
+  assert.equal(discovery.groups[0].copies[0].path, skill);
+  assert.equal(discovery.groups[0].copies[0].owner, "plugin:cursor");
+  assert.deepEqual(discovery.groups[0].provenance, [
+    "repository:https://github.com/example/cli-plugin",
+  ]);
+});
+
 test("CLI discovery finds Codex personal marketplace skills with plugin provenance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cli-codex-marketplace-"));
   const home = path.join(root, "home");

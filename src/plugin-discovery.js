@@ -34,6 +34,11 @@ const GEMINI_MANIFEST_POLICY = Object.freeze({
   nameMatchesDirectory: true,
   skipInvalidExtension: true,
 });
+const CURSOR_MANIFEST_POLICY = Object.freeze({
+  files: [".cursor-plugin/plugin.json", "plugin.json"],
+  description: "Cursor plugin metadata",
+  requiredFields: ["name"],
+});
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
   "skillDirectories",
@@ -1163,7 +1168,7 @@ async function discoverDirectExtensionRoots({
     context,
     { host, source: "extension" },
   );
-  if (!safeRoot) return;
+  if (!safeRoot) return undefined;
   for (const extension of await pluginDirectories(
     safeRoot,
     context,
@@ -1179,6 +1184,43 @@ async function discoverDirectExtensionRoots({
       source: {},
       context,
       ...(manifestPolicy ? { manifestPolicy } : {}),
+    });
+  }
+  return safeRoot;
+}
+
+async function discoverCursorLocalMarketplaces({
+  root,
+  boundary,
+  context,
+  host,
+  scope,
+  marketplaceName,
+  manifestPolicy,
+}) {
+  if (!root) return;
+  await discoverMarketplaceManifests({
+    base: root,
+    boundary,
+    context,
+    host,
+    scope,
+    marketplaceName,
+    manifestPolicy,
+  });
+  // A local plugin directory may itself be a documented multi-plugin repository.
+  for (const entry of await directoryEntries(root, context, { host, source: "marketplace" })) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    const entryPath = path.join(root, entry.name);
+    if (!(await canonicalContained(entryPath, root))) continue;
+    await discoverMarketplaceManifests({
+      base: entryPath,
+      boundary: root,
+      context,
+      host,
+      scope,
+      marketplaceName: entry.name,
+      manifestPolicy,
     });
   }
 }
@@ -1214,37 +1256,41 @@ async function discoverCursor(context) {
     stringValue(env.CURSOR_HOME) ?? path.join(home, ".cursor"),
   );
   const globalRoot = path.join(cursorHome, "plugins", "local");
-  await discoverDirectExtensionRoots({
+  const safeGlobalRoot = await discoverDirectExtensionRoots({
     root: globalRoot,
     boundary: cursorHome,
     host: "cursor",
     scope: "global",
     context,
+    manifestPolicy: CURSOR_MANIFEST_POLICY,
   });
-  await discoverMarketplaceManifests({
-    base: globalRoot,
+  await discoverCursorLocalMarketplaces({
+    root: safeGlobalRoot,
     boundary: cursorHome,
     context,
     host: "cursor",
     scope: "global",
     marketplaceName: "local",
+    manifestPolicy: CURSOR_MANIFEST_POLICY,
   });
   for (const workspace of context.workspaceDirectories) {
     const workspaceRoot = path.join(workspace, ".cursor", "plugins", "local");
-    await discoverDirectExtensionRoots({
+    const safeWorkspaceRoot = await discoverDirectExtensionRoots({
       root: workspaceRoot,
       boundary: workspace,
       host: "cursor",
       scope: "workspace",
       context,
+      manifestPolicy: CURSOR_MANIFEST_POLICY,
     });
-    await discoverMarketplaceManifests({
-      base: workspaceRoot,
+    await discoverCursorLocalMarketplaces({
+      root: safeWorkspaceRoot,
       boundary: workspace,
       context,
       host: "cursor",
       scope: "workspace",
       marketplaceName: "local",
+      manifestPolicy: CURSOR_MANIFEST_POLICY,
     });
   }
 }
@@ -1263,17 +1309,28 @@ function marketplaceSourceBase(file, safeBase) {
   return safeBase;
 }
 
-function marketplacePluginPath(configuredPath, file, safeBase) {
+function marketplacePluginPath(configuredPath, file, safeBase, pluginRoot) {
   if (path.isAbsolute(configuredPath)) return configuredPath;
   const sourceBase = marketplaceSourceBase(file, safeBase);
+  const hasDeclaredRoot = Boolean(stringValue(pluginRoot));
+  const declaredRoot = hasDeclaredRoot
+    ? path.resolve(sourceBase, pluginRoot)
+    : sourceBase;
   const normalized = configuredPath.replaceAll("\\", "/");
-  const usesMarketplaceRoot = sourceBase !== safeBase && (
+  const usesMarketplaceRoot = !hasDeclaredRoot && sourceBase !== safeBase && (
     normalized === "."
     || normalized === "./"
     || normalized === "./plugins"
     || normalized.startsWith("./plugins/")
   );
-  return path.resolve(usesMarketplaceRoot ? sourceBase : safeBase, configuredPath);
+  return path.resolve(
+    hasDeclaredRoot
+      ? declaredRoot
+      : usesMarketplaceRoot
+        ? sourceBase
+        : safeBase,
+    configuredPath,
+  );
 }
 
 async function readMarketplaceManifest(file, context, host, boundary) {
@@ -1291,6 +1348,7 @@ async function discoverMarketplaceManifests({
   host,
   scope,
   marketplaceName,
+  manifestPolicy,
 }) {
   const safeBase = await safeDirectory(
     base,
@@ -1310,6 +1368,22 @@ async function discoverMarketplaceManifests({
     const manifest = await readMarketplaceManifest(file, context, host, safeBase);
     if (!manifest) continue;
     const marketplace = stringValue(manifest.name) ?? marketplaceName ?? path.basename(safeBase);
+    const pluginRoot = host === "cursor" ? manifest.metadata?.pluginRoot : undefined;
+    if (
+      host === "cursor"
+      && Object.hasOwn(manifest.metadata ?? {}, "pluginRoot")
+      && !stringValue(pluginRoot)
+    ) {
+      context.diagnostics.push(
+        diagnostic({
+          host,
+          path: file,
+          code: "PLUGIN_MARKETPLACE_INVALID_ROOT",
+          message: `marketplace pluginRoot must be a non-empty string: ${file}`,
+          metadata: { host, marketplace },
+        }),
+      );
+    }
     const entriesField = ["plugins", "extensions", "entries"].find((field) =>
       Object.hasOwn(manifest, field),
     );
@@ -1384,7 +1458,7 @@ async function discoverMarketplaceManifests({
         continue;
       }
       await addPluginInstall({
-        installRoot: marketplacePluginPath(configuredPath, file, safeBase),
+        installRoot: marketplacePluginPath(configuredPath, file, safeBase, pluginRoot),
         boundary: boundary ?? safeBase,
         host,
         marketplace,
@@ -1398,6 +1472,7 @@ async function discoverMarketplaceManifests({
           marketplace,
         },
         context,
+        ...(manifestPolicy ? { manifestPolicy } : {}),
       });
     }
   }

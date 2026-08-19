@@ -328,6 +328,124 @@ test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plug
   ]);
 });
 
+test("Cursor local plugins honor documented manifests and marketplace roots", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-local-"));
+  const home = path.join(root, "home");
+  const localRoot = path.join(home, ".cursor", "plugins", "local");
+  const agentPlugin = path.join(localRoot, "agent-plugin");
+  const agentSkill = await writeSkill(agentPlugin, "prompts", "cursor-agent-review");
+  await writeFile(
+    path.join(agentPlugin, "plugin.json"),
+    JSON.stringify({
+      name: "agent-plugin",
+      skills: "prompts",
+      repository: "https://github.com/example/agent-plugin",
+    }),
+  );
+
+  const marketplaceRoot = path.join(localRoot, "team-marketplace");
+  const marketplacePlugin = path.join(marketplaceRoot, "plugins", "market-plugin");
+  const marketplaceSkill = await writeSkill(
+    marketplacePlugin,
+    "custom-skills",
+    "cursor-market-review",
+  );
+  await mkdir(path.join(marketplaceRoot, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(marketplaceRoot, ".cursor-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "team-marketplace",
+      metadata: { pluginRoot: "plugins" },
+      plugins: [{ name: "market-plugin", source: "market-plugin" }],
+    }),
+  );
+  await mkdir(path.join(marketplacePlugin, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(marketplacePlugin, ".cursor-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "market-plugin",
+      skills: "custom-skills",
+      repository: "https://github.com/example/market-plugin",
+    }),
+  );
+
+  const result = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  const byName = new Map(result.groups.map((group) => [group.name, group]));
+  assert.equal(byName.get("cursor-agent-review").copies[0].path, agentSkill);
+  assert.deepEqual(byName.get("cursor-agent-review").provenance, [
+    "repository:https://github.com/example/agent-plugin",
+  ]);
+  assert.equal(byName.get("cursor-market-review").copies[0].path, marketplaceSkill);
+  assert.deepEqual(byName.get("cursor-market-review").provenance, [
+    "repository:https://github.com/example/market-plugin",
+  ]);
+});
+
+test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-diagnostics-"));
+  const home = path.join(root, "home");
+  const localRoot = path.join(home, ".cursor", "plugins", "local");
+  const validPlugin = path.join(localRoot, "valid-plugin");
+  const validSkill = await writeSkill(path.join(validPlugin, "safe"), "valid-review");
+  const outsideSkill = path.join(root, "outside-skill");
+  await writeSkill(outsideSkill, "escaped-declared-review");
+  await symlink(outsideSkill, path.join(validPlugin, "linked"), "dir");
+  await mkdir(path.join(validPlugin, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(validPlugin, ".cursor-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "valid-plugin",
+      skills: ["safe", 42, "../outside-skill", "linked"],
+    }),
+  );
+
+  const malformedPlugin = path.join(localRoot, "malformed-plugin");
+  await writeSkill(path.join(malformedPlugin, "skills"), "malformed-review");
+  await mkdir(path.join(malformedPlugin, ".cursor-plugin"), { recursive: true });
+  await writeFile(path.join(malformedPlugin, ".cursor-plugin", "plugin.json"), "{broken\n");
+
+  const invalidPlugin = path.join(localRoot, "invalid-plugin");
+  await writeSkill(path.join(invalidPlugin, "skills"), "invalid-review");
+  await writeFile(
+    path.join(invalidPlugin, "plugin.json"),
+    JSON.stringify({ name: 42 }),
+  );
+
+  const outside = path.join(root, "outside");
+  await writeSkill(outside, "escaped-review");
+  await symlink(outside, path.join(localRoot, "escaped-plugin"), "dir");
+
+  const invalidMarketplace = path.join(localRoot, "invalid-marketplace");
+  await mkdir(path.join(invalidMarketplace, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(invalidMarketplace, ".cursor-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "invalid-marketplace",
+      metadata: { pluginRoot: "../outside-marketplace" },
+      plugins: [{ name: "escaped-market", source: "plugin" }],
+    }),
+  );
+
+  const result = await discoverSkills({
+    input: "valid-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  assert.equal(result.groups[0].copies[0].path, validSkill);
+  assert.ok(result.pluginDiagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_METADATA"));
+  assert.ok(result.pluginDiagnostics.some(({ code }) => code === "INVALID_PLUGIN_METADATA"));
+  assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
+  assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_SKILL_DIRECTORY_INVALID"));
+  assert.equal(result.groups.some(({ name }) => name === "escaped-review"), false);
+});
+
 test("Gemini CLI discovers configured user and bounded workspace extensions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-gemini-configured-"));
   const fallbackHome = path.join(root, "fallback-home");
