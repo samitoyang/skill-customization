@@ -480,7 +480,7 @@ test("Gemini validates metadata containment, required fields, and install proven
   const invalidManifest = path.join(invalidExtension, "gemini-extension.json");
   await writeFile(
     invalidManifest,
-    JSON.stringify({ name: "invalid-extension", skills: 42 }),
+    JSON.stringify({ name: "different-extension", version: "1.0.0", skills: 42 }),
   );
 
   const result = await discoverSkills({
@@ -501,6 +501,12 @@ test("Gemini validates metadata containment, required fields, and install proven
   assert.ok(result.pluginDiagnostics.some(
     ({ code, path: diagnosticPath }) =>
       code === "INVALID_PLUGIN_METADATA" && diagnosticPath === invalidManifest,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath, message }) =>
+      code === "INVALID_PLUGIN_METADATA"
+      && diagnosticPath === invalidManifest
+      && message.includes("must match its extension directory"),
   ));
   assert.ok(result.pluginDiagnostics.some(
     ({ code, path: diagnosticPath }) =>

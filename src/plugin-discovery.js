@@ -26,6 +26,13 @@ const MANIFEST_FILES = [
 const GEMINI_MANIFEST_FILES = ["gemini-extension.json"];
 const GEMINI_INSTALL_METADATA_FILE = ".gemini-extension-install.json";
 const GEMINI_REQUIRED_MANIFEST_FIELDS = ["name", "version"];
+const GEMINI_MANIFEST_POLICY = Object.freeze({
+  files: GEMINI_MANIFEST_FILES,
+  description: "Gemini extension metadata",
+  requiredFields: GEMINI_REQUIRED_MANIFEST_FIELDS,
+  installationFile: GEMINI_INSTALL_METADATA_FILE,
+  nameMatchesDirectory: true,
+});
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
   "skillDirectories",
@@ -446,11 +453,15 @@ async function addPluginInstall({
   context,
   defaultSkillDirectory = "skills",
   includeDefaultSkillDirectory = true,
-  manifestFiles = MANIFEST_FILES,
-  manifestDescription = "plugin metadata",
-  requiredManifestFields = [],
-  installationMetadataFile,
+  manifestPolicy = {},
 }) {
+  const {
+    files: manifestFiles = MANIFEST_FILES,
+    description: manifestDescription = "plugin metadata",
+    requiredFields: requiredManifestFields = [],
+    installationFile: installationMetadataFile,
+    nameMatchesDirectory = false,
+  } = manifestPolicy;
   const initialMetadata = metadataFor({
     host,
     marketplace,
@@ -496,6 +507,22 @@ async function addPluginInstall({
         );
       }
     }
+  }
+  if (
+    nameMatchesDirectory
+    && manifest
+    && stringValue(manifestValue.name)
+    && stringValue(manifestValue.name) !== path.basename(safeInstallRoot)
+  ) {
+    context.diagnostics.push(
+      diagnostic({
+        host,
+        path: manifest.path,
+        code: "INVALID_PLUGIN_METADATA",
+        message: `Gemini extension name must match its extension directory: ${manifest.path}`,
+        metadata: initialMetadata,
+      }),
+    );
   }
   const installationMetadata = installationMetadataFile
     ? await readJsonObject(path.join(safeInstallRoot, installationMetadataFile), context, {
@@ -1104,10 +1131,7 @@ async function discoverDirectExtensionRoots({
   scope,
   context,
   marketplace = "local",
-  manifestFiles,
-  manifestDescription,
-  requiredManifestFields,
-  installationMetadataFile,
+  manifestPolicy,
 }) {
   const safeRoot = await safeDirectory(
     root,
@@ -1130,10 +1154,7 @@ async function discoverDirectExtensionRoots({
       scope,
       source: {},
       context,
-      ...(manifestFiles ? { manifestFiles } : {}),
-      ...(manifestDescription ? { manifestDescription } : {}),
-      ...(requiredManifestFields ? { requiredManifestFields } : {}),
-      ...(installationMetadataFile ? { installationMetadataFile } : {}),
+      ...(manifestPolicy ? { manifestPolicy } : {}),
     });
   }
 }
@@ -1149,10 +1170,7 @@ async function discoverGemini(context) {
     host: "gemini-cli",
     scope: "global",
     context,
-    manifestFiles: GEMINI_MANIFEST_FILES,
-    manifestDescription: "Gemini extension metadata",
-    requiredManifestFields: GEMINI_REQUIRED_MANIFEST_FIELDS,
-    installationMetadataFile: GEMINI_INSTALL_METADATA_FILE,
+    manifestPolicy: GEMINI_MANIFEST_POLICY,
   });
   for (const workspace of context.workspaceDirectories) {
     await discoverDirectExtensionRoots({
@@ -1161,10 +1179,7 @@ async function discoverGemini(context) {
       host: "gemini-cli",
       scope: "workspace",
       context,
-      manifestFiles: GEMINI_MANIFEST_FILES,
-      manifestDescription: "Gemini extension metadata",
-      requiredManifestFields: GEMINI_REQUIRED_MANIFEST_FIELDS,
-      installationMetadataFile: GEMINI_INSTALL_METADATA_FILE,
+      manifestPolicy: GEMINI_MANIFEST_POLICY,
     });
   }
 }
