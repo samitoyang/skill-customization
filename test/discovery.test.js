@@ -365,6 +365,26 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     JSON.stringify({ name: "root-skill-plugin" }),
   );
 
+  const nestedMarketplaceRoot = path.join(localRoot, "nested-marketplace");
+  const nestedMarketplacePlugin = path.join(nestedMarketplaceRoot, "nested-plugin");
+  const nestedMarketplaceSkill = await writeSkill(
+    path.join(nestedMarketplacePlugin, "skills"),
+    "cursor-nested-review",
+  );
+  await mkdir(path.join(nestedMarketplaceRoot, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(nestedMarketplaceRoot, ".cursor-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "nested-marketplace",
+      plugins: [{ name: "nested-entry", source: "nested-plugin" }],
+    }),
+  );
+  await mkdir(path.join(nestedMarketplacePlugin, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(nestedMarketplacePlugin, ".cursor-plugin", "plugin.json"),
+    JSON.stringify({ name: "nested-plugin" }),
+  );
+
   const defaultRootSkillPlugin = path.join(localRoot, "default-root-skill-plugin");
   await mkdir(path.join(defaultRootSkillPlugin, "skills"), { recursive: true });
   await writeFile(
@@ -429,6 +449,7 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
   ]);
   assert.equal(byName.has("cursor-fallback-review"), false);
   assert.equal(byName.get("cursor-root-review").copies[0].path, rootSkillPlugin);
+  assert.equal(byName.get("cursor-nested-review").copies[0].path, nestedMarketplaceSkill);
   assert.equal(byName.get("cursor-market-review").copies[0].path, marketplaceSkill);
   assert.deepEqual(byName.get("cursor-market-review").copies[0].pluginMetadata, {
     host: "cursor",

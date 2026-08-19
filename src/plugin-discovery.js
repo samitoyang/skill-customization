@@ -804,6 +804,60 @@ async function pluginDirectories(root, context, metadata, filter = () => true) {
   return result;
 }
 
+async function hasCursorMarketplaceManifest(root) {
+  try {
+    const info = await lstat(path.join(root, ".cursor-plugin", "marketplace.json"));
+    return info.isFile() || info.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+async function discoverCursorLocalPluginRoots({
+  root,
+  boundary = root,
+  scope,
+  context,
+}) {
+  const safeRoot = await safeDirectory(
+    root,
+    boundary,
+    context,
+    { host: "cursor", source: "extension" },
+  );
+  if (!safeRoot) return;
+  for (const extension of await pluginDirectories(
+    safeRoot,
+    context,
+    { host: "cursor", source: "extension" },
+  )) {
+    if (await hasCursorMarketplaceManifest(extension.path)) {
+      // A direct child can itself be a documented multi-plugin repository.
+      await discoverMarketplaceManifests({
+        base: extension.path,
+        boundary: safeRoot,
+        context,
+        host: "cursor",
+        scope,
+        marketplaceName: "local",
+        manifestPolicy: CURSOR_MANIFEST_POLICY,
+      });
+      continue;
+    }
+    await addPluginInstall({
+      installRoot: extension.path,
+      boundary: safeRoot,
+      host: "cursor",
+      marketplace: "local",
+      name: extension.entry.name,
+      scope,
+      source: {},
+      context,
+      manifestPolicy: CURSOR_MANIFEST_POLICY,
+    });
+  }
+}
+
 async function discoverVersionedPluginCache({
   cacheRoot,
   boundary,
@@ -1315,13 +1369,11 @@ async function discoverCursor(context) {
     stringValue(env.CURSOR_HOME) ?? path.join(home, ".cursor"),
   );
   const globalRoot = path.join(cursorHome, "plugins", "local");
-  await discoverDirectExtensionRoots({
+  await discoverCursorLocalPluginRoots({
     root: globalRoot,
     boundary: cursorHome,
-    host: "cursor",
     scope: "global",
     context,
-    manifestPolicy: CURSOR_MANIFEST_POLICY,
   });
   await discoverMarketplaceManifests({
     base: globalRoot,
@@ -1334,13 +1386,11 @@ async function discoverCursor(context) {
   });
   for (const workspace of context.workspaceDirectories) {
     const workspaceRoot = path.join(workspace, ".cursor", "plugins", "local");
-    await discoverDirectExtensionRoots({
+    await discoverCursorLocalPluginRoots({
       root: workspaceRoot,
       boundary: workspace,
-      host: "cursor",
       scope: "workspace",
       context,
-      manifestPolicy: CURSOR_MANIFEST_POLICY,
     });
     await discoverMarketplaceManifests({
       base: workspaceRoot,
