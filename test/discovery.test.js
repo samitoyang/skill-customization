@@ -289,9 +289,19 @@ test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plug
 
   const cursor = path.join(home, ".cursor", "plugins", "local", "cursor-plugin");
   await writeSkill(path.join(cursor, "skills"), "cursor-review");
+  await mkdir(path.join(cursor, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(cursor, ".cursor-plugin", "plugin.json"),
+    JSON.stringify({ name: "cursor-plugin" }),
+  );
   const cursorLocal = path.join(home, ".cursor", "plugins", "local");
   const declaredCursor = path.join(cursorLocal, "declared-plugin");
   await writeSkill(path.join(declaredCursor, "custom"), "cursor-manifest-review");
+  await mkdir(path.join(declaredCursor, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(declaredCursor, ".cursor-plugin", "plugin.json"),
+    JSON.stringify({ name: "declared-plugin" }),
+  );
   await writeFile(
     path.join(cursorLocal, "marketplace.json"),
     JSON.stringify({
@@ -334,6 +344,7 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
   const localRoot = path.join(home, ".cursor", "plugins", "local");
   const agentPlugin = path.join(localRoot, "agent-plugin");
   const agentSkill = await writeSkill(agentPlugin, "prompts", "cursor-agent-review");
+  await writeSkill(agentPlugin, "skills", "cursor-fallback-review");
   await writeFile(
     path.join(agentPlugin, "plugin.json"),
     JSON.stringify({
@@ -343,7 +354,7 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     }),
   );
 
-  const marketplaceRoot = path.join(localRoot, "team-marketplace");
+  const marketplaceRoot = localRoot;
   const marketplacePlugin = path.join(marketplaceRoot, "plugins", "market-plugin");
   const marketplaceSkill = await writeSkill(
     marketplacePlugin,
@@ -380,6 +391,7 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
   assert.deepEqual(byName.get("cursor-agent-review").provenance, [
     "repository:https://github.com/example/agent-plugin",
   ]);
+  assert.equal(byName.has("cursor-fallback-review"), false);
   assert.equal(byName.get("cursor-market-review").copies[0].path, marketplaceSkill);
   assert.deepEqual(byName.get("cursor-market-review").provenance, [
     "repository:https://github.com/example/market-plugin",
@@ -420,10 +432,9 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   await writeSkill(outside, "escaped-review");
   await symlink(outside, path.join(localRoot, "escaped-plugin"), "dir");
 
-  const invalidMarketplace = path.join(localRoot, "invalid-marketplace");
-  await mkdir(path.join(invalidMarketplace, ".cursor-plugin"), { recursive: true });
+  await mkdir(path.join(localRoot, ".cursor-plugin"), { recursive: true });
   await writeFile(
-    path.join(invalidMarketplace, ".cursor-plugin", "marketplace.json"),
+    path.join(localRoot, ".cursor-plugin", "marketplace.json"),
     JSON.stringify({
       name: "invalid-marketplace",
       metadata: { pluginRoot: "../outside-marketplace" },

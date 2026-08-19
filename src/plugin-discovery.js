@@ -38,6 +38,8 @@ const CURSOR_MANIFEST_POLICY = Object.freeze({
   files: [".cursor-plugin/plugin.json", "plugin.json"],
   description: "Cursor plugin metadata",
   requiredFields: ["name"],
+  skipInvalidExtension: true,
+  declaredSkillDirectoriesReplaceDefault: true,
 });
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
@@ -474,6 +476,7 @@ async function addPluginInstall({
     installationFile: installationMetadataFile,
     nameMatchesDirectory = false,
     skipInvalidExtension = false,
+    declaredSkillDirectoriesReplaceDefault = false,
   } = manifestPolicy;
   const initialMetadata = metadataFor({
     host,
@@ -609,12 +612,16 @@ async function addPluginInstall({
     skipInvalidExtension
     && invalidManifest
   ) {
-    // Gemini CLI skips extensions it cannot load; retain diagnostics without exposing their skills.
+    // Hosts that reject invalid plugin metadata retain diagnostics without exposing its skills.
     return;
   }
+  const declaredDirectories = unique(declaredSkillDirectories(manifestValue, declaration));
   const directories = [
-    ...(includeDefaultSkillDirectory ? [defaultSkillDirectory] : []),
-    ...declaredSkillDirectories(manifestValue, declaration),
+    ...(includeDefaultSkillDirectory
+      && (!declaredSkillDirectoriesReplaceDefault || declaredDirectories.length === 0)
+      ? [defaultSkillDirectory]
+      : []),
+    ...declaredDirectories,
   ];
   for (const relativeDirectory of unique(directories)) {
     const value = stringValue(relativeDirectory);
@@ -1168,7 +1175,7 @@ async function discoverDirectExtensionRoots({
     context,
     { host, source: "extension" },
   );
-  if (!safeRoot) return undefined;
+  if (!safeRoot) return;
   for (const extension of await pluginDirectories(
     safeRoot,
     context,
@@ -1184,43 +1191,6 @@ async function discoverDirectExtensionRoots({
       source: {},
       context,
       ...(manifestPolicy ? { manifestPolicy } : {}),
-    });
-  }
-  return safeRoot;
-}
-
-async function discoverCursorLocalMarketplaces({
-  root,
-  boundary,
-  context,
-  host,
-  scope,
-  marketplaceName,
-  manifestPolicy,
-}) {
-  if (!root) return;
-  await discoverMarketplaceManifests({
-    base: root,
-    boundary,
-    context,
-    host,
-    scope,
-    marketplaceName,
-    manifestPolicy,
-  });
-  // A local plugin directory may itself be a documented multi-plugin repository.
-  for (const entry of await directoryEntries(root, context, { host, source: "marketplace" })) {
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    const entryPath = path.join(root, entry.name);
-    if (!(await canonicalContained(entryPath, root))) continue;
-    await discoverMarketplaceManifests({
-      base: entryPath,
-      boundary: root,
-      context,
-      host,
-      scope,
-      marketplaceName: entry.name,
-      manifestPolicy,
     });
   }
 }
@@ -1256,7 +1226,7 @@ async function discoverCursor(context) {
     stringValue(env.CURSOR_HOME) ?? path.join(home, ".cursor"),
   );
   const globalRoot = path.join(cursorHome, "plugins", "local");
-  const safeGlobalRoot = await discoverDirectExtensionRoots({
+  await discoverDirectExtensionRoots({
     root: globalRoot,
     boundary: cursorHome,
     host: "cursor",
@@ -1264,8 +1234,8 @@ async function discoverCursor(context) {
     context,
     manifestPolicy: CURSOR_MANIFEST_POLICY,
   });
-  await discoverCursorLocalMarketplaces({
-    root: safeGlobalRoot,
+  await discoverMarketplaceManifests({
+    base: globalRoot,
     boundary: cursorHome,
     context,
     host: "cursor",
@@ -1275,7 +1245,7 @@ async function discoverCursor(context) {
   });
   for (const workspace of context.workspaceDirectories) {
     const workspaceRoot = path.join(workspace, ".cursor", "plugins", "local");
-    const safeWorkspaceRoot = await discoverDirectExtensionRoots({
+    await discoverDirectExtensionRoots({
       root: workspaceRoot,
       boundary: workspace,
       host: "cursor",
@@ -1283,8 +1253,8 @@ async function discoverCursor(context) {
       context,
       manifestPolicy: CURSOR_MANIFEST_POLICY,
     });
-    await discoverCursorLocalMarketplaces({
-      root: safeWorkspaceRoot,
+    await discoverMarketplaceManifests({
+      base: workspaceRoot,
       boundary: workspace,
       context,
       host: "cursor",
