@@ -484,7 +484,24 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   await writeSkill(path.join(invalidNamePlugin, "skills"), "invalid-name-review");
   await writeFile(
     path.join(invalidNamePlugin, "plugin.json"),
-    JSON.stringify({ name: "Invalid Plugin" }),
+    JSON.stringify({ name: " invalid-name-plugin " }),
+  );
+
+  const defaultEscapingPlugin = path.join(localRoot, "default-escaping-plugin");
+  const defaultOutsideSkill = await writeSkill(
+    root,
+    "default-outside-skill",
+    "default-escaped-review",
+  );
+  await mkdir(path.join(defaultEscapingPlugin, "skills"), { recursive: true });
+  await symlink(
+    defaultOutsideSkill,
+    path.join(defaultEscapingPlugin, "skills", "linked"),
+    "dir",
+  );
+  await writeFile(
+    path.join(defaultEscapingPlugin, "plugin.json"),
+    JSON.stringify({ name: "default-escaping-plugin" }),
   );
 
   const emptySkillsPlugin = path.join(localRoot, "empty-skills-plugin");
@@ -531,6 +548,12 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_SKILL_DIRECTORY_INVALID"));
   assert.equal(result.groups.some(({ name }) => name === "escaped-review"), false);
+  assert.equal(result.groups.some(({ name }) => name === "default-escaped-review"), false);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_ROOT_ESCAPE"
+      && diagnosticPath === path.join(defaultEscapingPlugin, "skills", "linked"),
+  ));
 
   const escapedMarketplacePath = path.join(
     home,

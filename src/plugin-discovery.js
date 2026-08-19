@@ -563,8 +563,8 @@ async function addPluginInstall({
   if (
     manifestNamePattern
     && manifest
-    && stringValue(manifestValue.name)
-    && !manifestNamePattern.test(stringValue(manifestValue.name))
+    && typeof manifestValue.name === "string"
+    && !manifestNamePattern.test(manifestValue.name)
   ) {
     invalidManifest = true;
     context.diagnostics.push(

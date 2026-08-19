@@ -49,6 +49,11 @@ function root(pathname, owner, scope, origin = owner, metadata = {}) {
   };
 }
 
+function containsPath(rootPath, targetPath) {
+  const relative = path.relative(path.resolve(rootPath), path.resolve(targetPath));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 function uniqueRoots(roots) {
   const byPath = new Map();
   for (const item of roots) {
@@ -352,6 +357,24 @@ async function scanRoot(rootInfo) {
     };
   }
   const directories = [];
+  const diagnostics = [];
+  const canonicalPluginRoot = rootInfo.pluginRoot
+    ? await realpath(rootInfo.pluginRoot).catch(() => undefined)
+    : undefined;
+  const isContainedPluginDirectory = async (directory) => {
+    if (!canonicalPluginRoot || rootInfo.origin !== "plugin") return true;
+    const canonicalDirectory = await realpath(directory).catch(() => undefined);
+    if (!canonicalDirectory || containsPath(canonicalPluginRoot, canonicalDirectory)) return true;
+    diagnostics.push({
+      kind: "plugin",
+      host: rootInfo.host,
+      path: path.resolve(directory),
+      code: "PLUGIN_ROOT_ESCAPE",
+      message: `plugin skill directory resolves outside its plugin root: ${directory}`,
+      ...(rootInfo.plugin ? { plugin: structuredClone(rootInfo.plugin) } : {}),
+    });
+    return false;
+  };
   if (
     (rootInfo.singleSkill || rootInfo.includeRootSkill !== false)
     && await exists(path.join(rootInfo.path, "SKILL.md"))
@@ -360,7 +383,10 @@ async function scanRoot(rootInfo) {
     for (const entry of entries) {
       if (entry.isDirectory() || entry.isSymbolicLink()) {
         const directory = path.join(rootInfo.path, entry.name);
-        if (await exists(path.join(directory, "SKILL.md"))) directories.push(directory);
+        if (
+          await exists(path.join(directory, "SKILL.md"))
+          && await isContainedPluginDirectory(directory)
+        ) directories.push(directory);
       }
     }
   }
@@ -375,7 +401,7 @@ async function scanRoot(rootInfo) {
       result.status === "rejected"
         ? [{ directory: directories[index], error: result.reason }]
         : []),
-    diagnostics: [],
+    diagnostics,
   };
 }
 
