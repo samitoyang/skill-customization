@@ -984,9 +984,9 @@ async function discoverDirectExtensionRoots({
 
 async function discoverGemini(context) {
   const { home, env } = context;
-  const geminiHome = path.resolve(
-    stringValue(env.GEMINI_CLI_HOME) ?? path.join(home, ".gemini"),
-  );
+  // Gemini resolves GEMINI_CLI_HOME as a user-home override, then appends .gemini.
+  const geminiCliHome = path.resolve(stringValue(env.GEMINI_CLI_HOME) ?? home);
+  const geminiHome = path.join(geminiCliHome, ".gemini");
   await discoverDirectExtensionRoots({
     root: path.join(geminiHome, "extensions"),
     boundary: geminiHome,
@@ -994,6 +994,15 @@ async function discoverGemini(context) {
     scope: "global",
     context,
   });
+  for (const workspace of context.workspaceDirectories) {
+    await discoverDirectExtensionRoots({
+      root: path.join(workspace, ".gemini", "extensions"),
+      boundary: workspace,
+      host: "gemini-cli",
+      scope: "workspace",
+      context,
+    });
+  }
 }
 
 async function discoverCursor(context) {

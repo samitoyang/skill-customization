@@ -127,7 +127,7 @@ The [checkpointed agent registry](https://github.com/vercel-labs/skills/blob/305
 | Shared project | `.agents/skills` |
 | Host-specific project | `.claude/skills`, `.github/skills`, `.cursor/skills`, `.windsurf/skills` |
 | Personal | `~/.agents/skills`, `~/.claude/skills`, `$CODEX_HOME/skills` |
-| Plugin-backed | Claude `~/.claude/plugins/cache/.../skills`, Codex `$CODEX_HOME/plugins/cache/.../skills`, Gemini `~/.gemini/extensions/.../skills`, Cursor `~/.cursor/plugins/local/.../skills` |
+| Plugin-backed | Claude `~/.claude/plugins/cache/.../skills`, Codex `$CODEX_HOME/plugins/cache/.../skills`, Gemini `${GEMINI_CLI_HOME:-~}/.gemini/extensions/.../skills`, Cursor `~/.cursor/plugins/local/.../skills` |
 | Configured | Claude `additionalDirectories`, `COPILOT_SKILLS_DIRS`, manager-owned roots, explicit custom paths |
 
 Plugin discovery is manifest-aware and bounded to documented host paths. It includes Claude synced skills under `~/.claude/skills/synced` only when `CLAUDE_CODE_SYNC_SKILLS=1`; cache versions are provenance evidence rather than source identity, and plugin-only identities remain local.

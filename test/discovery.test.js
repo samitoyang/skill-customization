@@ -327,6 +327,125 @@ test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plug
   ]);
 });
 
+test("Gemini CLI discovers configured user and bounded workspace extensions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-gemini-configured-"));
+  const fallbackHome = path.join(root, "fallback-home");
+  const configuredHome = path.join(root, "configured-home");
+  const repository = path.join(root, "repository");
+  const nested = path.join(repository, "packages", "app");
+  await mkdir(path.join(repository, ".git"), { recursive: true });
+  await mkdir(nested, { recursive: true });
+
+  const globalExtension = path.join(
+    configuredHome,
+    ".gemini",
+    "extensions",
+    "global-extension",
+  );
+  const globalSkill = await writeSkill(
+    path.join(globalExtension, "skills"),
+    "configured-gemini-review",
+  );
+  await writeFile(
+    path.join(globalExtension, "gemini-extension.json"),
+    JSON.stringify({
+      name: "global-extension",
+      version: "1.0.0",
+      repository: "https://github.com/example/global-extension",
+    }),
+  );
+
+  const workspaceExtension = path.join(
+    repository,
+    ".gemini",
+    "extensions",
+    "workspace-extension",
+  );
+  const workspaceSkill = await writeSkill(
+    path.join(workspaceExtension, "skills"),
+    "workspace-gemini-review",
+  );
+  await writeFile(
+    path.join(workspaceExtension, "gemini-extension.json"),
+    JSON.stringify({
+      name: "workspace-extension",
+      version: "2.0.0",
+    }),
+  );
+
+  const options = {
+    home: fallbackHome,
+    cwd: nested,
+    env: { GEMINI_CLI_HOME: configuredHome },
+    managerRecords: [],
+  };
+  const global = await discoverSkills({
+    input: "configured-gemini-review",
+    ...options,
+  });
+  const workspace = await discoverSkills({
+    input: "workspace-gemini-review",
+    ...options,
+  });
+
+  assert.equal(global.groups[0].copies[0].path, globalSkill);
+  assert.equal(global.groups[0].copies[0].scope, "global");
+  assert.equal(global.groups[0].copies[0].plugin.host, "gemini-cli");
+  assert.deepEqual(global.groups[0].provenance, [
+    "repository:https://github.com/example/global-extension",
+  ]);
+  assert.equal(workspace.groups[0].copies[0].path, workspaceSkill);
+  assert.equal(workspace.groups[0].copies[0].scope, "workspace");
+  assert.equal(workspace.groups[0].copies[0].plugin.name, "workspace-extension");
+});
+
+test("Gemini extension diagnostics isolate malformed metadata and escaping skill roots", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-gemini-diagnostics-"));
+  const home = path.join(root, "home");
+  const extensions = path.join(home, ".gemini", "extensions");
+  const validExtension = path.join(extensions, "valid-extension");
+  await writeSkill(path.join(validExtension, "skills"), "valid-gemini-review");
+  await writeFile(
+    path.join(validExtension, "gemini-extension.json"),
+    JSON.stringify({ name: "valid-extension", version: "1.0.0" }),
+  );
+
+  const malformedExtension = path.join(extensions, "malformed-extension");
+  await writeSkill(path.join(malformedExtension, "skills"), "malformed-gemini-review");
+  const malformedManifest = path.join(malformedExtension, "gemini-extension.json");
+  await writeFile(malformedManifest, "{broken\n");
+
+  const escapingExtension = path.join(extensions, "escaping-extension");
+  await writeSkill(path.join(escapingExtension, "skills"), "escaping-gemini-review");
+  const escapingManifest = path.join(escapingExtension, "gemini-extension.json");
+  await writeFile(
+    escapingManifest,
+    JSON.stringify({
+      name: "escaping-extension",
+      version: "1.0.0",
+      skills: ["skills", "../outside"],
+    }),
+  );
+
+  const result = await discoverSkills({
+    input: "valid-gemini-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups[0].name, "valid-gemini-review");
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "MALFORMED_PLUGIN_METADATA" && diagnosticPath === malformedManifest,
+  ));
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_ROOT_ESCAPE" && diagnosticPath === path.join(escapingExtension, "../outside"),
+  ));
+});
+
 test("Codex personal marketplaces discover .codex-plugin custom skill directories", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-personal-marketplace-"));
   const home = path.join(root, "home");
