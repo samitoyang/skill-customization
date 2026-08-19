@@ -354,6 +354,17 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     }),
   );
 
+  const rootSkillPlugin = path.join(localRoot, "root-skill-plugin");
+  await mkdir(rootSkillPlugin, { recursive: true });
+  await writeFile(
+    path.join(rootSkillPlugin, "SKILL.md"),
+    "---\nname: cursor-root-review\ndescription: Fixture\n---\nUse this skill.\n",
+  );
+  await writeFile(
+    path.join(rootSkillPlugin, "plugin.json"),
+    JSON.stringify({ name: "root-skill-plugin" }),
+  );
+
   const marketplaceRoot = localRoot;
   const marketplacePlugin = path.join(marketplaceRoot, "plugins", "market-plugin");
   const marketplaceSkill = await writeSkill(
@@ -392,6 +403,7 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     "repository:https://github.com/example/agent-plugin",
   ]);
   assert.equal(byName.has("cursor-fallback-review"), false);
+  assert.equal(byName.get("cursor-root-review").copies[0].path, rootSkillPlugin);
   assert.equal(byName.get("cursor-market-review").copies[0].path, marketplaceSkill);
   assert.deepEqual(byName.get("cursor-market-review").provenance, [
     "repository:https://github.com/example/market-plugin",
@@ -428,6 +440,20 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
     JSON.stringify({ name: 42 }),
   );
 
+  const emptySkillsPlugin = path.join(localRoot, "empty-skills-plugin");
+  await writeSkill(path.join(emptySkillsPlugin, "skills"), "empty-fallback-review");
+  await writeFile(
+    path.join(emptySkillsPlugin, "plugin.json"),
+    JSON.stringify({ name: "empty-skills-plugin", skills: [] }),
+  );
+
+  const invalidSkillsPlugin = path.join(localRoot, "invalid-skills-plugin");
+  await writeSkill(path.join(invalidSkillsPlugin, "skills"), "invalid-fallback-review");
+  await writeFile(
+    path.join(invalidSkillsPlugin, "plugin.json"),
+    JSON.stringify({ name: "invalid-skills-plugin", skills: 42 }),
+  );
+
   const outside = path.join(root, "outside");
   await writeSkill(outside, "escaped-review");
   await symlink(outside, path.join(localRoot, "escaped-plugin"), "dir");
@@ -455,6 +481,28 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_SKILL_DIRECTORY_INVALID"));
   assert.equal(result.groups.some(({ name }) => name === "escaped-review"), false);
+
+  const escapedMarketplacePath = path.join(
+    home,
+    ".cursor",
+    "plugins",
+    "outside-marketplace",
+    "plugin",
+  );
+  assert.ok(result.pluginDiagnostics.some(
+    ({ host, code, path: diagnosticPath }) =>
+      host === "cursor"
+      && code === "PLUGIN_ROOT_ESCAPE"
+      && diagnosticPath === escapedMarketplacePath,
+  ));
+  const inventory = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  assert.equal(inventory.groups.some(({ name }) => name === "empty-fallback-review"), false);
+  assert.equal(inventory.groups.some(({ name }) => name === "invalid-fallback-review"), false);
 });
 
 test("Gemini CLI discovers configured user and bounded workspace extensions", async () => {

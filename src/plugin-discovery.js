@@ -40,6 +40,7 @@ const CURSOR_MANIFEST_POLICY = Object.freeze({
   requiredFields: ["name"],
   skipInvalidExtension: true,
   declaredSkillDirectoriesReplaceDefault: true,
+  includeRootSkillFallback: true,
 });
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
@@ -477,6 +478,7 @@ async function addPluginInstall({
     nameMatchesDirectory = false,
     skipInvalidExtension = false,
     declaredSkillDirectoriesReplaceDefault = false,
+    includeRootSkillFallback = false,
   } = manifestPolicy;
   const initialMetadata = metadataFor({
     host,
@@ -615,14 +617,60 @@ async function addPluginInstall({
     // Hosts that reject invalid plugin metadata retain diagnostics without exposing its skills.
     return;
   }
+  const hasDeclaredSkillDirectory = [manifestValue, declaration].some((value) =>
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.hasOwn(value, "skills"));
+  let rootSkillFallback = false;
+  if (includeRootSkillFallback && !hasDeclaredSkillDirectory) {
+    let hasDefaultSkillDirectory = false;
+    try {
+      const defaultSkillInfo = await lstat(path.join(safeInstallRoot, defaultSkillDirectory));
+      hasDefaultSkillDirectory = defaultSkillInfo.isDirectory() || defaultSkillInfo.isSymbolicLink();
+    } catch {
+      // A missing default directory is the normal root-skill fallback case.
+    }
+    if (!hasDefaultSkillDirectory) {
+      try {
+        const rootSkillInfo = await lstat(path.join(safeInstallRoot, "SKILL.md"));
+        rootSkillFallback = rootSkillInfo.isFile() || rootSkillInfo.isSymbolicLink();
+      } catch {
+        rootSkillFallback = false;
+      }
+    }
+  }
   const declaredDirectories = unique(declaredSkillDirectories(manifestValue, declaration));
   const directories = [
     ...(includeDefaultSkillDirectory
-      && (!declaredSkillDirectoriesReplaceDefault || declaredDirectories.length === 0)
+      && (!declaredSkillDirectoriesReplaceDefault || !hasDeclaredSkillDirectory)
       ? [defaultSkillDirectory]
       : []),
     ...declaredDirectories,
   ];
+  const pluginRootInfo = (skillRoot, extra = {}) => ({
+    path: skillRoot,
+    owner: `${PLUGIN_OWNER_PREFIX}${host}`,
+    owners: [`${PLUGIN_OWNER_PREFIX}${host}`],
+    scope,
+    origin: "plugin",
+    host,
+    ...extra,
+    plugin: {
+      host: metadata.host,
+      marketplace: metadata.marketplace,
+      name: metadata.name,
+      ...(metadata.version ? { version: metadata.version } : {}),
+    },
+    pluginMetadata: metadata,
+    pluginIdentity: pluginIdentity(metadata),
+    pluginEvidence: [evidenceResult.evidence],
+    pluginRoot: safeInstallRoot,
+    ...(manifest?.path ? { pluginManifest: manifest.path } : {}),
+  });
+  if (rootSkillFallback) {
+    context.roots.push(pluginRootInfo(safeInstallRoot, { singleSkill: true }));
+  }
   for (const relativeDirectory of unique(directories)) {
     const value = stringValue(relativeDirectory);
     if (!value) continue;
@@ -634,26 +682,7 @@ async function addPluginInstall({
       { declared: value !== defaultSkillDirectory },
     );
     if (!skillRoot) continue;
-    const rootInfo = {
-      path: skillRoot,
-      owner: `${PLUGIN_OWNER_PREFIX}${host}`,
-      owners: [`${PLUGIN_OWNER_PREFIX}${host}`],
-      scope,
-      origin: "plugin",
-      host,
-      plugin: {
-        host: metadata.host,
-        marketplace: metadata.marketplace,
-        name: metadata.name,
-        ...(metadata.version ? { version: metadata.version } : {}),
-      },
-      pluginMetadata: metadata,
-      pluginIdentity: pluginIdentity(metadata),
-      pluginEvidence: [evidenceResult.evidence],
-      pluginRoot: safeInstallRoot,
-      ...(manifest?.path ? { pluginManifest: manifest.path } : {}),
-    };
-    context.roots.push(rootInfo);
+    context.roots.push(pluginRootInfo(skillRoot));
   }
 }
 
@@ -1429,7 +1458,7 @@ async function discoverMarketplaceManifests({
       }
       await addPluginInstall({
         installRoot: marketplacePluginPath(configuredPath, file, safeBase, pluginRoot),
-        boundary: boundary ?? safeBase,
+        boundary: host === "cursor" ? safeBase : boundary ?? safeBase,
         host,
         marketplace,
         name: entry.name,

@@ -353,10 +353,12 @@ async function scanRoot(rootInfo) {
   }
   const directories = [];
   if (await exists(path.join(rootInfo.path, "SKILL.md"))) directories.push(rootInfo.path);
-  for (const entry of entries) {
-    if (entry.isDirectory() || entry.isSymbolicLink()) {
-      const directory = path.join(rootInfo.path, entry.name);
-      if (await exists(path.join(directory, "SKILL.md"))) directories.push(directory);
+  if (!rootInfo.singleSkill) {
+    for (const entry of entries) {
+      if (entry.isDirectory() || entry.isSymbolicLink()) {
+        const directory = path.join(rootInfo.path, entry.name);
+        if (await exists(path.join(directory, "SKILL.md"))) directories.push(directory);
+      }
     }
   }
   const results = await Promise.allSettled(
