@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeNpmPackReport } from "./npm-pack-report.js";
 import { isForbiddenPackagePath } from "./package-path-policy.js";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -68,12 +69,9 @@ try {
     throw new Error(packed.stderr || packed.stdout || "npm pack --dry-run failed");
   }
 
-  const report = JSON.parse(packed.stdout);
-  if (!Array.isArray(report) || report.length !== 1) {
-    throw new Error("npm pack returned an unexpected report");
-  }
+  const report = normalizeNpmPackReport(JSON.parse(packed.stdout));
 
-  const files = new Set(report[0].files?.map(({ path: file }) => file));
+  const files = new Set(report.files.map(({ path: file }) => file));
   const missing = requiredFiles.filter((file) => !files.has(file));
   const forbidden = [...files].filter(isForbiddenPackagePath);
 
@@ -84,7 +82,7 @@ try {
     throw new Error(`npm package contains private files: ${forbidden.join(", ")}`);
   }
 
-  const cli = report[0].files.find(
+  const cli = report.files.find(
     ({ path: file }) => file === "bin/skill-customization.js",
   );
   if ((cli.mode & 0o111) === 0) {
@@ -92,7 +90,7 @@ try {
   }
 
   process.stdout.write(
-    `checked npm package (${report[0].entryCount} files, ${report[0].unpackedSize} bytes unpacked)\n`,
+    `checked npm package (${report.entryCount} files, ${report.unpackedSize} bytes unpacked)\n`,
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
