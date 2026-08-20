@@ -261,11 +261,14 @@ function declaredSkillDirectories(manifest, declaration = {}) {
 }
 
 function hasDeclaredSkillDirectoryField(value) {
-  return Boolean(
-    value
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && DECLARED_SKILL_DIRECTORY_FIELDS.some((field) => Object.hasOwn(value, field)),
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return [value, value.layout, value.components].some((container) =>
+    container
+    && typeof container === "object"
+    && !Array.isArray(container)
+    && DECLARED_SKILL_DIRECTORY_FIELDS.some((field) =>
+      Object.hasOwn(container, field),
+    ),
   );
 }
 

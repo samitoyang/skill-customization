@@ -740,6 +740,40 @@ test("Cursor marketplace discovery ignores foreign host manifests", async () => 
   assert.equal(byName.get("foreign-local-review").conflict, false);
 });
 
+test("Cursor manifests honor nested skill directory declarations", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-nested-skills-"));
+  const home = path.join(root, "home");
+  const localRoot = path.join(home, ".cursor", "plugins", "local");
+  const expected = new Map();
+  for (const container of ["layout", "components"]) {
+    const plugin = path.join(localRoot, `${container}-plugin`);
+    const skillDirectory = `${container}-skills`;
+    const skillName = `${container}-nested-review`;
+    expected.set(skillName, await writeSkill(path.join(plugin, skillDirectory), skillName));
+    await mkdir(path.join(plugin, ".cursor-plugin"), { recursive: true });
+    await writeFile(
+      path.join(plugin, ".cursor-plugin", "plugin.json"),
+      JSON.stringify({
+        name: `${container}-plugin`,
+        [container]: { skills: skillDirectory },
+      }),
+    );
+  }
+
+  const result = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  const byName = new Map(result.groups.map((group) => [group.name, group]));
+
+  for (const [name, skillPath] of expected) {
+    assert.equal(byName.get(name).copies[0].path, skillPath);
+    assert.equal(byName.get(name).copies[0].plugin.name, `${name.split("-")[0]}-plugin`);
+  }
+});
+
 test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-diagnostics-"));
   const home = path.join(root, "home");

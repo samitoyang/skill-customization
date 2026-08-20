@@ -494,11 +494,17 @@ async function recoverMissingPluginBinding({
   ) return undefined;
   // A cache path is replaceable local state; continuity is safe only for one
   // stable plugin identity and one already reviewed effective fingerprint.
-  const discovery = await discoverSkills({
-    input: descriptor.source.skill_name,
-    roots,
-    managerRecords,
-  });
+  let discovery;
+  try {
+    discovery = await discoverSkills({
+      input: descriptor.source.skill_name,
+      roots,
+      managerRecords,
+    });
+  } catch (error) {
+    if (error.code === "NO_LOCAL_COPY") return undefined;
+    throw error;
+  }
   const matches = [];
   for (const group of discovery.groups) {
     for (const copy of group.copies) {

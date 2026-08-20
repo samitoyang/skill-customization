@@ -287,6 +287,69 @@ test("plugin cache recovery preserves concurrent binding changes and deletions",
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
+test("missing plugin cache recovery preserves target-missing invalidation", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-cache-missing-"));
+  const install = path.join(root, "plugin", "1");
+  const source = path.join(install, "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const identity = "local:plugin:fixture-host:fixture-marketplace:reviewer";
+  const repository = "https://github.com/example/skills";
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nstable\n");
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      ...descriptor().source,
+      effective_fingerprint: await fingerprintPath(source),
+    },
+  };
+  const rootRecord = {
+    path: path.dirname(source),
+    owner: "plugin:fixture-host",
+    scope: "global",
+    origin: "plugin",
+    plugin: {
+      host: "fixture-host",
+      marketplace: "fixture-marketplace",
+      name: "reviewer",
+      version: "1",
+    },
+    pluginIdentity: identity,
+    pluginRoot: install,
+    pluginEvidence: [{
+      kind: "plugin",
+      host: "fixture-host",
+      marketplace: "fixture-marketplace",
+      plugin: "reviewer",
+      repository,
+      upstream_path: "skills/review/SKILL.md",
+      identity,
+      cache: { kind: "versioned", scope: "global" },
+    }],
+  };
+  await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots: [rootRecord],
+    interactive: true,
+    confirm: async () => true,
+  });
+  await rename(install, path.join(root, "removed"));
+
+  await assert.rejects(
+    resolveBinding({
+      descriptor: sourceDescriptor,
+      context: "global",
+      statePath,
+      roots: [],
+    }),
+    (error) => error.code === "BINDING_TARGET_MISSING",
+  );
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+});
+
 test("ambient binding preserves plugin identity for cache recovery", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-ambient-plugin-continuity-"));
   const claudeHome = path.join(root, "claude");
