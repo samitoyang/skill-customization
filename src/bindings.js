@@ -458,7 +458,7 @@ export async function bindCustomization({
   sourcePath,
   context,
   statePath = bindingStorePath(),
-  roots = [],
+  roots,
   requestedScope,
   interactive = Boolean(process.stdin.isTTY),
   confirm,

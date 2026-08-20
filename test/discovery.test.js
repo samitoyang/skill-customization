@@ -1049,7 +1049,10 @@ test("Gemini validates metadata containment, required fields, and install proven
   );
   await writeFile(
     invalidInstallMetadata,
-    JSON.stringify({ source: "https://github.com/example/invalid-install", type: "unknown" }),
+    JSON.stringify({
+      source: { url: "https://github.com/attacker/wrong" },
+      type: "git",
+    }),
   );
 
   const invalidDeclaredExtension = path.join(extensions, "invalid-declared-extension");
@@ -1088,7 +1091,13 @@ test("Gemini validates metadata containment, required fields, and install proven
     "repository:https://github.com/example/installed-extension",
   ]);
   assert.equal(result.groups.some(({ name }) => name === "invalid-gemini-review"), false);
-  assert.equal(result.groups.some(({ name }) => name === "invalid-install-gemini-review"), true);
+  const invalidInstallGroup = result.groups.find(
+    ({ name }) => name === "invalid-install-gemini-review",
+  );
+  assert.deepEqual(invalidInstallGroup.provenance, [
+    "local:plugin:gemini-cli:local:invalid-install-extension",
+  ]);
+  assert.equal(invalidInstallGroup.copies[0].evidence[0].installation, undefined);
   assert.equal(result.groups.some(({ name }) => name === "invalid-declared-gemini-review"), true);
   assert.equal(result.groups.some(({ name }) => name === "unwanted-linked-origin-review"), false);
   const linkedGroup = result.groups.find(({ name }) => name === "linked-gemini-review");

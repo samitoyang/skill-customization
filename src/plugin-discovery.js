@@ -624,7 +624,7 @@ async function addPluginInstall({
   const installationMetadataPath = installationMetadataFile
     ? path.join(safeInstallRoot, installationMetadataFile)
     : undefined;
-  const installationMetadata = installationMetadataPath
+  let installationMetadata = installationMetadataPath
     ? await readJsonObject(installationMetadataPath, context, {
       host,
       metadata: initialMetadata,
@@ -649,6 +649,7 @@ async function addPluginInstall({
         metadata: initialMetadata,
       }),
     );
+    installationMetadata = undefined;
   }
   // Local/link sources identify an external origin; preserve that evidence without traversing or writing it.
   const manifestField = (field) => manifestOverridesDeclaration

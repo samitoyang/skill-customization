@@ -215,31 +215,31 @@ test("plugin cache replacement preserves a confirmed binding when identity and c
   assert.equal(Object.hasOwn(sourceDescriptor, "plugin"), false);
 });
 
-test("binding recovery rediscovers ambient plugin caches when roots are omitted", async () => {
+test("ambient binding preserves plugin identity for cache recovery", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-ambient-plugin-continuity-"));
-  const versionOne = path.join(root, "plugin", "1", "skills", "review");
   const claudeHome = path.join(root, "claude");
-  const versionTwoRoot = path.join(
+  const pluginCacheRoot = path.join(
     claudeHome,
     "plugins",
     "cache",
     "fixture-marketplace",
     "reviewer",
-    "2",
   );
+  const versionOneRoot = path.join(pluginCacheRoot, "1");
+  const versionOne = path.join(versionOneRoot, "skills", "review");
+  const versionTwoRoot = path.join(pluginCacheRoot, "2");
   const versionTwo = path.join(versionTwoRoot, "skills", "review");
   const statePath = path.join(root, "state", "bindings.json");
-  const plugin = {
-    host: "claude-code",
-    marketplace: "fixture-marketplace",
-    name: "reviewer",
-    version: "1",
-  };
   const identity = "local:plugin:claude-code:fixture-marketplace:reviewer";
   const repository = "https://github.com/example/reviewer";
   const workflow = "---\nname: review\n---\nstable\n";
   await mkdir(versionOne, { recursive: true });
   await writeFile(path.join(versionOne, "SKILL.md"), workflow);
+  await mkdir(path.join(versionOneRoot, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(versionOneRoot, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name: "reviewer", version: "1", repository }),
+  );
   const sourceDescriptor = {
     ...descriptor(),
     source: {
@@ -249,37 +249,6 @@ test("binding recovery rediscovers ambient plugin caches when roots are omitted"
       effective_fingerprint: await fingerprintPath(versionOne),
     },
   };
-  await bindCustomization({
-    descriptor: sourceDescriptor,
-    sourcePath: versionOne,
-    context: "global",
-    statePath,
-    roots: [{
-      path: path.dirname(versionOne),
-      owner: "plugin:claude-code",
-      scope: "global",
-      origin: "plugin",
-      plugin,
-      pluginIdentity: identity,
-      pluginRoot: path.dirname(path.dirname(versionOne)),
-      pluginEvidence: [{
-        kind: "plugin",
-        ...plugin,
-        repository,
-        identity,
-      }],
-    }],
-    interactive: true,
-    confirm: async () => true,
-  });
-  await rename(path.join(root, "plugin", "1"), path.join(root, "removed"));
-  await mkdir(versionTwo, { recursive: true });
-  await writeFile(path.join(versionTwo, "SKILL.md"), workflow);
-  await mkdir(path.join(versionTwoRoot, ".claude-plugin"), { recursive: true });
-  await writeFile(
-    path.join(versionTwoRoot, ".claude-plugin", "plugin.json"),
-    JSON.stringify({ name: "reviewer", version: "2", repository }),
-  );
 
   const ambientHomes = {
     CLAUDE_CONFIG_DIR: claudeHome,
@@ -292,6 +261,26 @@ test("binding recovery rediscovers ambient plugin caches when roots are omitted"
   );
   Object.assign(process.env, ambientHomes);
   try {
+    const bound = await bindCustomization({
+      descriptor: sourceDescriptor,
+      sourcePath: versionOne,
+      context: "global",
+      statePath,
+      requestedScope: "global",
+      interactive: true,
+      confirm: async () => true,
+    });
+    assert.equal(bound.source.pluginIdentity, identity);
+
+    await rename(versionOneRoot, path.join(root, "removed"));
+    await mkdir(versionTwo, { recursive: true });
+    await writeFile(path.join(versionTwo, "SKILL.md"), workflow);
+    await mkdir(path.join(versionTwoRoot, ".claude-plugin"), { recursive: true });
+    await writeFile(
+      path.join(versionTwoRoot, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "reviewer", version: "2", repository }),
+    );
+
     const resolved = await resolveBinding({
       descriptor: sourceDescriptor,
       context: "global",
