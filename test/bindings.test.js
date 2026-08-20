@@ -422,11 +422,11 @@ test("ambient binding preserves plugin identity for cache recovery", async () =>
       sourcePath: versionOne,
       context: "global",
       statePath,
-      requestedScope: "global",
       interactive: true,
       confirm: async () => true,
       confirmedSelection,
     });
+    assert.equal(bound.scope, "global");
     assert.equal(bound.source.pluginIdentity, identity);
     assert.deepEqual(bound.source.pluginCache, { kind: "versioned", scope: "global" });
     assert.equal(bound.source.selection.provenance, `repository:${repository}`);

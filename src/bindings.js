@@ -409,6 +409,7 @@ async function inspectBindingSource({
       : {}),
     provenance: selection ? [selection.provenance] : group.provenance,
     evidence: group.evidence,
+    searchedRoots: discovery.searchedRoots,
     selection,
     ...(bindingPluginIdentity
       ? { pluginIdentity: bindingPluginIdentity }
@@ -608,7 +609,13 @@ export async function bindCustomization({
     managerRecords,
     confirmedSelection,
   });
-  const classified = await classifyBindingScope({ sourcePath, roots, requestedScope });
+  const classified = await classifyBindingScope({
+    sourcePath,
+    roots: roots ?? inspection.searchedRoots.filter(
+      ({ scope }) => scope === "global" || scope === "workspace",
+    ),
+    requestedScope,
+  });
   await confirmOrFail(
     confirm,
     { descriptor, context, source: classified, inspection },
