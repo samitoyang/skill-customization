@@ -16,15 +16,17 @@ import { isPathContained } from "./paths.js";
 import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 
 const PLUGIN_OWNER_PREFIX = "plugin:";
-const MANIFEST_FILES = [
-  ".claude-plugin/plugin.json",
-  ".cursor-plugin/plugin.json",
-  ".codex-plugin/plugin.json",
+const GENERIC_MANIFEST_FILES = [
   "plugin.json",
   "manifest.json",
-  "gemini-extension.json",
   "package.json",
 ];
+const CLAUDE_MANIFEST_POLICY = Object.freeze({
+  files: [".claude-plugin/plugin.json", ...GENERIC_MANIFEST_FILES],
+});
+const CODEX_MANIFEST_POLICY = Object.freeze({
+  files: [".codex-plugin/plugin.json", ...GENERIC_MANIFEST_FILES],
+});
 const GEMINI_MANIFEST_FILES = ["gemini-extension.json"];
 const GEMINI_INSTALL_METADATA_FILE = ".gemini-extension-install.json";
 const GEMINI_REQUIRED_MANIFEST_FIELDS = ["name", "version"];
@@ -46,6 +48,12 @@ const CURSOR_MANIFEST_POLICY = Object.freeze({
   includeRootSkillFallback: true,
   includeDefaultSkillRoot: false,
   manifestNamePattern: /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
+});
+const HOST_MANIFEST_POLICIES = Object.freeze({
+  "claude-code": CLAUDE_MANIFEST_POLICY,
+  codex: CODEX_MANIFEST_POLICY,
+  "gemini-cli": GEMINI_MANIFEST_POLICY,
+  cursor: CURSOR_MANIFEST_POLICY,
 });
 const CURSOR_MARKETPLACE_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
@@ -495,7 +503,7 @@ async function readManifest(
   installRoot,
   context,
   metadata,
-  { files = MANIFEST_FILES, description = "plugin metadata" } = {},
+  { files = GENERIC_MANIFEST_FILES, description = "plugin metadata" } = {},
 ) {
   for (const relative of files) {
     const file = path.join(installRoot, relative);
@@ -530,10 +538,11 @@ async function addPluginInstall({
   context,
   defaultSkillDirectory = "skills",
   includeDefaultSkillDirectory = true,
-  manifestPolicy = {},
+  manifestPolicy,
 }) {
+  const effectiveManifestPolicy = manifestPolicy ?? HOST_MANIFEST_POLICIES[host] ?? {};
   const {
-    files: manifestFiles = MANIFEST_FILES,
+    files: manifestFiles = GENERIC_MANIFEST_FILES,
     description: manifestDescription = "plugin metadata",
     requiredFields: requiredManifestFields = [],
     installationFile: installationMetadataFile,
@@ -544,7 +553,7 @@ async function addPluginInstall({
     includeRootSkillFallback = false,
     includeDefaultSkillRoot = true,
     manifestNamePattern,
-  } = manifestPolicy;
+  } = effectiveManifestPolicy;
   const initialMetadata = metadataFor({
     host,
     marketplace,

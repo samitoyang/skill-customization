@@ -89,6 +89,91 @@ test("ambient discovery finds Claude plugin cache roots with manifest provenance
   ]);
 });
 
+test("multi-host installs select each host's own plugin manifest", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-multi-host-plugin-"));
+  const home = path.join(root, "home");
+  const install = path.join(
+    home,
+    ".claude",
+    "plugins",
+    "cache",
+    "official",
+    "shared-plugin",
+    "1.0.0",
+  );
+  const claudeSkill = await writeSkill(
+    path.join(install, "claude-skills"),
+    "claude-host-review",
+  );
+  const codexSkill = await writeSkill(
+    path.join(install, "codex-skills"),
+    "codex-host-review",
+  );
+  await mkdir(path.join(install, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(install, ".claude-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "shared-plugin",
+      skills: "claude-skills",
+      repository: "https://github.com/example/claude-plugin",
+    }),
+  );
+  await mkdir(path.join(install, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(install, ".codex-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "shared-plugin",
+      skills: "codex-skills",
+      repository: "https://github.com/example/codex-plugin",
+    }),
+  );
+  await mkdir(path.join(home, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(home, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "personal",
+      plugins: [{
+        name: "shared-plugin",
+        source: {
+          source: "local",
+          path: install,
+        },
+      }],
+    }),
+  );
+
+  const result = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: path.join(home, ".codex") },
+    managerRecords: [],
+  });
+  const byName = new Map(result.groups.map((group) => [group.name, group]));
+  assert.ok(
+    byName.has("claude-host-review"),
+    `missing Claude-host skill; discovered: ${[...byName.keys()].join(", ")}`,
+  );
+  assert.ok(
+    byName.has("codex-host-review"),
+    `missing Codex-host skill; discovered: ${[...byName.keys()].join(", ")}`,
+  );
+  const claudeCopy = byName.get("claude-host-review").copies[0];
+  const codexCopy = byName.get("codex-host-review").copies[0];
+
+  assert.equal(claudeCopy.path, claudeSkill);
+  assert.equal(claudeCopy.plugin.host, "claude-code");
+  assert.match(claudeCopy.pluginMetadata.manifestPath, /\.claude-plugin[\\/]plugin\.json$/);
+  assert.deepEqual(byName.get("claude-host-review").provenance, [
+    "repository:https://github.com/example/claude-plugin",
+  ]);
+  assert.equal(codexCopy.path, codexSkill);
+  assert.equal(codexCopy.plugin.host, "codex");
+  assert.match(codexCopy.pluginMetadata.manifestPath, /\.codex-plugin[\\/]plugin\.json$/);
+  assert.deepEqual(byName.get("codex-host-review").provenance, [
+    "repository:https://github.com/example/codex-plugin",
+  ]);
+});
+
 test("ambient plugin discovery is opt-out and explicit roots remain authoritative", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-policy-"));
   const home = path.join(root, "home");
