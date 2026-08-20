@@ -328,6 +328,27 @@ test("ambient binding preserves plugin identity for cache recovery", async () =>
   );
   Object.assign(process.env, ambientHomes);
   try {
+    const discovery = await discoverSkills({
+      input: versionOne,
+      managerRecords: [],
+    });
+    const group = discovery.groups[0];
+    const chosenCopy = group.copies.find((copy) => copy.pluginIdentity === identity);
+    const confirmedSelection = confirmDiscoverySelection({
+      discovery,
+      choice: {
+        name: group.name,
+        fingerprint: group.fingerprint,
+        path: chosenCopy.path,
+        owner: chosenCopy.owner,
+      },
+      interactive: true,
+      confirmedProvenance: `repository:${repository}`,
+      confirmationEvidence: {
+        actor: "human",
+        reason: "selected ambient plugin provenance",
+      },
+    });
     const bound = await bindCustomization({
       descriptor: sourceDescriptor,
       sourcePath: versionOne,
@@ -336,9 +357,19 @@ test("ambient binding preserves plugin identity for cache recovery", async () =>
       requestedScope: "global",
       interactive: true,
       confirm: async () => true,
+      confirmedSelection,
     });
     assert.equal(bound.source.pluginIdentity, identity);
     assert.deepEqual(bound.source.pluginCache, { kind: "versioned", scope: "global" });
+    assert.equal(bound.source.selection.provenance, `repository:${repository}`);
+
+    const validated = await resolveBinding({
+      descriptor: sourceDescriptor,
+      context: "global",
+      statePath,
+    });
+    assert.equal(validated.source.path, path.resolve(versionOne));
+    assert.equal(validated.source.selection.provenance, `repository:${repository}`);
 
     await rename(versionOneRoot, path.join(root, "removed"));
     await mkdir(versionTwo, { recursive: true });

@@ -1043,6 +1043,13 @@ function tomlKeyValue(doubleQuoted, singleQuoted, bare) {
   );
 }
 
+function tomlAssignmentKey(line) {
+  const match = line.match(
+    /^(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*=/,
+  );
+  return match ? tomlKeyValue(match[1], match[2], match[3]) : undefined;
+}
+
 function codexMarketplaceConfigEntries(contents) {
   const entries = [];
   const invalid = [];
@@ -1069,16 +1076,18 @@ function codexMarketplaceConfigEntries(contents) {
     }
     if (!current) continue;
     const assignment = trimmed.match(
-      /^(source_type|source)\s*=\s*(?:"((?:\\.|[^"])*)"|'([^']*)')\s*(?:#.*)?$/,
+      /^(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*=\s*(?:"((?:\\.|[^"])*)"|'([^']*)')\s*(?:#.*)?$/,
     );
     if (!assignment) {
-      const key = trimmed.match(/^([A-Za-z0-9_-]+)\s*=/)?.[1];
+      const key = tomlAssignmentKey(trimmed);
       if (key === "source" || key === "source_type") invalid.push(index + 1);
       continue;
     }
-    current[assignment[1]] = tomlQuotedValue(
-      assignment[2] !== undefined ? '"' : "'",
-      assignment[2] ?? assignment[3],
+    const key = tomlKeyValue(assignment[1], assignment[2], assignment[3]);
+    if (key !== "source" && key !== "source_type") continue;
+    current[key] = tomlQuotedValue(
+      assignment[4] !== undefined ? '"' : "'",
+      assignment[4] ?? assignment[5],
     );
   }
   return { entries, invalid };

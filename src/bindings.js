@@ -629,7 +629,7 @@ async function invalidate(statePath, key, expectedBinding) {
 export async function validateBinding({
   descriptor,
   binding,
-  roots = [],
+  roots,
   managerRecords = [],
   activeSkills,
 }) {
