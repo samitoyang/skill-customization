@@ -476,6 +476,46 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
   assert.equal(byName.has("cursor-undocumented-default-review"), false);
 });
 
+test("Cursor skips marketplace entries when the declared plugin root is invalid", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-invalid-plugin-root-"));
+  const home = path.join(root, "home");
+  const localRoot = path.join(home, ".cursor", "plugins", "local");
+  const plugin = path.join(localRoot, "declared-plugin");
+  await writeSkill(path.join(plugin, "skills"), "direct-review");
+  await writeFile(
+    path.join(plugin, "plugin.json"),
+    JSON.stringify({ name: "declared-plugin" }),
+  );
+  await mkdir(path.join(localRoot, ".cursor-plugin"), { recursive: true });
+  const marketplacePath = path.join(localRoot, ".cursor-plugin", "marketplace.json");
+  await writeFile(
+    marketplacePath,
+    JSON.stringify({
+      name: "team-marketplace",
+      owner: { name: "fixture" },
+      metadata: { pluginRoot: 42 },
+      plugins: [{ name: "marketplace-entry", source: "declared-plugin" }],
+    }),
+  );
+
+  const result = await discoverSkills({
+    input: "direct-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].conflict, false);
+  assert.equal(result.groups[0].copies[0].plugin.marketplace, "local");
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_MARKETPLACE_INVALID_ROOT"
+      && diagnosticPath === marketplacePath,
+  ));
+});
+
 test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-diagnostics-"));
   const home = path.join(root, "home");
@@ -1123,7 +1163,7 @@ test("Codex config.toml local marketplaces discover bounded external roots", asy
   await mkdir(codexHome, { recursive: true });
   await writeFile(
     path.join(codexHome, "config.toml"),
-    `[marketplaces."configured-marketplace"]\nsource_type = "local"\nsource = "${marketplaceRoot}"\n\n[marketplaces."broken-marketplace"]\nsource_type = local\nsource = "${marketplaceRoot}"\n`,
+    `[marketplaces."configured-marketplace"] # development checkout\nsource_type = "local"\nsource = "${marketplaceRoot}"\n\n[marketplaces."broken-marketplace"]\nsource_type = local\nsource = "${marketplaceRoot}"\n`,
   );
 
   const result = await discoverSkills({

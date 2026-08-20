@@ -1030,7 +1030,7 @@ function codexMarketplaceConfigEntries(contents) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const section = trimmed.match(
-      /^\[marketplaces\.(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\]\s*$/,
+      /^\[marketplaces\.(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\]\s*(?:#.*)?$/,
     );
     if (section) {
       current = {
@@ -1581,6 +1581,7 @@ async function discoverMarketplaceManifests({
       && Object.hasOwn(manifest.metadata ?? {}, "pluginRoot")
       && !stringValue(pluginRoot)
     ) {
+      validCursorMarketplace = false;
       context.diagnostics.push(
         diagnostic({
           host,
