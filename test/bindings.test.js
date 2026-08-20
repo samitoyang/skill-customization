@@ -1107,6 +1107,29 @@ test("binding accepts confirmed repository-only plugin provenance", async () => 
   assert.equal(binding.source.repository, repository);
   assert.equal(binding.source.upstreamPath, "skills/review/SKILL.md");
   assert.equal(binding.source.selection.provenance, repositoryOnlyProvenance);
+
+  assert.equal(
+    spawnSync("git", ["-C", root, "remote", "set-url", "origin", repository])
+      .status,
+    0,
+  );
+  const updatedDiscovery = await discoverSkills({
+    input: source,
+    roots,
+    managerRecords: [],
+  });
+  assert.deepEqual(updatedDiscovery.groups[0].provenance, [
+    repositoryOnlyProvenance,
+    `${repositoryOnlyProvenance}#skills/review/SKILL.md`,
+  ]);
+  const resolved = await resolveBinding({
+    descriptor: descriptor(),
+    context: "global",
+    statePath,
+    roots,
+    managerRecords: [],
+  });
+  assert.equal(resolved.source.selection.provenance, repositoryOnlyProvenance);
 });
 
 test("binding persists the confirmed plugin identity", async () => {

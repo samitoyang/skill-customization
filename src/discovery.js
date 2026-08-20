@@ -677,26 +677,28 @@ function summarizeProvenance(evidence) {
       const upstreamPath = normalizeUpstreamEntrypoint(
         item.upstream_path ?? item.upstreamPath,
       );
-      const paths = repositories.get(repository) ?? new Set();
-      if (upstreamPath) paths.add(upstreamPath);
-      repositories.set(repository, paths);
+      const summary = repositories.get(repository) ?? {
+        repositoryOnly: false,
+        paths: new Set(),
+      };
+      if (upstreamPath) summary.paths.add(upstreamPath);
+      else summary.repositoryOnly = true;
+      repositories.set(repository, summary);
       continue;
     }
     const identity = evidenceIdentity(item);
     if (identity) local.add(identity);
   }
   const identities = [];
-  for (const [repository, paths] of repositories) {
-    if (paths.size === 0) identities.push(`repository:${repository}`);
-    else {
-      for (const upstreamPath of paths) {
-        identities.push(`repository:${repository}#${upstreamPath}`);
-      }
+  for (const [repository, summary] of repositories) {
+    if (summary.repositoryOnly) identities.push(`repository:${repository}`);
+    for (const upstreamPath of summary.paths) {
+      identities.push(`repository:${repository}#${upstreamPath}`);
     }
   }
   identities.push(...local);
   const repositoryPathConflict = [...repositories.values()].some(
-    (paths) => paths.size > 1,
+    ({ paths }) => paths.size > 1,
   );
   return {
     identities: identities.sort(),
