@@ -410,9 +410,10 @@ async function recoverMissingPluginBinding({ descriptor, binding, roots, manager
   });
   const matches = [];
   for (const group of discovery.groups) {
-    if (group.fingerprint !== descriptor.source.effective_fingerprint) continue;
     for (const copy of group.copies) {
       if (copy.pluginIdentity !== binding.source.pluginIdentity) continue;
+      const effectiveFingerprint = await fingerprintPath(copy.path).catch(() => undefined);
+      if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
       const provenance = compatibleProvenance(descriptor, copy);
       if (provenance || descriptor.source.kind === "local") {
         matches.push({ group, copy, provenance });
@@ -421,23 +422,13 @@ async function recoverMissingPluginBinding({ descriptor, binding, roots, manager
   }
   if (matches.length !== 1) return undefined;
   const { group, copy, provenance } = matches[0];
-  const selection = group.conflict
-    ? {
-        name: group.name,
-        copy,
-        provenance: provenance ?? copy.provenance[0],
-        confirmation: {
-          kind: "confirmation",
-          path: copy.path,
-          method: "binding-continuity",
-        },
-      }
-    : undefined;
+  // A replacement cache copy is not a substitute for human provenance review.
+  if (group.conflict || copy.conflict) return undefined;
+  const { alias: _alias, selection: _selection, ...stableSource } = binding.source;
   const source = {
-    ...binding.source,
+    ...stableSource,
     path: path.resolve(copy.path),
     target: await realpath(copy.path),
-    ...(selection ? { selection } : {}),
   };
   return { ...binding, source, updatedAt: new Date().toISOString() };
 }

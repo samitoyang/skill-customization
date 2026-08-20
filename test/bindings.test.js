@@ -209,6 +209,8 @@ test("plugin cache replacement preserves a confirmed binding when identity and c
   });
   assert.equal(resolved.source.path, path.resolve(versionTwo));
   assert.equal(resolved.source.pluginIdentity, identity);
+  assert.equal(Object.hasOwn(resolved.source, "alias"), false);
+  assert.equal(Object.hasOwn(resolved.source, "selection"), false);
   assert.equal((await readBindingStore(statePath)).bindings[`${encodeURIComponent(sourceDescriptor.id)}::global`].source.path, path.resolve(versionTwo));
   assert.equal(Object.hasOwn(sourceDescriptor, "plugin"), false);
 });
