@@ -1,6 +1,7 @@
 import { lstat, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { assertValidDescriptor, readDescriptor } from "./descriptor.js";
 import { discoverSkills } from "./discovery.js";
@@ -238,6 +239,18 @@ async function inspectBindingSource({
   const sourceCopy = group.copies.find(
     (copy) => path.resolve(copy.realPath ?? copy.path) === sourceRoot,
   );
+  const pluginIdentities = [...new Set([
+    sourceCopy?.pluginIdentity,
+    ...(sourceCopy?.evidence ?? [])
+      .filter(({ kind, identity }) => kind === "plugin" && typeof identity === "string")
+      .map(({ identity }) => identity),
+  ].filter(Boolean))];
+  const bindingPluginIdentity = selection
+    && pluginIdentities.includes(selection.provenance)
+    ? selection.provenance
+    : pluginIdentities.length === 1
+      ? pluginIdentities[0]
+      : undefined;
   let repository;
   let upstreamPath;
   if (descriptor.source.kind === "repository") {
@@ -380,8 +393,8 @@ async function inspectBindingSource({
     provenance: selection ? [selection.provenance] : group.provenance,
     evidence: group.evidence,
     selection,
-    ...(sourceCopy?.pluginIdentity
-      ? { pluginIdentity: sourceCopy.pluginIdentity }
+    ...(bindingPluginIdentity
+      ? { pluginIdentity: bindingPluginIdentity }
       : {}),
   };
 }
@@ -575,12 +588,16 @@ export async function bindCustomization({
   }).then((result) => result.binding);
 }
 
-async function invalidate(statePath, key) {
+async function invalidate(statePath, key, expectedBinding) {
+  let invalidated = false;
   await updateJsonAtomic(statePath, EMPTY_STORE, async (store) => {
     assertBindingStore(store, statePath);
+    if (!isDeepStrictEqual(store.bindings[key], expectedBinding)) return store;
     delete store.bindings[key];
+    invalidated = true;
     return store;
   });
+  return invalidated;
 }
 
 export async function validateBinding({
@@ -719,12 +736,23 @@ export async function resolveBinding({
         managerRecords,
       });
       if (recovered) {
+        let persisted = false;
         await updateJsonAtomic(statePath, EMPTY_STORE, async (store) => {
           assertBindingStore(store, statePath);
-          if (store.bindings[key]) store.bindings[key] = recovered;
+          if (!isDeepStrictEqual(store.bindings[key], binding)) return store;
+          store.bindings[key] = recovered;
+          persisted = true;
           return store;
         });
-        return recovered;
+        if (persisted) return recovered;
+        return resolveBinding({
+          descriptor,
+          context,
+          statePath,
+          roots,
+          managerRecords,
+          activeSkills,
+        });
       }
     }
     if (
@@ -746,7 +774,17 @@ export async function resolveBinding({
         "BINDING_SOURCE_KIND_MISMATCH",
       ]).has(error.code)
     ) {
-      await invalidate(statePath, key);
+      const invalidated = await invalidate(statePath, key, binding);
+      if (!invalidated) {
+        return resolveBinding({
+          descriptor,
+          context,
+          statePath,
+          roots,
+          managerRecords,
+          activeSkills,
+        });
+      }
     }
     throw error;
   }

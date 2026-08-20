@@ -17,6 +17,7 @@ import test from "node:test";
 
 import {
   bindCustomization,
+  bindingKey,
   bindingStorePath,
   classifyBindingScope,
   readBindingStore,
@@ -29,6 +30,7 @@ import {
   confirmDiscoverySelection,
   discoverSkills,
 } from "../src/discovery.js";
+import { acquireStateLock } from "../src/state.js";
 
 function descriptor(activation = { mode: "coexist" }) {
   const replacing = activation.mode === "replace";
@@ -147,7 +149,7 @@ test("first use fails closed noninteractively and confirmed writes are atomic", 
   assert.doesNotThrow(() => JSON.parse(persisted));
 });
 
-test("plugin cache replacement preserves a confirmed binding when identity and content remain stable", async () => {
+test("plugin cache recovery preserves concurrent binding changes and deletions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-continuity-"));
   const versionOne = path.join(root, "plugin", "1", "skills", "review");
   const versionTwo = path.join(root, "plugin", "2", "skills", "review");
@@ -213,6 +215,69 @@ test("plugin cache replacement preserves a confirmed binding when identity and c
   assert.equal(Object.hasOwn(resolved.source, "selection"), false);
   assert.equal((await readBindingStore(statePath)).bindings[`${encodeURIComponent(sourceDescriptor.id)}::global`].source.path, path.resolve(versionTwo));
   assert.equal(Object.hasOwn(sourceDescriptor, "plugin"), false);
+
+  const versionThree = path.join(root, "plugin", "3", "skills", "review");
+  const concurrentSource = path.join(root, "concurrent", "skills", "review");
+  await rename(path.join(root, "plugin", "2"), path.join(root, "removed-two"));
+  await mkdir(versionThree, { recursive: true });
+  await mkdir(concurrentSource, { recursive: true });
+  await writeFile(path.join(versionThree, "SKILL.md"), "---\nname: review\n---\nstable\n");
+  await writeFile(path.join(concurrentSource, "SKILL.md"), "---\nname: review\n---\nstable\n");
+  const key = bindingKey(sourceDescriptor.id, "global");
+  const store = await readBindingStore(statePath);
+  const concurrentBinding = {
+    ...structuredClone(store.bindings[key]),
+    source: {
+      ...structuredClone(store.bindings[key].source),
+      path: path.resolve(concurrentSource),
+      target: await realpath(concurrentSource),
+    },
+    updatedAt: "2026-08-20T00:00:00.000Z",
+  };
+  const release = await acquireStateLock(statePath);
+  const pendingRecovery = resolveBinding({
+    descriptor: sourceDescriptor,
+    context: "global",
+    statePath,
+    roots: [rootRecord(versionThree, "3")],
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    store.bindings[key] = concurrentBinding;
+    await writeFile(statePath, `${JSON.stringify(store, null, 2)}\n`);
+  } finally {
+    await release();
+  }
+
+  const afterRace = await pendingRecovery;
+  assert.equal(afterRace.source.path, path.resolve(concurrentSource));
+  assert.deepEqual((await readBindingStore(statePath)).bindings[key], concurrentBinding);
+
+  const versionFour = path.join(root, "plugin", "4", "skills", "review");
+  await rename(path.join(root, "concurrent"), path.join(root, "removed-concurrent"));
+  await mkdir(versionFour, { recursive: true });
+  await writeFile(path.join(versionFour, "SKILL.md"), "---\nname: review\n---\nstable\n");
+  const releaseDeletion = await acquireStateLock(statePath);
+  const pendingDeletion = resolveBinding({
+    descriptor: sourceDescriptor,
+    context: "global",
+    statePath,
+    roots: [rootRecord(versionFour, "4")],
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const deletedStore = await readBindingStore(statePath);
+    delete deletedStore.bindings[key];
+    await writeFile(statePath, `${JSON.stringify(deletedStore, null, 2)}\n`);
+  } finally {
+    await releaseDeletion();
+  }
+
+  await assert.rejects(
+    pendingDeletion,
+    (error) => error.code === "BINDING_NOT_FOUND",
+  );
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
 test("ambient binding preserves plugin identity for cache recovery", async () => {
@@ -710,6 +775,79 @@ test("binding accepts confirmed repository-only plugin provenance", async () => 
   assert.equal(binding.source.repository, repository);
   assert.equal(binding.source.upstreamPath, "skills/review/SKILL.md");
   assert.equal(binding.source.selection.provenance, repositoryOnlyProvenance);
+});
+
+test("binding persists the confirmed plugin identity", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-confirmed-plugin-identity-"));
+  const source = path.join(root, "skills", "review");
+  const statePath = path.join(root, "bindings.json");
+  const entrypoint = path.join(source, "SKILL.md");
+  await mkdir(source, { recursive: true });
+  await writeFile(entrypoint, "---\nname: review\n---\nsource\n");
+  const identities = [
+    "local:plugin:fixture-host:first:reviewer",
+    "local:plugin:fixture-host:confirmed:reviewer",
+  ];
+  const roots = identities.map((identity, index) => ({
+    path: path.dirname(source),
+    owner: "plugin:fixture-host",
+    scope: "global",
+    origin: "plugin",
+    pluginRoot: root,
+    pluginIdentity: identity,
+    pluginEvidence: [{
+      kind: "plugin",
+      host: "fixture-host",
+      marketplace: index === 0 ? "first" : "confirmed",
+      plugin: "reviewer",
+      identity,
+    }],
+  }));
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      skill_name: "review",
+      kind: "local",
+      license: "MIT",
+      effective_fingerprint: await fingerprintPath(source),
+      identity: generateLocalIdentity({
+        skillName: "review",
+        fingerprint: await fingerprintFile(entrypoint),
+      }),
+    },
+  };
+  const discovery = await discoverSkills({ input: source, roots, managerRecords: [] });
+  const group = discovery.groups[0];
+  const chosenCopy = group.copies.find(({ owner }) => owner === "plugin:fixture-host");
+  const confirmedSelection = confirmDiscoverySelection({
+    discovery,
+    choice: {
+      name: group.name,
+      fingerprint: group.fingerprint,
+      path: chosenCopy.path,
+      owner: chosenCopy.owner,
+    },
+    interactive: true,
+    confirmedProvenance: identities[1],
+    confirmationEvidence: {
+      actor: "human",
+      reason: "selected the confirmed marketplace identity",
+    },
+  });
+
+  const binding = await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots,
+    confirmedSelection,
+    interactive: true,
+    confirm: async () => true,
+  });
+
+  assert.equal(binding.source.selection.provenance, identities[1]);
+  assert.equal(binding.source.pluginIdentity, identities[1]);
 });
 
 test("binding preserves a provenance choice made through a customization alias", async () => {
