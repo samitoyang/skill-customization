@@ -499,15 +499,21 @@ async function readManifest(
 ) {
   for (const relative of files) {
     const file = path.join(installRoot, relative);
+    try {
+      await lstat(file);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+    }
     const value = await readJsonObject(file, context, {
       host: context.host,
       metadata,
       description,
       boundary: installRoot,
     });
-    if (value) return { value, path: file };
+    if (value) return { status: "valid", value, path: file };
+    return { status: "invalid", path: file };
   }
-  return undefined;
+  return { status: "missing" };
 }
 
 async function addPluginInstall({
@@ -558,10 +564,10 @@ async function addPluginInstall({
     files: manifestFiles,
     description: manifestDescription,
   });
-  const manifestValue = manifest?.value;
-  let invalidManifest = false;
+  const manifestValue = manifest.status === "valid" ? manifest.value : undefined;
+  let invalidManifest = manifest.status === "invalid";
   if (requiredManifestFields.length > 0) {
-    if (!manifest) {
+    if (manifest.status === "missing") {
       invalidManifest = true;
       context.diagnostics.push(
         diagnostic({
@@ -572,7 +578,7 @@ async function addPluginInstall({
           metadata: initialMetadata,
         }),
       );
-    } else {
+    } else if (manifest.status === "valid") {
       for (const field of requiredManifestFields) {
         if (stringValue(manifestValue[field])) continue;
         invalidManifest = true;
@@ -590,7 +596,7 @@ async function addPluginInstall({
   }
   if (
     manifestNamePattern
-    && manifest
+    && manifestValue
     && typeof manifestValue.name === "string"
     && !manifestNamePattern.test(manifestValue.name)
   ) {
@@ -607,7 +613,7 @@ async function addPluginInstall({
   }
   if (
     nameMatchesDirectory
-    && manifest
+    && manifestValue
     && stringValue(manifestValue.name)
     && stringValue(manifestValue.name) !== path.basename(safeInstallRoot)
   ) {

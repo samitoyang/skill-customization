@@ -578,6 +578,10 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   await writeSkill(path.join(malformedPlugin, "skills"), "malformed-review");
   await mkdir(path.join(malformedPlugin, ".cursor-plugin"), { recursive: true });
   await writeFile(path.join(malformedPlugin, ".cursor-plugin", "plugin.json"), "{broken\n");
+  await writeFile(
+    path.join(malformedPlugin, "plugin.json"),
+    JSON.stringify({ name: "malformed-plugin" }),
+  );
 
   const invalidPlugin = path.join(localRoot, "invalid-plugin");
   await writeSkill(path.join(invalidPlugin, "skills"), "invalid-review");
@@ -854,6 +858,7 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   });
   assert.equal(inventory.groups.some(({ name }) => name === "empty-fallback-review"), false);
   assert.equal(inventory.groups.some(({ name }) => name === "invalid-fallback-review"), false);
+  assert.equal(inventory.groups.some(({ name }) => name === "malformed-review"), false);
   assert.equal(
     inventory.groups.some(({ name }) => name === "cursor-escaping-marketplace-review"),
     true,
