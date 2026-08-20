@@ -1036,7 +1036,7 @@ function codexMarketplaceConfigEntries(contents) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const section = trimmed.match(
-      /^\[marketplaces\.(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\]\s*(?:#.*)?$/,
+      /^\[\s*marketplaces\s*\.\s*(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*\]\s*(?:#.*)?$/,
     );
     if (section) {
       current = {

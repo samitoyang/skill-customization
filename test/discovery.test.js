@@ -1212,7 +1212,7 @@ test("Codex config.toml local marketplaces discover bounded external roots", asy
   await mkdir(codexHome, { recursive: true });
   await writeFile(
     path.join(codexHome, "config.toml"),
-    `[marketplaces."configured-marketplace"] # development checkout\nsource_type = "local"\nsource = "${marketplaceRoot}"\n\n[marketplaces."broken-marketplace"]\nsource_type = local\nsource = "${marketplaceRoot}"\n`,
+    `[marketplaces . configured-marketplace] # development checkout\nsource_type = "local"\nsource = "${marketplaceRoot}"\n\n[marketplaces."broken-marketplace"]\nsource_type = local\nsource = "${marketplaceRoot}"\n`,
   );
 
   const result = await discoverSkills({
