@@ -287,7 +287,7 @@ test("plugin cache recovery preserves concurrent binding changes and deletions",
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
-test("missing plugin cache recovery preserves target-missing invalidation", async () => {
+test("plugin cache recovery rejects mismatched upstream paths", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-cache-missing-"));
   const install = path.join(root, "plugin", "1");
   const source = path.join(install, "skills", "review");
@@ -322,7 +322,6 @@ test("missing plugin cache recovery preserves target-missing invalidation", asyn
       marketplace: "fixture-marketplace",
       plugin: "reviewer",
       repository,
-      upstream_path: "skills/review/SKILL.md",
       identity,
       cache: { kind: "versioned", scope: "global" },
     }],
@@ -337,13 +336,32 @@ test("missing plugin cache recovery preserves target-missing invalidation", asyn
     confirm: async () => true,
   });
   await rename(install, path.join(root, "removed"));
+  const replacementInstall = path.join(root, "plugin", "2");
+  const replacement = path.join(replacementInstall, "skills", "review");
+  await mkdir(replacement, { recursive: true });
+  await writeFile(path.join(replacement, "SKILL.md"), "---\nname: review\n---\nstable\n");
+  const replacementRoot = {
+    ...rootRecord,
+    path: path.dirname(replacement),
+    pluginRoot: replacementInstall,
+  };
 
   await assert.rejects(
     resolveBinding({
       descriptor: sourceDescriptor,
       context: "global",
       statePath,
-      roots: [],
+      roots: [replacementRoot],
+      managerRecords: [{
+        manager: "asm",
+        name: "review",
+        path: replacement,
+        source: {
+          kind: "repository",
+          repository,
+          upstreamPath: "other/review/SKILL.md",
+        },
+      }],
     }),
     (error) => error.code === "BINDING_TARGET_MISSING",
   );

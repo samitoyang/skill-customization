@@ -121,6 +121,29 @@ async function confirmOrFail(callback, payload, code, message) {
   }
 }
 
+function normalizedRepositoryEvidence(evidence) {
+  return evidence
+    .filter((item) => item.repository)
+    .map((item) => ({
+      repository: normalizeRepositoryUrl(item.repository),
+      upstreamPath: normalizeUpstreamEntrypoint(
+        item.upstream_path ?? item.upstreamPath,
+      ),
+      kind: item.kind,
+    }));
+}
+
+function observedRepositoryPaths(evidence, repository) {
+  return [
+    ...new Set(
+      evidence
+        .filter((item) => item.repository === repository)
+        .map((item) => item.upstreamPath)
+        .filter(Boolean),
+    ),
+  ];
+}
+
 async function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
   if (!confirmedSelection) {
     if (group.conflict) {
@@ -273,15 +296,7 @@ async function inspectBindingSource({
     upstreamPath = normalizeUpstreamEntrypoint(descriptor.source.upstream_path);
     const repositoryProvenance = `repository:${repository}`;
     const expectedProvenance = `repository:${repository}#${upstreamPath}`;
-    const repositoryEvidence = group.evidence
-      .filter((item) => item.repository)
-      .map((item) => ({
-        repository: normalizeRepositoryUrl(item.repository),
-        upstreamPath: normalizeUpstreamEntrypoint(
-          item.upstream_path ?? item.upstreamPath,
-        ),
-        kind: item.kind,
-      }));
+    const repositoryEvidence = normalizedRepositoryEvidence(group.evidence);
     if (
       selection
       && selection.provenance !== repositoryProvenance
@@ -310,14 +325,7 @@ async function inspectBindingSource({
       }
     }
     if (!selection || selection.provenance === repositoryProvenance) {
-      const observedPaths = [
-        ...new Set(
-          repositoryEvidence
-            .filter((item) => item.repository === repository)
-            .map((item) => item.upstreamPath)
-            .filter(Boolean),
-        ),
-      ];
+      const observedPaths = observedRepositoryPaths(repositoryEvidence, repository);
       if (observedPaths.some((value) => value !== upstreamPath)) {
         throw new BindingError(
           "binding source upstream entrypoint does not match the descriptor",
@@ -427,6 +435,13 @@ function compatibleProvenance(descriptor, copy) {
   const upstreamPath = descriptor.source.kind === "repository"
     ? normalizeUpstreamEntrypoint(descriptor.source.upstream_path)
     : undefined;
+  if (repository) {
+    const observedPaths = observedRepositoryPaths(
+      normalizedRepositoryEvidence(copy.evidence),
+      repository,
+    );
+    if (observedPaths.some((value) => value !== upstreamPath)) return undefined;
+  }
   return copy.provenance.find((identity) => {
     if (repository) {
       return identity === `repository:${repository}`
