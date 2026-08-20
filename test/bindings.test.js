@@ -188,6 +188,7 @@ test("plugin cache recovery preserves concurrent binding changes and deletions",
       version,
       repository,
       identity,
+      cache: { kind: "versioned", scope: "global" },
     }],
   });
   await bindCustomization({
@@ -211,6 +212,7 @@ test("plugin cache recovery preserves concurrent binding changes and deletions",
   });
   assert.equal(resolved.source.path, path.resolve(versionTwo));
   assert.equal(resolved.source.pluginIdentity, identity);
+  assert.deepEqual(resolved.source.pluginCache, { kind: "versioned", scope: "global" });
   assert.equal(Object.hasOwn(resolved.source, "alias"), false);
   assert.equal(Object.hasOwn(resolved.source, "selection"), false);
   assert.equal((await readBindingStore(statePath)).bindings[`${encodeURIComponent(sourceDescriptor.id)}::global`].source.path, path.resolve(versionTwo));
@@ -336,6 +338,7 @@ test("ambient binding preserves plugin identity for cache recovery", async () =>
       confirm: async () => true,
     });
     assert.equal(bound.source.pluginIdentity, identity);
+    assert.deepEqual(bound.source.pluginCache, { kind: "versioned", scope: "global" });
 
     await rename(versionOneRoot, path.join(root, "removed"));
     await mkdir(versionTwo, { recursive: true });
@@ -353,12 +356,111 @@ test("ambient binding preserves plugin identity for cache recovery", async () =>
     });
     assert.equal(resolved.source.path, path.resolve(versionTwo));
     assert.equal(resolved.source.pluginIdentity, identity);
+    assert.deepEqual(resolved.source.pluginCache, { kind: "versioned", scope: "global" });
   } finally {
     for (const [name, value] of Object.entries(previousHomes)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
   }
+});
+
+test("automatic plugin recovery requires a same-scope versioned cache", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-cache-policy-"));
+  const directSource = path.join(root, "workspace-direct", "skills", "review");
+  const directReplacement = path.join(root, "global-direct", "skills", "review");
+  const cacheSource = path.join(root, "workspace-cache", "skills", "review");
+  const cacheReplacement = path.join(root, "global-cache", "skills", "review");
+  const workflow = "---\nname: review\n---\nstable\n";
+  const plugin = {
+    host: "fixture-host",
+    marketplace: "fixture-marketplace",
+    name: "reviewer",
+  };
+  const identity = "local:plugin:fixture-host:fixture-marketplace:reviewer";
+  const repository = "https://github.com/example/reviewer";
+  const rootRecord = (directory, scope, versioned = false) => ({
+    path: path.dirname(directory),
+    owner: "plugin:fixture-host",
+    scope,
+    origin: "plugin",
+    plugin,
+    pluginIdentity: identity,
+    pluginRoot: path.dirname(path.dirname(directory)),
+    pluginEvidence: [{
+      kind: "plugin",
+      ...plugin,
+      repository,
+      identity,
+      ...(versioned ? { cache: { kind: "versioned", scope } } : {}),
+    }],
+  });
+
+  await mkdir(directSource, { recursive: true });
+  await writeFile(path.join(directSource, "SKILL.md"), workflow);
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      ...descriptor().source,
+      repository,
+      effective_fingerprint: await fingerprintPath(directSource),
+    },
+  };
+  const directStatePath = path.join(root, "direct-state", "bindings.json");
+  const directBinding = await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: directSource,
+    context: "workspace-direct",
+    statePath: directStatePath,
+    roots: [rootRecord(directSource, "workspace")],
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.equal(directBinding.source.pluginIdentity, identity);
+  assert.equal(Object.hasOwn(directBinding.source, "pluginCache"), false);
+  await rename(directSource, path.join(root, "removed-direct"));
+  await mkdir(directReplacement, { recursive: true });
+  await writeFile(path.join(directReplacement, "SKILL.md"), workflow);
+  await assert.rejects(
+    resolveBinding({
+      descriptor: sourceDescriptor,
+      context: "workspace-direct",
+      statePath: directStatePath,
+      roots: [rootRecord(directReplacement, "global")],
+    }),
+    (error) => error.code === "BINDING_TARGET_MISSING",
+  );
+  assert.deepEqual((await readBindingStore(directStatePath)).bindings, {});
+
+  await mkdir(cacheSource, { recursive: true });
+  await writeFile(path.join(cacheSource, "SKILL.md"), workflow);
+  const cacheStatePath = path.join(root, "cache-state", "bindings.json");
+  const cacheBinding = await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: cacheSource,
+    context: "workspace-cache",
+    statePath: cacheStatePath,
+    roots: [rootRecord(cacheSource, "workspace", true)],
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.deepEqual(cacheBinding.source.pluginCache, {
+    kind: "versioned",
+    scope: "workspace",
+  });
+  await rename(cacheSource, path.join(root, "removed-cache"));
+  await mkdir(cacheReplacement, { recursive: true });
+  await writeFile(path.join(cacheReplacement, "SKILL.md"), workflow);
+  await assert.rejects(
+    resolveBinding({
+      descriptor: sourceDescriptor,
+      context: "workspace-cache",
+      statePath: cacheStatePath,
+      roots: [rootRecord(cacheReplacement, "global", true)],
+    }),
+    (error) => error.code === "BINDING_TARGET_MISSING",
+  );
+  assert.deepEqual((await readBindingStore(cacheStatePath)).bindings, {});
 });
 
 test("concurrent bindings preserve distinct context keys", async () => {

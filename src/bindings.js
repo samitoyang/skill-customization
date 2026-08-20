@@ -251,6 +251,13 @@ async function inspectBindingSource({
     : pluginIdentities.length === 1
       ? pluginIdentities[0]
       : undefined;
+  const bindingPluginCache = sourceCopy?.evidence.find(
+    ({ kind, identity, cache }) =>
+      kind === "plugin"
+      && identity === bindingPluginIdentity
+      && cache?.kind === "versioned"
+      && cache.scope === sourceCopy.scope,
+  )?.cache;
   let repository;
   let upstreamPath;
   if (descriptor.source.kind === "repository") {
@@ -396,6 +403,9 @@ async function inspectBindingSource({
     ...(bindingPluginIdentity
       ? { pluginIdentity: bindingPluginIdentity }
       : {}),
+    ...(bindingPluginCache
+      ? { pluginCache: structuredClone(bindingPluginCache) }
+      : {}),
   };
 }
 
@@ -417,7 +427,12 @@ function compatibleProvenance(descriptor, copy) {
 }
 
 async function recoverMissingPluginBinding({ descriptor, binding, roots, managerRecords }) {
-  if (!binding.source.pluginIdentity) return undefined;
+  const { pluginCache, pluginIdentity } = binding.source;
+  if (
+    !pluginIdentity
+    || pluginCache?.kind !== "versioned"
+    || pluginCache.scope !== binding.scope
+  ) return undefined;
   // A cache path is replaceable local state; continuity is safe only for one
   // stable plugin identity and one already reviewed effective fingerprint.
   const discovery = await discoverSkills({
@@ -428,7 +443,15 @@ async function recoverMissingPluginBinding({ descriptor, binding, roots, manager
   const matches = [];
   for (const group of discovery.groups) {
     for (const copy of group.copies) {
-      if (copy.pluginIdentity !== binding.source.pluginIdentity) continue;
+      if (copy.pluginIdentity !== pluginIdentity || copy.scope !== pluginCache.scope) continue;
+      const compatibleCache = copy.evidence.some(
+        ({ kind, identity, cache }) =>
+          kind === "plugin"
+          && identity === pluginIdentity
+          && cache?.kind === "versioned"
+          && cache.scope === pluginCache.scope,
+      );
+      if (!compatibleCache) continue;
       const effectiveFingerprint = await fingerprintPath(copy.path).catch(() => undefined);
       if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
       const provenance = compatibleProvenance(descriptor, copy);
@@ -554,6 +577,9 @@ export async function bindCustomization({
       provenance: inspection.provenance,
       ...(inspection.pluginIdentity
         ? { pluginIdentity: inspection.pluginIdentity }
+        : {}),
+      ...(inspection.pluginCache?.scope === classified.scope
+        ? { pluginCache: inspection.pluginCache }
         : {}),
       ...(inspection.selection ? { selection: inspection.selection } : {}),
       confirmation: inspection.selection

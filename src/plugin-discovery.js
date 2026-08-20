@@ -519,6 +519,7 @@ async function addPluginInstall({
   version,
   scope,
   source,
+  cache,
   declaration = {},
   context,
   defaultSkillDirectory = "skills",
@@ -771,7 +772,10 @@ async function addPluginInstall({
     },
     pluginMetadata: metadata,
     pluginIdentity: pluginIdentity(metadata),
-    pluginEvidence: [evidenceResult.evidence],
+    pluginEvidence: [{
+      ...evidenceResult.evidence,
+      ...(cache ? { cache: structuredClone(cache) } : {}),
+    }],
     pluginRoot: safeInstallRoot,
     ...(manifest?.path ? { pluginManifest: manifest.path } : {}),
   });
@@ -952,6 +956,7 @@ async function discoverVersionedPluginCache({
           version: version.entry.name,
           scope,
           source: {},
+          cache: { kind: "versioned", scope },
           context,
         });
       }
@@ -1028,6 +1033,16 @@ function tomlQuotedValue(quote, value) {
   }
 }
 
+function tomlKeyValue(doubleQuoted, singleQuoted, bare) {
+  return stringValue(
+    doubleQuoted !== undefined
+      ? tomlQuotedValue('"', doubleQuoted)
+      : singleQuoted !== undefined
+        ? tomlQuotedValue("'", singleQuoted)
+        : bare,
+  );
+}
+
 function codexMarketplaceConfigEntries(contents) {
   const entries = [];
   const invalid = [];
@@ -1036,17 +1051,11 @@ function codexMarketplaceConfigEntries(contents) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const section = trimmed.match(
-      /^\[\s*marketplaces\s*\.\s*(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*\]\s*(?:#.*)?$/,
+      /^\[\s*(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*\.\s*(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*\]\s*(?:#.*)?$/,
     );
-    if (section) {
+    if (section && tomlKeyValue(section[1], section[2], section[3]) === "marketplaces") {
       current = {
-        name: stringValue(
-          section[1] !== undefined
-            ? tomlQuotedValue('"', section[1])
-            : section[2] !== undefined
-              ? tomlQuotedValue("'", section[2])
-              : section[3],
-        ),
+        name: tomlKeyValue(section[4], section[5], section[6]),
       };
       entries.push(current);
       continue;
