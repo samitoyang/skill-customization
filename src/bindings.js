@@ -411,7 +411,6 @@ async function recoverMissingPluginBinding({ descriptor, binding, roots, manager
     input: descriptor.source.skill_name,
     roots,
     managerRecords,
-    includePlugins: false,
   });
   const matches = [];
   for (const group of discovery.groups) {
@@ -688,7 +687,7 @@ export async function resolveBinding({
   descriptor,
   context,
   statePath = bindingStorePath(),
-  roots = [],
+  roots,
   managerRecords = [],
   activeSkills,
 }) {

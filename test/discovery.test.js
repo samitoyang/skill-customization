@@ -1485,31 +1485,52 @@ test("Claude marketplace manifests contribute repository provenance", async () =
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-marketplace-"));
   const home = path.join(root, "home");
   const marketplace = path.join(home, ".claude", "plugins", "marketplaces", "team");
+  const escapedPlugin = path.join(
+    home,
+    ".claude",
+    "plugins",
+    "marketplaces",
+    "other",
+    "plugins",
+    "escaped",
+  );
   await writeSkill(path.join(marketplace, "plugins", "reviewer", "skills"), "market-review");
+  await writeSkill(path.join(escapedPlugin, "skills"), "escaped-market-review");
   await mkdir(path.join(marketplace, ".claude-plugin"), { recursive: true });
   await writeFile(
     path.join(marketplace, ".claude-plugin", "marketplace.json"),
     JSON.stringify({
       name: "team",
-      plugins: [{
-        name: "reviewer",
-        source: "./plugins/reviewer",
-        repository: "https://github.com/example/team-skills",
-      }],
+      plugins: [
+        {
+          name: "reviewer",
+          source: "./plugins/reviewer",
+          repository: "https://github.com/example/team-skills",
+        },
+        {
+          name: "escaped",
+          source: "../other/plugins/escaped",
+          repository: "https://github.com/example/team-skills",
+        },
+      ],
     }),
   );
 
   const result = await discoverSkills({
-    input: "market-review",
     home,
     cwd: path.join(root, "workspace"),
     env: {},
     managerRecords: [],
   });
   assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].name, "market-review");
   assert.deepEqual(result.groups[0].provenance, [
     "repository:https://github.com/example/team-skills",
   ]);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_ROOT_ESCAPE" && diagnosticPath === escapedPlugin,
+  ));
   assert.equal(
     result.pluginDiagnostics.some(({ code }) => code === "INVALID_PLUGIN_REPOSITORY"),
     false,

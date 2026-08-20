@@ -215,6 +215,98 @@ test("plugin cache replacement preserves a confirmed binding when identity and c
   assert.equal(Object.hasOwn(sourceDescriptor, "plugin"), false);
 });
 
+test("binding recovery rediscovers ambient plugin caches when roots are omitted", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-ambient-plugin-continuity-"));
+  const versionOne = path.join(root, "plugin", "1", "skills", "review");
+  const claudeHome = path.join(root, "claude");
+  const versionTwoRoot = path.join(
+    claudeHome,
+    "plugins",
+    "cache",
+    "fixture-marketplace",
+    "reviewer",
+    "2",
+  );
+  const versionTwo = path.join(versionTwoRoot, "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const plugin = {
+    host: "claude-code",
+    marketplace: "fixture-marketplace",
+    name: "reviewer",
+    version: "1",
+  };
+  const identity = "local:plugin:claude-code:fixture-marketplace:reviewer";
+  const repository = "https://github.com/example/reviewer";
+  const workflow = "---\nname: review\n---\nstable\n";
+  await mkdir(versionOne, { recursive: true });
+  await writeFile(path.join(versionOne, "SKILL.md"), workflow);
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      ...descriptor().source,
+      repository,
+      upstream_path: "skills/review/SKILL.md",
+      effective_fingerprint: await fingerprintPath(versionOne),
+    },
+  };
+  await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: versionOne,
+    context: "global",
+    statePath,
+    roots: [{
+      path: path.dirname(versionOne),
+      owner: "plugin:claude-code",
+      scope: "global",
+      origin: "plugin",
+      plugin,
+      pluginIdentity: identity,
+      pluginRoot: path.dirname(path.dirname(versionOne)),
+      pluginEvidence: [{
+        kind: "plugin",
+        ...plugin,
+        repository,
+        identity,
+      }],
+    }],
+    interactive: true,
+    confirm: async () => true,
+  });
+  await rename(path.join(root, "plugin", "1"), path.join(root, "removed"));
+  await mkdir(versionTwo, { recursive: true });
+  await writeFile(path.join(versionTwo, "SKILL.md"), workflow);
+  await mkdir(path.join(versionTwoRoot, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(versionTwoRoot, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name: "reviewer", version: "2", repository }),
+  );
+
+  const ambientHomes = {
+    CLAUDE_CONFIG_DIR: claudeHome,
+    CODEX_HOME: path.join(root, "codex"),
+    CURSOR_HOME: path.join(root, "cursor"),
+    GEMINI_CLI_HOME: path.join(root, "gemini"),
+  };
+  const previousHomes = Object.fromEntries(
+    Object.keys(ambientHomes).map((name) => [name, process.env[name]]),
+  );
+  Object.assign(process.env, ambientHomes);
+  try {
+    const resolved = await resolveBinding({
+      descriptor: sourceDescriptor,
+      context: "global",
+      statePath,
+    });
+    assert.equal(resolved.source.path, path.resolve(versionTwo));
+    assert.equal(resolved.source.pluginIdentity, identity);
+  } finally {
+    for (const [name, value] of Object.entries(previousHomes)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
 test("concurrent bindings preserve distinct context keys", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-concurrent-"));
   const source = path.join(root, "skills", "review");

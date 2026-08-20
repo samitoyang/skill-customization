@@ -1710,7 +1710,7 @@ async function discoverMarketplaceManifests({
       }
       const added = await addPluginInstall({
         installRoot: marketplacePluginPath(configuredPath, file, safeBase, pluginRoot),
-        boundary: host === "cursor" ? safeBase : boundary ?? safeBase,
+        boundary: marketplaceSourceBase(file, safeBase),
         host,
         marketplace,
         name: entry.name,
