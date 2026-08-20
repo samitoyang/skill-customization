@@ -892,16 +892,24 @@ async function discoverCursorLocalPluginRoots({
     { host: "cursor", source: "extension" },
   );
   if (!safeRoot) return;
+  const marketplaceOwnedRoots = new Set(
+    (await Promise.all(
+      context.roots
+        .filter((rootInfo) =>
+          rootInfo.host === "cursor"
+          && rootInfo.pluginMetadata?.source === "marketplace"
+          && rootInfo.pluginRoot
+        )
+        .map((rootInfo) => realpath(rootInfo.pluginRoot).catch(() => undefined)),
+    )).filter(Boolean),
+  );
   for (const extension of await pluginDirectories(
     safeRoot,
     context,
     { host: "cursor", source: "extension" },
   )) {
-    if (context.roots.some((rootInfo) =>
-      rootInfo.host === "cursor"
-      && rootInfo.pluginMetadata?.source === "marketplace"
-      && path.resolve(rootInfo.pluginRoot) === extension.path
-    )) continue;
+    const canonicalExtension = await realpath(extension.path).catch(() => undefined);
+    if (canonicalExtension && marketplaceOwnedRoots.has(canonicalExtension)) continue;
     const marketplaceManifest = await cursorMarketplaceManifestStatus(extension.path);
     if (marketplaceManifest.present) {
       // A direct child can itself be a documented multi-plugin repository.

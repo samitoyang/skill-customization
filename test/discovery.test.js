@@ -516,7 +516,7 @@ test("Cursor skips marketplace entries when the declared plugin root is invalid"
   ));
 });
 
-test("Cursor root marketplaces own declared direct-child plugins", async () => {
+test("Cursor root marketplaces own every in-root alias of declared plugins", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-marketplace-owner-"));
   const home = path.join(root, "home");
   const localRoot = path.join(home, ".cursor", "plugins", "local");
@@ -526,13 +526,15 @@ test("Cursor root marketplaces own declared direct-child plugins", async () => {
     path.join(plugin, "plugin.json"),
     JSON.stringify({ name: "owned-plugin" }),
   );
+  const alias = path.join(localRoot, "owned-alias");
+  await symlink(plugin, alias, "dir");
   await mkdir(path.join(localRoot, ".cursor-plugin"), { recursive: true });
   await writeFile(
     path.join(localRoot, ".cursor-plugin", "marketplace.json"),
     JSON.stringify({
       name: "team-marketplace",
       owner: { name: "fixture" },
-      plugins: [{ name: "owned-plugin", source: "owned-plugin" }],
+      plugins: [{ name: "owned-plugin", source: "owned-alias" }],
     }),
   );
 
