@@ -1987,6 +1987,9 @@ export async function discoverPluginSkillRoots({
       ...existing.pluginEvidence.map((value) => JSON.stringify(value)),
       ...(item.pluginEvidence ?? []).map((value) => JSON.stringify(value)),
     ]).map((value) => JSON.parse(value));
+    if (existing.active === false && item.active !== false) {
+      delete existing.active;
+    }
   }
   roots.sort((left, right) => left.path.localeCompare(right.path, "en"));
   return {

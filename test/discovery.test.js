@@ -62,6 +62,14 @@ test("ambient discovery finds Claude plugin cache roots with manifest provenance
       repository: "https://github.com/example/reviewer",
     }),
   );
+  await writeFile(
+    path.join(home, ".claude", "plugins", "installed_plugins.json"),
+    JSON.stringify({
+      plugins: {
+        "reviewer@official": [{ installPath: pluginRoot, version: "1.2.3" }],
+      },
+    }),
+  );
 
   const result = await discoverSkills({
     input: "review",
@@ -74,6 +82,10 @@ test("ambient discovery finds Claude plugin cache roots with manifest provenance
   assert.equal(result.groups.length, 1);
   assert.equal(result.groups[0].copies[0].path, skill);
   assert.equal(result.groups[0].copies[0].owner, "plugin:claude-code");
+  assert.equal(result.groups[0].copies[0].active, undefined);
+  assert.deepEqual(activeSkillInventory(result), [
+    { name: "review", path: skill, realPath: await realpath(skill) },
+  ]);
   assert.deepEqual(result.groups[0].copies[0].plugin, {
     host: "claude-code",
     marketplace: "official",
@@ -82,7 +94,7 @@ test("ambient discovery finds Claude plugin cache roots with manifest provenance
   });
   assert.deepEqual(
     result.groups[0].evidence.map(({ kind }) => kind),
-    ["plugin"],
+    ["plugin", "plugin"],
   );
   assert.deepEqual(result.groups[0].provenance, [
     "repository:https://github.com/example/reviewer",
