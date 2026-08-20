@@ -516,6 +516,46 @@ test("Cursor skips marketplace entries when the declared plugin root is invalid"
   ));
 });
 
+test("Cursor root marketplaces own declared direct-child plugins", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-marketplace-owner-"));
+  const home = path.join(root, "home");
+  const localRoot = path.join(home, ".cursor", "plugins", "local");
+  const plugin = path.join(localRoot, "owned-plugin");
+  await writeSkill(path.join(plugin, "skills"), "owned-review");
+  await writeFile(
+    path.join(plugin, "plugin.json"),
+    JSON.stringify({ name: "owned-plugin" }),
+  );
+  await mkdir(path.join(localRoot, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(localRoot, ".cursor-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "team-marketplace",
+      owner: { name: "fixture" },
+      plugins: [{ name: "owned-plugin", source: "owned-plugin" }],
+    }),
+  );
+
+  const result = await discoverSkills({
+    input: "owned-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].conflict, false);
+  assert.deepEqual(result.groups[0].copies[0].plugin, {
+    host: "cursor",
+    marketplace: "team-marketplace",
+    name: "owned-plugin",
+  });
+  assert.deepEqual(result.groups[0].provenance, [
+    "local:plugin:cursor:team-marketplace:owned-plugin",
+  ]);
+});
+
 test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-diagnostics-"));
   const home = path.join(root, "home");

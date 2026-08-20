@@ -886,6 +886,11 @@ async function discoverCursorLocalPluginRoots({
     context,
     { host: "cursor", source: "extension" },
   )) {
+    if (context.roots.some((rootInfo) =>
+      rootInfo.host === "cursor"
+      && rootInfo.pluginMetadata?.source === "marketplace"
+      && path.resolve(rootInfo.pluginRoot) === extension.path
+    )) continue;
     const marketplaceManifest = await cursorMarketplaceManifestStatus(extension.path);
     if (marketplaceManifest.present) {
       // A direct child can itself be a documented multi-plugin repository.
@@ -1425,12 +1430,7 @@ async function discoverCursor(context) {
     stringValue(env.CURSOR_HOME) ?? path.join(home, ".cursor"),
   );
   const globalRoot = path.join(cursorHome, "plugins", "local");
-  await discoverCursorLocalPluginRoots({
-    root: globalRoot,
-    boundary: cursorHome,
-    scope: "global",
-    context,
-  });
+  // A valid marketplace owns its declared installs; direct discovery is the fallback.
   await discoverMarketplaceManifests({
     base: globalRoot,
     boundary: cursorHome,
@@ -1440,14 +1440,14 @@ async function discoverCursor(context) {
     marketplaceName: "local",
     manifestPolicy: CURSOR_MANIFEST_POLICY,
   });
+  await discoverCursorLocalPluginRoots({
+    root: globalRoot,
+    boundary: cursorHome,
+    scope: "global",
+    context,
+  });
   for (const workspace of context.workspaceDirectories) {
     const workspaceRoot = path.join(workspace, ".cursor", "plugins", "local");
-    await discoverCursorLocalPluginRoots({
-      root: workspaceRoot,
-      boundary: workspace,
-      scope: "workspace",
-      context,
-    });
     await discoverMarketplaceManifests({
       base: workspaceRoot,
       boundary: workspace,
@@ -1456,6 +1456,12 @@ async function discoverCursor(context) {
       scope: "workspace",
       marketplaceName: "local",
       manifestPolicy: CURSOR_MANIFEST_POLICY,
+    });
+    await discoverCursorLocalPluginRoots({
+      root: workspaceRoot,
+      boundary: workspace,
+      scope: "workspace",
+      context,
     });
   }
 }
