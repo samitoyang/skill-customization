@@ -643,6 +643,103 @@ test("Cursor root marketplaces own every in-root alias of declared plugins", asy
   ]);
 });
 
+test("Cursor marketplace plugin roots bound every declared entry", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-plugin-boundary-"));
+  const home = path.join(root, "home");
+  const localRoot = path.join(home, ".cursor", "plugins", "local");
+  const ownedPlugin = path.join(localRoot, "plugins", "owned-plugin");
+  const outsidePlugin = path.join(localRoot, "outside-plugin");
+  await writeSkill(path.join(ownedPlugin, "skills"), "owned-boundary-review");
+  await writeSkill(path.join(outsidePlugin, "skills"), "outside-boundary-review");
+  for (const [plugin, name] of [
+    [ownedPlugin, "owned-plugin"],
+    [outsidePlugin, "outside-plugin"],
+  ]) {
+    await writeFile(path.join(plugin, "plugin.json"), JSON.stringify({ name }));
+  }
+  await mkdir(path.join(localRoot, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(localRoot, ".cursor-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "team-marketplace",
+      owner: { name: "fixture" },
+      metadata: { pluginRoot: "plugins" },
+      plugins: [
+        { name: "owned-plugin", source: "owned-plugin" },
+        { name: "outside-plugin", source: "../outside-plugin" },
+      ],
+    }),
+  );
+
+  const result = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  const byName = new Map(result.groups.map((group) => [group.name, group]));
+
+  assert.equal(
+    byName.get("owned-boundary-review").copies[0].plugin.marketplace,
+    "team-marketplace",
+  );
+  assert.equal(
+    byName.get("outside-boundary-review").copies[0].plugin.marketplace,
+    "local",
+  );
+  assert.equal(byName.get("outside-boundary-review").conflict, false);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_ROOT_ESCAPE" && diagnosticPath === outsidePlugin,
+  ));
+});
+
+test("Cursor marketplace discovery ignores foreign host manifests", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-host-marketplace-"));
+  const home = path.join(root, "home");
+  const localRoot = path.join(home, ".cursor", "plugins", "local");
+  const cursorPlugin = path.join(localRoot, "cursor-plugin");
+  const foreignPlugin = path.join(localRoot, "foreign-plugin");
+  await writeSkill(path.join(cursorPlugin, "skills"), "cursor-owned-review");
+  await writeSkill(path.join(foreignPlugin, "skills"), "foreign-local-review");
+  for (const [plugin, name] of [
+    [cursorPlugin, "cursor-plugin"],
+    [foreignPlugin, "foreign-plugin"],
+  ]) {
+    await writeFile(path.join(plugin, "plugin.json"), JSON.stringify({ name }));
+  }
+  await mkdir(path.join(localRoot, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(localRoot, ".claude-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "foreign-marketplace",
+      owner: { name: "fixture" },
+      plugins: [{ name: "foreign-plugin", source: "foreign-plugin" }],
+    }),
+  );
+  await mkdir(path.join(localRoot, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(localRoot, ".cursor-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "cursor-marketplace",
+      owner: { name: "fixture" },
+      plugins: [{ name: "cursor-plugin", source: "cursor-plugin" }],
+    }),
+  );
+
+  const result = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+  const byName = new Map(result.groups.map((group) => [group.name, group]));
+
+  assert.equal(byName.get("cursor-owned-review").copies[0].plugin.marketplace, "cursor-marketplace");
+  assert.equal(byName.get("foreign-local-review").copies[0].plugin.marketplace, "local");
+  assert.equal(byName.get("foreign-local-review").conflict, false);
+});
+
 test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-diagnostics-"));
   const home = path.join(root, "home");
@@ -929,7 +1026,6 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
     ".cursor",
     "plugins",
     "outside-marketplace",
-    "plugin",
   );
   assert.ok(result.pluginDiagnostics.some(
     ({ host, code, path: diagnosticPath }) =>
@@ -1446,7 +1542,7 @@ test("Codex cache versions and synced or bundled marketplace copies remain audit
   ]);
 });
 
-test("malformed Codex marketplace metadata is isolated from valid cache candidates", async () => {
+test("malformed higher-priority Codex marketplace metadata stops generic fallbacks", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-malformed-marketplace-"));
   const home = path.join(root, "home");
   const codexHome = path.join(home, ".codex");
@@ -1478,14 +1574,14 @@ test("malformed Codex marketplace metadata is isolated from valid cache candidat
     ({ code, path: diagnosticPath }) =>
       code === "MALFORMED_PLUGIN_METADATA" && diagnosticPath === marketplacePath,
   ));
-  assert.ok(result.pluginDiagnostics.some(
+  assert.equal(result.pluginDiagnostics.some(
     ({ code, path: diagnosticPath }) =>
       code === "PLUGIN_MARKETPLACE_INVALID_ENTRIES" && diagnosticPath === invalidEntriesPath,
-  ));
-  assert.ok(result.pluginDiagnostics.some(
+  ), false);
+  assert.equal(result.pluginDiagnostics.some(
     ({ code, path: diagnosticPath }) =>
       code === "PLUGIN_MARKETPLACE_MISSING_ENTRIES" && diagnosticPath === missingEntriesPath,
-  ));
+  ), false);
 });
 
 test("plugin host specifications extend discovery without changing candidate policy", async () => {
@@ -1558,6 +1654,8 @@ test("plugin cache versions preserve every copy without making version part of i
     result.groups[0].evidence.every(({ repository }) => repository === undefined),
     true,
   );
+  assert.deepEqual(result.groups[0].copies.map(({ active }) => active), [false, false]);
+  assert.deepEqual(activeSkillInventory(result), []);
 });
 
 test("plugin identities escape delimiter-bearing names without collisions", async () => {
@@ -1582,7 +1680,7 @@ test("plugin identities escape delimiter-bearing names without collisions", asyn
   assert.equal(result.groups[0].conflict, true);
 });
 
-test("Claude marketplace manifests contribute repository provenance", async () => {
+test("Claude marketplace discovery selects its host manifest and repository provenance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-marketplace-"));
   const home = path.join(root, "home");
   const marketplace = path.join(home, ".claude", "plugins", "marketplaces", "team");
@@ -1595,7 +1693,9 @@ test("Claude marketplace manifests contribute repository provenance", async () =
     "plugins",
     "escaped",
   );
+  const foreignPlugin = path.join(marketplace, "plugins", "cursor-only");
   await writeSkill(path.join(marketplace, "plugins", "reviewer", "skills"), "market-review");
+  await writeSkill(path.join(foreignPlugin, "skills"), "cursor-only-market-review");
   await writeSkill(path.join(escapedPlugin, "skills"), "escaped-market-review");
   await mkdir(path.join(marketplace, ".claude-plugin"), { recursive: true });
   await writeFile(
@@ -1616,6 +1716,15 @@ test("Claude marketplace manifests contribute repository provenance", async () =
       ],
     }),
   );
+  await mkdir(path.join(marketplace, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(marketplace, ".cursor-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "cursor-team",
+      owner: { name: "fixture" },
+      plugins: [{ name: "cursor-only", source: "./plugins/cursor-only" }],
+    }),
+  );
 
   const result = await discoverSkills({
     home,
@@ -1625,6 +1734,7 @@ test("Claude marketplace manifests contribute repository provenance", async () =
   });
   assert.equal(result.groups.length, 1);
   assert.equal(result.groups[0].name, "market-review");
+  assert.equal(result.groups.some(({ name }) => name === "cursor-only-market-review"), false);
   assert.deepEqual(result.groups[0].provenance, [
     "repository:https://github.com/example/team-skills",
   ]);
@@ -2485,7 +2595,18 @@ test("active inventory deduplicates one physical source with multiple owners", (
       {
         name: "review",
         copies: [
-          { path: "/alias/review", realPath: "/source/review", owner: "codex" },
+          {
+            path: "/cache/review",
+            realPath: "/cache/review",
+            owner: "plugin:codex",
+            active: false,
+          },
+          {
+            path: "/alias/review",
+            realPath: "/source/review",
+            owner: "plugin:codex",
+            active: false,
+          },
           { path: "/source/review", realPath: "/source/review", owner: "manager:asm" },
         ],
       },

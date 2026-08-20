@@ -125,6 +125,11 @@ function uniqueRoots(roots) {
         ...new Set([...(existing.scopes ?? [existing.scope]), normalized.scope]),
       ];
     }
+    // Audit-only cache observations stay inactive unless another root identifies
+    // the same physical source as an active installation.
+    if (existing.active === false && normalized.active !== false) {
+      delete existing.active;
+    }
     existing.pluginEvidence = [
       ...new Map([
         ...(existing.pluginEvidence ?? []).map((value) => [JSON.stringify(value), value]),
@@ -579,6 +584,7 @@ async function candidateFromDirectory(directory, rootInfo) {
     ...(rootInfo.pluginEvidence
       ? { pluginEvidence: structuredClone(rootInfo.pluginEvidence) }
       : {}),
+    ...(rootInfo.active === false ? { active: false } : {}),
     fingerprint: customization?.owned_payload.reviewed_fingerprint
       ?? await fingerprintPath(directory),
     classification: customization ? "customization" : "skill",
@@ -732,6 +738,7 @@ function groupCandidates(candidates) {
       provenance: copyProvenance.identities,
       conflict: copyProvenance.conflict,
       classification: candidate.classification,
+      ...(candidate.active === false ? { active: false } : {}),
       ...(candidate.customization
         ? { customization: structuredClone(candidate.customization) }
         : {}),
@@ -1024,6 +1031,7 @@ export function activeSkillInventory(discovery) {
   const skills = new Map();
   for (const group of discovery.groups) {
     for (const copy of group.copies) {
+      if (copy.active === false) continue;
       const key = `${group.name}\0${copy.realPath ?? copy.path}`;
       if (!skills.has(key)) {
         skills.set(key, {
