@@ -1093,6 +1093,35 @@ function tomlAssignmentKey(line) {
   return match ? tomlKeyValue(match[1], match[2], match[3]) : undefined;
 }
 
+function tomlDottedMarketplaceAssignment(line) {
+  const match = line.match(
+    /^(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*\.\s*(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*\.\s*(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*=\s*/,
+  );
+  if (!match || tomlKeyValue(match[1], match[2], match[3]) !== "marketplaces") {
+    return undefined;
+  }
+  const key = tomlKeyValue(match[7], match[8], match[9]);
+  if (key !== "source" && key !== "source_type") return undefined;
+  return {
+    name: tomlKeyValue(match[4], match[5], match[6]),
+    key,
+    value: line.slice(match[0].length),
+  };
+}
+
+function tomlSinglelineStringValue(value) {
+  const match = value.match(
+    /^(?:"((?:\\.|[^"])*)"|'([^']*)')\s*(?:#.*)?$/,
+  );
+  if (!match) return undefined;
+  return {
+    value: tomlQuotedValue(
+      match[1] !== undefined ? '"' : "'",
+      match[1] ?? match[2],
+    ),
+  };
+}
+
 function tomlMultilineBasicValue(value) {
   let result = "";
   const escapes = new Map([
@@ -1188,9 +1217,11 @@ function tomlMultilineValue(lines, start, assignmentValue) {
 
 function codexMarketplaceConfigEntries(contents) {
   const entries = [];
+  const entriesByName = new Map();
   const invalid = [];
   const lines = contents.split(/\r?\n/);
   let current;
+  let topLevel = true;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     const trimmed = line.trim();
@@ -1199,17 +1230,42 @@ function codexMarketplaceConfigEntries(contents) {
       /^\[\s*(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*\.\s*(?:"((?:\\.|[^"])*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*\]\s*(?:#.*)?$/,
     );
     if (section && tomlKeyValue(section[1], section[2], section[3]) === "marketplaces") {
-      current = {
-        name: tomlKeyValue(section[4], section[5], section[6]),
-      };
-      entries.push(current);
+      topLevel = false;
+      const name = tomlKeyValue(section[4], section[5], section[6]);
+      current = entriesByName.get(name);
+      if (!current) {
+        current = { name };
+        entriesByName.set(name, current);
+        entries.push(current);
+      }
       continue;
     }
     if (trimmed.startsWith("[")) {
+      topLevel = false;
       if (trimmed.startsWith("[marketplaces")) {
         invalid.push(index + 1);
       }
       current = undefined;
+      continue;
+    }
+    const dotted = topLevel
+      ? tomlDottedMarketplaceAssignment(trimmed)
+      : undefined;
+    if (dotted) {
+      let entry = entriesByName.get(dotted.name);
+      if (!entry) {
+        entry = { name: dotted.name };
+        entriesByName.set(dotted.name, entry);
+        entries.push(entry);
+      }
+      const singleline = tomlSinglelineStringValue(dotted.value);
+      const multiline = singleline
+        ? undefined
+        : tomlMultilineValue(lines, index, dotted.value);
+      const parsed = singleline ?? multiline;
+      if (parsed?.value !== undefined) entry[dotted.key] = parsed.value;
+      else invalid.push(index + 1);
+      if (multiline) index = multiline.end;
       continue;
     }
     if (!current) continue;

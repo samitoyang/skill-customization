@@ -273,6 +273,15 @@ async function inspectBindingSource({
     upstreamPath = normalizeUpstreamEntrypoint(descriptor.source.upstream_path);
     const repositoryProvenance = `repository:${repository}`;
     const expectedProvenance = `repository:${repository}#${upstreamPath}`;
+    const repositoryEvidence = group.evidence
+      .filter((item) => item.repository)
+      .map((item) => ({
+        repository: normalizeRepositoryUrl(item.repository),
+        upstreamPath: normalizeUpstreamEntrypoint(
+          item.upstream_path ?? item.upstreamPath,
+        ),
+        kind: item.kind,
+      }));
     if (
       selection
       && selection.provenance !== repositoryProvenance
@@ -290,15 +299,6 @@ async function inspectBindingSource({
       );
     }
     if (!selection) {
-      const repositoryEvidence = group.evidence
-        .filter((item) => item.repository)
-        .map((item) => ({
-          repository: normalizeRepositoryUrl(item.repository),
-          upstreamPath: normalizeUpstreamEntrypoint(
-            item.upstream_path ?? item.upstreamPath,
-          ),
-          kind: item.kind,
-        }));
       const conflictingRepositories = repositoryEvidence.filter(
         (item) => item.repository !== repository,
       );
@@ -308,6 +308,8 @@ async function inspectBindingSource({
           details: { expected: repository, actual: conflictingRepositories },
         });
       }
+    }
+    if (!selection || selection.provenance === repositoryProvenance) {
       const observedPaths = [
         ...new Set(
           repositoryEvidence

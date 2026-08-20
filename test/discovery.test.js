@@ -1474,6 +1474,47 @@ test("Codex config.toml local marketplaces discover bounded external roots", asy
   ));
 });
 
+test("Codex config.toml accepts dotted marketplace assignments", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-dotted-config-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, ".codex");
+  const marketplaceRoot = path.join(root, "dotted-marketplace");
+  const plugin = path.join(marketplaceRoot, "plugins", "dotted-plugin");
+  await writeSkill(plugin, "skills", "dotted-config-review");
+  await mkdir(path.join(marketplaceRoot, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "dotted-marketplace",
+      plugins: [{
+        name: "dotted-plugin",
+        source: { source: "local", path: "./plugins/dotted-plugin" },
+      }],
+    }),
+  );
+  await mkdir(codexHome, { recursive: true });
+  await writeFile(
+    path.join(codexHome, "config.toml"),
+    `marketplaces.dotted-marketplace.source_type = "local"\nmarketplaces.dotted-marketplace.source = "${marketplaceRoot}"\n`,
+  );
+
+  const result = await discoverSkills({
+    input: "dotted-config-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: codexHome },
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].copies[0].path, path.join(plugin, "skills"));
+  assert.equal(result.groups[0].copies[0].plugin.marketplace, "dotted-marketplace");
+  assert.equal(
+    result.pluginDiagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_CONFIGURATION"),
+    false,
+  );
+});
+
 test("Codex config.toml accepts multiline marketplace source strings", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-multiline-config-"));
   const home = path.join(root, "home");

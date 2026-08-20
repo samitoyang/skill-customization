@@ -1130,6 +1130,26 @@ test("binding accepts confirmed repository-only plugin provenance", async () => 
     managerRecords: [],
   });
   assert.equal(resolved.source.selection.provenance, repositoryOnlyProvenance);
+
+  await assert.rejects(
+    resolveBinding({
+      descriptor: descriptor(),
+      context: "global",
+      statePath,
+      roots,
+      managerRecords: [{
+        manager: "asm",
+        name: "review",
+        path: source,
+        source: {
+          kind: "repository",
+          repository,
+          upstreamPath: "other/review/SKILL.md",
+        },
+      }],
+    }),
+    (error) => error.code === "BINDING_SOURCE_UPSTREAM_PATH_MISMATCH",
+  );
 });
 
 test("binding persists the confirmed plugin identity", async () => {
