@@ -24,8 +24,13 @@ import {
   resolveBinding,
   validateBinding,
 } from "../src/bindings.js";
-import { fingerprintFile, fingerprintPath } from "../src/fingerprint.js";
+import {
+  fingerprintFile,
+  fingerprintPath,
+  payloadFingerprint,
+} from "../src/fingerprint.js";
 import { generateLocalIdentity } from "../src/normalization.js";
+import { preflightCustomization } from "../src/preflight.js";
 import {
   confirmDiscoverySelection,
   discoverSkills,
@@ -471,10 +476,19 @@ test("automatic plugin recovery requires a same-scope versioned cache", async ()
     sourcePath: cacheSource,
     context: "workspace-cache",
     statePath: cacheStatePath,
-    roots: [rootRecord(cacheSource, "workspace", true)],
+    roots: [
+      {
+        path: cacheSource,
+        owner: "workspace",
+        scope: "workspace",
+        origin: "project",
+      },
+      rootRecord(cacheSource, "workspace", true),
+    ],
     interactive: true,
     confirm: async () => true,
   });
+  assert.equal(cacheBinding.source.pluginIdentity, identity);
   assert.deepEqual(cacheBinding.source.pluginCache, {
     kind: "versioned",
     scope: "workspace",
@@ -492,6 +506,128 @@ test("automatic plugin recovery requires a same-scope versioned cache", async ()
     (error) => error.code === "BINDING_TARGET_MISSING",
   );
   assert.deepEqual((await readBindingStore(cacheStatePath)).bindings, {});
+});
+
+test("versioned cache recovery checks a customization execution graph", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-customization-cache-"));
+  const versionOne = path.join(root, "plugin", "1", "skills", "review-fork");
+  const versionTwo = path.join(root, "plugin", "2", "skills", "review-fork");
+  const statePath = path.join(root, "state", "bindings.json");
+  const context = "global";
+  const plugin = {
+    host: "fixture-host",
+    marketplace: "fixture-marketplace",
+    name: "review-fork-plugin",
+  };
+  const identity = "local:plugin:fixture-host:fixture-marketplace:review-fork-plugin";
+  const writeFork = async (directory) => {
+    const snapshot = path.join(directory, "provenance", "source");
+    const skillHeader = "---\nname: review-fork\n---\n";
+    await mkdir(snapshot, { recursive: true });
+    await writeFile(path.join(snapshot, "SKILL.md"), `${skillHeader}snapshot\n`);
+    await writeFile(path.join(directory, "SKILL.md"), `${skillHeader}fork\n`);
+    await writeFile(path.join(directory, "CUSTOMIZATION.md"), "Fork rationale.\n");
+    const diffPath = path.join(directory, "provenance", "source.diff");
+    await writeFile(
+      diffPath,
+      "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1,4 +1,4 @@\n ---\n name: review-fork\n ---\n-snapshot\n+fork\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+Fork rationale.\n",
+    );
+    const snapshotFingerprint = await fingerprintPath(snapshot);
+    const nestedDescriptor = {
+      schema_version: 1,
+      id: "urn:skill-customization:fixture:review-fork-cache",
+      type: "fork",
+      name: "review-fork",
+      license: "MIT",
+      entrypoint: "SKILL.md",
+      customization: "CUSTOMIZATION.md",
+      dependencies: [],
+      owned_payload: { reviewed_fingerprint: await payloadFingerprint(directory) },
+      source: {
+        skill_name: "review",
+        kind: "repository",
+        repository: "https://github.com/example/skills",
+        upstream_path: "skills/review/SKILL.md",
+        license: "MIT",
+        effective_fingerprint: snapshotFingerprint,
+        review: { revision: "fixture" },
+      },
+      activation: { mode: "coexist" },
+      fork: {
+        snapshot: "provenance/source",
+        diff: "provenance/source.diff",
+        snapshot_fingerprint: snapshotFingerprint,
+        diff_fingerprint: await fingerprintFile(diffPath),
+      },
+    };
+    await writeFile(
+      path.join(directory, "customization.json"),
+      `${JSON.stringify(nestedDescriptor, null, 2)}\n`,
+    );
+    return nestedDescriptor;
+  };
+  const rootRecord = (directory, version) => ({
+    path: path.dirname(directory),
+    owner: "plugin:fixture-host",
+    scope: "global",
+    origin: "plugin",
+    plugin: { ...plugin, version },
+    pluginIdentity: identity,
+    pluginRoot: path.dirname(path.dirname(directory)),
+    pluginEvidence: [{
+      kind: "plugin",
+      ...plugin,
+      version,
+      identity,
+      cache: { kind: "versioned", scope: "global" },
+    }],
+  });
+
+  const nestedDescriptor = await writeFork(versionOne);
+  const nestedExecution = await preflightCustomization({
+    descriptorPath: path.join(versionOne, "customization.json"),
+    context,
+    statePath,
+  });
+  assert.equal(nestedExecution.status, "ready");
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      skill_name: nestedDescriptor.name,
+      kind: "customization",
+      id: nestedDescriptor.id,
+      type: nestedDescriptor.type,
+      license: nestedDescriptor.license,
+      effective_fingerprint: nestedExecution.effectiveFingerprint,
+    },
+  };
+  const bound = await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: versionOne,
+    context,
+    statePath,
+    roots: [rootRecord(versionOne, "1")],
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.deepEqual(bound.source.customization, {
+    id: nestedDescriptor.id,
+    type: nestedDescriptor.type,
+    license: nestedDescriptor.license,
+  });
+  assert.deepEqual(bound.source.pluginCache, { kind: "versioned", scope: "global" });
+
+  await rename(path.join(root, "plugin", "1"), path.join(root, "removed"));
+  await writeFork(versionTwo);
+  const recovered = await resolveBinding({
+    descriptor: sourceDescriptor,
+    context,
+    statePath,
+    roots: [rootRecord(versionTwo, "2")],
+  });
+  assert.equal(recovered.source.path, path.resolve(versionTwo));
+  assert.equal(recovered.source.pluginIdentity, identity);
+  assert.deepEqual(recovered.source.customization, bound.source.customization);
 });
 
 test("concurrent bindings preserve distinct context keys", async () => {

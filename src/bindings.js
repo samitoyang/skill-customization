@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { assertValidDescriptor, readDescriptor } from "./descriptor.js";
 import { discoverSkills } from "./discovery.js";
 import { BindingError } from "./errors.js";
+import { inspectCustomizationExecution } from "./execution-graph.js";
 import { fingerprintFile, fingerprintPath } from "./fingerprint.js";
 import {
   generateLocalIdentity,
@@ -236,13 +237,16 @@ async function inspectBindingSource({
       ? sourceRoot
       : path.dirname(entrypoint),
   );
-  const sourceCopy = group.copies.find(
+  const sourceCopies = group.copies.filter(
     (copy) => path.resolve(copy.realPath ?? copy.path) === sourceRoot,
   );
+  const sourcePluginEvidence = sourceCopies.flatMap((copy) =>
+    (copy.evidence ?? []).filter(({ kind }) => kind === "plugin")
+  );
   const pluginIdentities = [...new Set([
-    sourceCopy?.pluginIdentity,
-    ...(sourceCopy?.evidence ?? [])
-      .filter(({ kind, identity }) => kind === "plugin" && typeof identity === "string")
+    ...sourceCopies.map(({ pluginIdentity }) => pluginIdentity),
+    ...sourcePluginEvidence
+      .filter(({ identity }) => typeof identity === "string")
       .map(({ identity }) => identity),
   ].filter(Boolean))];
   const bindingPluginIdentity = selection
@@ -251,13 +255,17 @@ async function inspectBindingSource({
     : pluginIdentities.length === 1
       ? pluginIdentities[0]
       : undefined;
-  const bindingPluginCache = sourceCopy?.evidence.find(
-    ({ kind, identity, cache }) =>
-      kind === "plugin"
-      && identity === bindingPluginIdentity
-      && cache?.kind === "versioned"
-      && cache.scope === sourceCopy.scope,
-  )?.cache;
+  const bindingPluginCaches = [...new Map(
+    sourcePluginEvidence
+      .filter(({ identity, cache }) =>
+        identity === bindingPluginIdentity
+        && cache?.kind === "versioned"
+      )
+      .map(({ cache }) => [JSON.stringify(cache), cache]),
+  ).values()];
+  const bindingPluginCache = bindingPluginCaches.length === 1
+    ? bindingPluginCaches[0]
+    : undefined;
   let repository;
   let upstreamPath;
   if (descriptor.source.kind === "repository") {
@@ -426,7 +434,58 @@ function compatibleProvenance(descriptor, copy) {
   });
 }
 
-async function recoverMissingPluginBinding({ descriptor, binding, roots, managerRecords }) {
+const BINDING_OPERATIONS = Object.freeze({
+  bindingKey,
+  readBindingStore,
+  resolveBinding,
+  validateBinding,
+});
+
+function matchesCustomizationCopy(source, group, copy) {
+  return copy.classification === "customization"
+    && group.name === source.skill_name
+    && copy.customization?.id === source.id
+    && copy.customization?.type === source.type
+    && copy.customization?.license === source.license;
+}
+
+async function recoveryFingerprint({
+  descriptor,
+  group,
+  copy,
+  context,
+  statePath,
+  roots,
+  managerRecords,
+  activeSkills,
+}) {
+  if (descriptor.source.kind !== "customization") {
+    return fingerprintPath(copy.path).catch(() => undefined);
+  }
+  if (!matchesCustomizationCopy(descriptor.source, group, copy)) return undefined;
+  const execution = await inspectCustomizationExecution({
+    descriptorPath: path.join(copy.path, "customization.json"),
+    context,
+    statePath,
+    roots,
+    managerRecords,
+    activeSkills,
+    bindings: BINDING_OPERATIONS,
+  }).catch(() => undefined);
+  return execution?.status === "maintenance-required"
+    ? undefined
+    : execution?.effectiveFingerprint;
+}
+
+async function recoverMissingPluginBinding({
+  descriptor,
+  binding,
+  context,
+  statePath,
+  roots,
+  managerRecords,
+  activeSkills,
+}) {
   const { pluginCache, pluginIdentity } = binding.source;
   if (
     !pluginIdentity
@@ -452,10 +511,19 @@ async function recoverMissingPluginBinding({ descriptor, binding, roots, manager
           && cache.scope === pluginCache.scope,
       );
       if (!compatibleCache) continue;
-      const effectiveFingerprint = await fingerprintPath(copy.path).catch(() => undefined);
+      const effectiveFingerprint = await recoveryFingerprint({
+        descriptor,
+        group,
+        copy,
+        context,
+        statePath,
+        roots,
+        managerRecords,
+        activeSkills,
+      });
       if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
       const provenance = compatibleProvenance(descriptor, copy);
-      if (provenance || descriptor.source.kind === "local") {
+      if (provenance || ["local", "customization"].includes(descriptor.source.kind)) {
         matches.push({ group, copy, provenance });
       }
     }
@@ -758,8 +826,11 @@ export async function resolveBinding({
       const recovered = await recoverMissingPluginBinding({
         descriptor,
         binding,
+        context,
+        statePath,
         roots,
         managerRecords,
+        activeSkills,
       });
       if (recovered) {
         let persisted = false;
