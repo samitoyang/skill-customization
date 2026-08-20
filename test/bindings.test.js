@@ -393,6 +393,20 @@ test("ambient binding preserves plugin identity for cache recovery", async () =>
     path.join(versionOneRoot, ".claude-plugin", "plugin.json"),
     JSON.stringify({ name: "reviewer", version: "1", repository }),
   );
+  const installedPluginsPath = path.join(claudeHome, "plugins", "installed_plugins.json");
+  await writeFile(
+    installedPluginsPath,
+    JSON.stringify({
+      plugins: {
+        "reviewer@fixture-marketplace": [{
+          scope: "project",
+          projectPath: process.cwd(),
+          installPath: versionOneRoot,
+          version: "1",
+        }],
+      },
+    }),
+  );
   const sourceDescriptor = {
     ...descriptor(),
     source: {
@@ -444,9 +458,9 @@ test("ambient binding preserves plugin identity for cache recovery", async () =>
       confirm: async () => true,
       confirmedSelection,
     });
-    assert.equal(bound.scope, "global");
+    assert.equal(bound.scope, "workspace");
     assert.equal(bound.source.pluginIdentity, identity);
-    assert.deepEqual(bound.source.pluginCache, { kind: "versioned", scope: "global" });
+    assert.deepEqual(bound.source.pluginCache, { kind: "versioned", scope: "workspace" });
     assert.equal(bound.source.selection.provenance, `repository:${repository}`);
 
     const validated = await resolveBinding({
@@ -465,6 +479,19 @@ test("ambient binding preserves plugin identity for cache recovery", async () =>
       path.join(versionTwoRoot, ".claude-plugin", "plugin.json"),
       JSON.stringify({ name: "reviewer", version: "2", repository }),
     );
+    await writeFile(
+      installedPluginsPath,
+      JSON.stringify({
+        plugins: {
+          "reviewer@fixture-marketplace": [{
+            scope: "project",
+            projectPath: process.cwd(),
+            installPath: versionTwoRoot,
+            version: "2",
+          }],
+        },
+      }),
+    );
 
     const resolved = await resolveBinding({
       descriptor: sourceDescriptor,
@@ -473,7 +500,7 @@ test("ambient binding preserves plugin identity for cache recovery", async () =>
     });
     assert.equal(resolved.source.path, path.resolve(versionTwo));
     assert.equal(resolved.source.pluginIdentity, identity);
-    assert.deepEqual(resolved.source.pluginCache, { kind: "versioned", scope: "global" });
+    assert.deepEqual(resolved.source.pluginCache, { kind: "versioned", scope: "workspace" });
   } finally {
     for (const [name, value] of Object.entries(previousHomes)) {
       if (value === undefined) delete process.env[name];

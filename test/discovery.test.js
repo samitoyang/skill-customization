@@ -94,11 +94,73 @@ test("ambient discovery finds Claude plugin cache roots with manifest provenance
   });
   assert.deepEqual(
     result.groups[0].evidence.map(({ kind }) => kind),
-    ["plugin", "plugin"],
+    ["plugin"],
   );
   assert.deepEqual(result.groups[0].provenance, [
     "repository:https://github.com/example/reviewer",
   ]);
+});
+
+test("Claude project-scoped installs activate only inside their bound project", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-project-plugin-"));
+  const home = path.join(root, "home");
+  const project = path.join(root, "project-a");
+  const foreignProject = path.join(root, "project-b");
+  const pluginRoot = path.join(
+    home,
+    ".claude",
+    "plugins",
+    "cache",
+    "official",
+    "reviewer",
+    "1.2.3",
+  );
+  const skill = await writeSkill(path.join(pluginRoot, "skills"), "review");
+  await mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name: "reviewer", version: "1.2.3" }),
+  );
+  await Promise.all([
+    mkdir(path.join(project, "nested"), { recursive: true }),
+    mkdir(foreignProject, { recursive: true }),
+  ]);
+  await writeFile(
+    path.join(home, ".claude", "plugins", "installed_plugins.json"),
+    JSON.stringify({
+      plugins: {
+        "reviewer@official": [{
+          scope: "project",
+          projectPath: project,
+          installPath: pluginRoot,
+          version: "1.2.3",
+        }],
+      },
+    }),
+  );
+
+  const active = await discoverSkills({
+    input: "review",
+    home,
+    cwd: path.join(project, "nested"),
+    env: {},
+    managerRecords: [],
+  });
+  assert.equal(active.groups[0].copies[0].scope, "workspace");
+  assert.equal(active.groups[0].copies[0].active, undefined);
+  assert.deepEqual(activeSkillInventory(active), [
+    { name: "review", path: skill, realPath: await realpath(skill) },
+  ]);
+
+  const inactive = await discoverSkills({
+    input: "review",
+    home,
+    cwd: foreignProject,
+    env: {},
+    managerRecords: [],
+  });
+  assert.equal(inactive.groups[0].copies[0].active, false);
+  assert.deepEqual(activeSkillInventory(inactive), []);
 });
 
 test("multi-host installs select each host's own plugin manifest", async () => {

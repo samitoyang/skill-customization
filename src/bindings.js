@@ -283,6 +283,9 @@ async function inspectBindingSource({
       .filter(({ identity, cache }) =>
         identity === bindingPluginIdentity
         && cache?.kind === "versioned"
+        && sourceCopies.some((copy) =>
+          copy.pluginIdentity === identity && copy.scope === cache.scope
+        )
       )
       .map(({ cache }) => [JSON.stringify(cache), cache]),
   ).values()];

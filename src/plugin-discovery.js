@@ -553,6 +553,7 @@ async function addPluginInstall({
   scope,
   source,
   cache,
+  active = cache?.kind !== "versioned",
   declaration = {},
   context,
   defaultSkillDirectory = "skills",
@@ -811,7 +812,7 @@ async function addPluginInstall({
       ...(cache ? { cache: structuredClone(cache) } : {}),
     }],
     pluginRoot: safeInstallRoot,
-    ...(cache?.kind === "versioned" ? { active: false } : {}),
+    ...(active === false ? { active: false } : {}),
     ...(manifest?.path ? { pluginManifest: manifest.path } : {}),
   });
   if (rootSkillFallback) {
@@ -1037,6 +1038,61 @@ function installedEntries(value) {
         marketplace: entry.marketplace ?? marketplace,
       }));
   });
+}
+
+async function claudeInstalledScope({ entry, metadataFile, context }) {
+  const declaredScope = stringValue(entry.scope) ?? "user";
+  if (declaredScope === "user") return "global";
+  if (declaredScope !== "project" && declaredScope !== "local") {
+    context.diagnostics.push(
+      diagnostic({
+        host: "claude-code",
+        path: metadataFile,
+        code: "INVALID_PLUGIN_INSTALL_METADATA",
+        message: `Claude plugin installation has an invalid scope: ${metadataFile}`,
+        metadata: { host: "claude-code", name: entry.name, scope: entry.scope },
+      }),
+    );
+    return undefined;
+  }
+  const projectPath = stringValue(entry.projectPath ?? entry.project_path);
+  if (!projectPath || !path.isAbsolute(projectPath)) {
+    context.diagnostics.push(
+      diagnostic({
+        host: "claude-code",
+        path: metadataFile,
+        code: "INVALID_PLUGIN_INSTALL_METADATA",
+        message: `Claude scoped plugin installation has an invalid project path: ${metadataFile}`,
+        metadata: { host: "claude-code", name: entry.name, scope: declaredScope },
+      }),
+    );
+    return undefined;
+  }
+  let canonicalProject;
+  try {
+    const info = await stat(projectPath);
+    if (!info.isDirectory()) throw new Error("project path is not a directory");
+    canonicalProject = await realpath(projectPath);
+  } catch (error) {
+    context.diagnostics.push(
+      diagnostic({
+        host: "claude-code",
+        path: metadataFile,
+        code: "INVALID_PLUGIN_INSTALL_METADATA",
+        message: `cannot inspect Claude plugin project path ${projectPath}: ${error.message}`,
+        metadata: { host: "claude-code", name: entry.name, scope: declaredScope },
+      }),
+    );
+    return undefined;
+  }
+  const workspaces = await Promise.all(
+    context.workspaceDirectories.map((directory) =>
+      realpath(directory).catch(() => path.resolve(directory))
+    ),
+  );
+  return workspaces.some((workspace) => isPathContained(canonicalProject, workspace))
+    ? "workspace"
+    : undefined;
 }
 
 function knownMarketplaceEntries(value) {
@@ -1446,17 +1502,29 @@ async function discoverClaude(context) {
     for (const entry of installedEntries(metadataFile.value)) {
       const installPath = stringValue(entry.installPath ?? entry.install_path ?? entry.path);
       if (!installPath) continue;
+      const scope = await claudeInstalledScope({
+        entry,
+        metadataFile: metadataFile.file,
+        context,
+      });
+      if (!scope) continue;
+      const installRoot = path.isAbsolute(installPath)
+        ? installPath
+        : path.resolve(safePluginsRoot, installPath);
+      const versionedCache = safeCacheRoot
+        && await canonicalContained(installRoot, safeCacheRoot);
       await addPluginInstall({
-        installRoot: path.isAbsolute(installPath)
-          ? installPath
-          : path.resolve(safePluginsRoot, installPath),
+        installRoot,
         boundary: safePluginsRoot,
         host: "claude-code",
         marketplace: entry.marketplace,
         name: entry.name,
         version: entry.version,
-        scope: "global",
+        scope,
         source: entry,
+        ...(versionedCache
+          ? { cache: { kind: "versioned", scope }, active: true }
+          : {}),
         declaration: entry,
         context,
       });
@@ -2043,8 +2111,10 @@ export async function discoverPluginSkillRoots({
       ...existing.pluginEvidence.map((value) => JSON.stringify(value)),
       ...(item.pluginEvidence ?? []).map((value) => JSON.stringify(value)),
     ]).map((value) => JSON.parse(value));
-    if (existing.active === false && item.active !== false) {
+    if (item.active !== false) {
+      const auditOnly = existing.active === false;
       delete existing.active;
+      if (auditOnly || item.scope === "global") existing.scope = item.scope;
     }
   }
   roots.sort((left, right) => left.path.localeCompare(right.path, "en"));
