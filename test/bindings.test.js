@@ -6,6 +6,7 @@ import {
   readFile,
   readdir,
   realpath,
+  rename,
   symlink,
   unlink,
   writeFile,
@@ -22,7 +23,7 @@ import {
   resolveBinding,
   validateBinding,
 } from "../src/bindings.js";
-import { fingerprintFile } from "../src/fingerprint.js";
+import { fingerprintFile, fingerprintPath } from "../src/fingerprint.js";
 import { generateLocalIdentity } from "../src/normalization.js";
 import {
   confirmDiscoverySelection,
@@ -144,6 +145,72 @@ test("first use fails closed noninteractively and confirmed writes are atomic", 
   );
   const persisted = await readFile(statePath, "utf8");
   assert.doesNotThrow(() => JSON.parse(persisted));
+});
+
+test("plugin cache replacement preserves a confirmed binding when identity and content remain stable", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-continuity-"));
+  const versionOne = path.join(root, "plugin", "1", "skills", "review");
+  const versionTwo = path.join(root, "plugin", "2", "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const plugin = {
+    host: "fixture-host",
+    marketplace: "fixture-marketplace",
+    name: "reviewer",
+    version: "1",
+  };
+  const identity = "local:plugin:fixture-host:fixture-marketplace:reviewer";
+  const repository = "https://github.com/example/reviewer";
+  await mkdir(versionOne, { recursive: true });
+  await writeFile(path.join(versionOne, "SKILL.md"), "---\nname: review\n---\nstable\n");
+  const effectiveFingerprint = await fingerprintPath(versionOne);
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      ...descriptor().source,
+      repository,
+      upstream_path: "skills/review/SKILL.md",
+      effective_fingerprint: effectiveFingerprint,
+    },
+  };
+  const rootRecord = (directory, version) => ({
+    path: path.dirname(directory),
+    owner: "plugin:fixture-host",
+    scope: "global",
+    origin: "plugin",
+    plugin,
+    pluginIdentity: identity,
+    pluginRoots: [path.dirname(path.dirname(directory))],
+    pluginEvidence: [{
+      kind: "plugin",
+      ...plugin,
+      version,
+      repository,
+      identity,
+    }],
+  });
+  await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: versionOne,
+    context: "global",
+    statePath,
+    roots: [rootRecord(versionOne, "1")],
+    interactive: true,
+    confirm: async () => true,
+  });
+  await rename(path.join(root, "plugin", "1"), path.join(root, "removed"));
+  await mkdir(versionTwo, { recursive: true });
+  await writeFile(path.join(versionTwo, "SKILL.md"), "---\nname: review\n---\nstable\n");
+
+  const resolved = await resolveBinding({
+    descriptor: sourceDescriptor,
+    context: "global",
+    statePath,
+    roots: [rootRecord(versionTwo, "2")],
+  });
+  assert.equal(resolved.source.path, path.resolve(versionTwo));
+  assert.equal(resolved.source.pluginIdentity, identity);
+  assert.equal((await readBindingStore(statePath)).bindings[`${encodeURIComponent(sourceDescriptor.id)}::global`].source.path, path.resolve(versionTwo));
+  assert.equal(Object.hasOwn(sourceDescriptor, "plugin"), false);
 });
 
 test("concurrent bindings preserve distinct context keys", async () => {

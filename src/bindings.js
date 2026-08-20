@@ -235,6 +235,9 @@ async function inspectBindingSource({
       ? sourceRoot
       : path.dirname(entrypoint),
   );
+  const sourceCopy = group.copies.find(
+    (copy) => path.resolve(copy.realPath ?? copy.path) === sourceRoot,
+  );
   let repository;
   let upstreamPath;
   if (descriptor.source.kind === "repository") {
@@ -372,7 +375,71 @@ async function inspectBindingSource({
     provenance: selection ? [selection.provenance] : group.provenance,
     evidence: group.evidence,
     selection,
+    ...(sourceCopy?.pluginIdentity
+      ? { pluginIdentity: sourceCopy.pluginIdentity }
+      : {}),
   };
+}
+
+function compatibleProvenance(descriptor, copy) {
+  const repository = descriptor.source.kind === "repository"
+    ? normalizeRepositoryUrl(descriptor.source.repository)
+    : undefined;
+  const upstreamPath = descriptor.source.kind === "repository"
+    ? normalizeUpstreamEntrypoint(descriptor.source.upstream_path)
+    : undefined;
+  return copy.provenance.find((identity) => {
+    if (repository) {
+      return identity === `repository:${repository}`
+        || identity === `repository:${repository}#${upstreamPath}`;
+    }
+    return identity === descriptor.source.identity
+      || identity === `local:${descriptor.source.identity}`;
+  });
+}
+
+async function recoverMissingPluginBinding({ descriptor, binding, roots, managerRecords }) {
+  if (!binding.source.pluginIdentity) return undefined;
+  // A cache path is replaceable local state; continuity is safe only for one
+  // stable plugin identity and one already reviewed effective fingerprint.
+  const discovery = await discoverSkills({
+    input: descriptor.source.skill_name,
+    roots,
+    managerRecords,
+    includePlugins: false,
+  });
+  const matches = [];
+  for (const group of discovery.groups) {
+    if (group.fingerprint !== descriptor.source.effective_fingerprint) continue;
+    for (const copy of group.copies) {
+      if (copy.pluginIdentity !== binding.source.pluginIdentity) continue;
+      const provenance = compatibleProvenance(descriptor, copy);
+      if (provenance || descriptor.source.kind === "local") {
+        matches.push({ group, copy, provenance });
+      }
+    }
+  }
+  if (matches.length !== 1) return undefined;
+  const { group, copy, provenance } = matches[0];
+  const selection = group.conflict
+    ? {
+        name: group.name,
+        copy,
+        provenance: provenance ?? copy.provenance[0],
+        confirmation: {
+          kind: "confirmation",
+          path: copy.path,
+          method: "binding-continuity",
+        },
+      }
+    : undefined;
+  const source = {
+    ...binding.source,
+    path: path.resolve(copy.path),
+    target: await realpath(copy.path),
+    ...(selection ? { selection } : {}),
+  };
+  return { ...binding, source, updatedAt: new Date().toISOString() };
 }
 
 function assertReplacementInventory(descriptor, activeSkills) {
@@ -477,6 +544,9 @@ export async function bindCustomization({
           : { customization: inspection.customization }),
       fingerprint: inspection.fingerprint,
       provenance: inspection.provenance,
+      ...(inspection.pluginIdentity
+        ? { pluginIdentity: inspection.pluginIdentity }
+        : {}),
       ...(inspection.selection ? { selection: inspection.selection } : {}),
       confirmation: inspection.selection
         ? "provenance-confirmed"
@@ -646,6 +716,22 @@ export async function resolveBinding({
       })
     ).binding;
   } catch (error) {
+    if (error.code === "BINDING_TARGET_MISSING") {
+      const recovered = await recoverMissingPluginBinding({
+        descriptor,
+        binding,
+        roots,
+        managerRecords,
+      });
+      if (recovered) {
+        await updateJsonAtomic(statePath, EMPTY_STORE, async (store) => {
+          assertBindingStore(store, statePath);
+          if (store.bindings[key]) store.bindings[key] = recovered;
+          return store;
+        });
+        return recovered;
+      }
+    }
     if (
       new Set([
         "INVALID_BINDING_RECORD",
