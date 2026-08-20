@@ -50,6 +50,44 @@ function root(pathname, owner, scope, origin = owner, metadata = {}) {
   };
 }
 
+function mergePluginRootPolicy(existing, normalized) {
+  const pluginRecords = [existing, normalized].filter(
+    ({ origin }) => origin === "plugin",
+  );
+  if (pluginRecords.length === 0) return;
+
+  // Keep the first path/owner as the public copy, but apply plugin scan policy
+  // whenever any observation identifies the physical root as plugin-backed.
+  existing.origin = "plugin";
+  existing.host ??= pluginRecords.find(({ host }) => host)?.host;
+  existing.pluginManifest ??= pluginRecords.find(
+    ({ pluginManifest }) => pluginManifest,
+  )?.pluginManifest;
+
+  const pluginRoots = [
+    ...new Set(pluginRecords.flatMap((record) => [
+      ...(record.pluginRoots ?? []),
+      record.pluginRoot,
+    ]).filter(Boolean).map((pluginRoot) => path.resolve(pluginRoot))),
+  ];
+  if (pluginRoots.length > 0) {
+    existing.pluginRoots = pluginRoots;
+    existing.pluginRoot ??= pluginRoots[0];
+  }
+
+  const singleSkillPolicies = pluginRecords
+    .filter((record) => Object.hasOwn(record, "singleSkill"))
+    .map(({ singleSkill }) => singleSkill);
+  if (singleSkillPolicies.includes(true)) existing.singleSkill = true;
+  else if (singleSkillPolicies.length > 0) existing.singleSkill = false;
+
+  const rootSkillPolicies = pluginRecords
+    .filter((record) => Object.hasOwn(record, "includeRootSkill"))
+    .map(({ includeRootSkill }) => includeRootSkill);
+  if (rootSkillPolicies.includes(false)) existing.includeRootSkill = false;
+  else if (rootSkillPolicies.includes(true)) existing.includeRootSkill = true;
+}
+
 function uniqueRoots(roots) {
   const byPath = new Map();
   for (const item of roots) {
@@ -101,12 +139,18 @@ function uniqueRoots(roots) {
         normalized.pluginIdentity,
       ]),
     ].filter(Boolean);
-    if (!existing.pluginMetadata && normalized.pluginMetadata) {
-      existing.pluginMetadata = structuredClone(normalized.pluginMetadata);
-    }
+    // A standard root can be an alias for a plugin root; keep plugin context on
+    // the public copy while pluginEvidence/pluginIdentities retain every observation.
     if (!existing.plugin && normalized.plugin) {
       existing.plugin = structuredClone(normalized.plugin);
     }
+    if (!existing.pluginMetadata && normalized.pluginMetadata) {
+      existing.pluginMetadata = structuredClone(normalized.pluginMetadata);
+    }
+    if (!existing.pluginIdentity && normalized.pluginIdentity) {
+      existing.pluginIdentity = normalized.pluginIdentity;
+    }
+    mergePluginRootPolicy(existing, normalized);
   }
   return [...byPath.values()];
 }
@@ -124,6 +168,8 @@ async function uniquePhysicalRoots(roots) {
       existing,
       {
         ...item,
+        // Retain the standard-facing alias while uniqueRoots promotes any
+        // plugin containment and scan policy attached to the physical source.
         path: existing.path,
         aliases: [
           ...(existing.aliases ?? [existing.path]),
@@ -354,13 +400,25 @@ async function scanRoot(rootInfo) {
   }
   const directories = [];
   const diagnostics = [];
-  const canonicalPluginRoot = rootInfo.pluginRoot
-    ? await realpath(rootInfo.pluginRoot).catch(() => undefined)
-    : undefined;
+  const canonicalPluginRoots = (
+    await Promise.all(
+      [...new Set([
+        ...(rootInfo.pluginRoots ?? []),
+        rootInfo.pluginRoot,
+      ].filter(Boolean))].map((pluginRoot) =>
+        realpath(pluginRoot).catch(() => undefined),
+      ),
+    )
+  ).filter(Boolean);
   const isContainedPluginDirectory = async (directory) => {
-    if (!canonicalPluginRoot || rootInfo.origin !== "plugin") return true;
+    if (canonicalPluginRoots.length === 0 || rootInfo.origin !== "plugin") return true;
     const canonicalDirectory = await realpath(directory).catch(() => undefined);
-    if (!canonicalDirectory || isPathContained(canonicalPluginRoot, canonicalDirectory)) return true;
+    if (
+      !canonicalDirectory
+      || canonicalPluginRoots.every((pluginRoot) =>
+        isPathContained(pluginRoot, canonicalDirectory),
+      )
+    ) return true;
     diagnostics.push({
       kind: "plugin",
       host: rootInfo.host,

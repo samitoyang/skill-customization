@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,6 +11,7 @@ import {
   discoverSkills,
   hostSkillRoots,
 } from "../src/discovery.js";
+import { fingerprintFile } from "../src/fingerprint.js";
 
 async function writeSkill(root, folder, name = folder, body = "Use this skill.\n") {
   const directory = path.join(root, folder);
@@ -1372,6 +1373,10 @@ test("plugin cache versions preserve every copy without making version part of i
   assert.deepEqual(result.groups[0].provenance, [
     "local:plugin:claude-code:official:reviewer",
   ]);
+  assert.equal(
+    result.groups[0].evidence.every(({ repository }) => repository === undefined),
+    true,
+  );
 });
 
 test("plugin identities escape delimiter-bearing names without collisions", async () => {
@@ -1513,6 +1518,215 @@ test("discovery groups equivalent copies and exposes every path and owner", asyn
   assert.deepEqual(result.choices.at(-1), { kind: "custom-path" });
 });
 
+test("discovery preserves plugin metadata when a standard root aliases the same physical source", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-alias-"));
+  const home = path.join(root, "home");
+  const workspace = path.join(root, "workspace");
+  const pluginInstall = path.join(
+    home,
+    ".claude",
+    "plugins",
+    "cache",
+    "official",
+    "reviewer",
+    "2.0.0",
+  );
+  const pluginSkills = path.join(pluginInstall, "skills");
+  await writeSkill(pluginSkills, "review");
+  const escapedSkill = await writeSkill(
+    path.join(root, "outside"),
+    "escaped",
+    "escaped-review",
+  );
+  await symlink(escapedSkill, path.join(pluginSkills, "escaped"), "dir");
+  await mkdir(path.join(pluginInstall, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(pluginInstall, ".claude-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "reviewer",
+      repository: "https://github.com/example/reviewer",
+    }),
+  );
+  await mkdir(path.join(workspace, ".agents"), { recursive: true });
+  await symlink(pluginSkills, path.join(workspace, ".agents", "skills"), "dir");
+
+  const result = await discoverSkills({
+    input: "review",
+    home,
+    cwd: workspace,
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].copies.length, 1);
+  const copy = result.groups[0].copies[0];
+  assert.equal(copy.plugin.host, "claude-code");
+  assert.equal(copy.plugin.version, "2.0.0");
+  assert.equal(copy.pluginIdentity, "local:plugin:claude-code:official:reviewer");
+  assert.deepEqual(copy.provenance, [
+    "repository:https://github.com/example/reviewer",
+  ]);
+  assert.ok(copy.owners.includes("plugin:claude-code"));
+  assert.equal(result.groups.some(({ name }) => name === "escaped-review"), false);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_ROOT_ESCAPE"
+      && diagnosticPath === path.join(workspace, ".agents", "skills", "escaped"),
+  ));
+});
+
+test("discovery preserves plugin root-skill scan and fingerprint policy through standard aliases", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-policy-alias-"));
+  const home = path.join(root, "home");
+  const workspace = path.join(root, "workspace");
+  const cursorPlugins = path.join(home, ".cursor", "plugins", "local");
+
+  const rootPlugin = path.join(cursorPlugins, "root-plugin");
+  await mkdir(rootPlugin, { recursive: true });
+  const rootWorkflow = "---\nname: root-review\ndescription: Fixture\n---\nUse the root workflow.\n";
+  await writeFile(path.join(rootPlugin, "SKILL.md"), rootWorkflow);
+  await writeSkill(rootPlugin, "extra", "root-extra-review");
+  await writeFile(
+    path.join(rootPlugin, "plugin.json"),
+    JSON.stringify({ name: "root-plugin" }),
+  );
+
+  const folderPlugin = path.join(cursorPlugins, "folder-plugin");
+  const folderSkills = path.join(folderPlugin, "skills");
+  await mkdir(folderSkills, { recursive: true });
+  await writeFile(
+    path.join(folderSkills, "SKILL.md"),
+    "---\nname: folder-root-review\ndescription: Fixture\n---\nDo not expose this root.\n",
+  );
+  await writeSkill(folderSkills, "child", "folder-child-review");
+  await writeFile(
+    path.join(folderPlugin, "plugin.json"),
+    JSON.stringify({ name: "folder-plugin" }),
+  );
+
+  await mkdir(path.join(workspace, ".agents"), { recursive: true });
+  await mkdir(path.join(workspace, ".cursor"), { recursive: true });
+  await symlink(rootPlugin, path.join(workspace, ".agents", "skills"), "dir");
+  await symlink(folderSkills, path.join(workspace, ".cursor", "skills"), "dir");
+
+  const result = await discoverSkills({
+    home,
+    cwd: workspace,
+    env: {},
+    managerRecords: [],
+  });
+  const groups = new Map(result.groups.map((group) => [group.name, group]));
+
+  assert.equal(groups.get("root-review").fingerprint, await fingerprintFile(
+    path.join(rootPlugin, "SKILL.md"),
+  ));
+  assert.equal(groups.has("root-extra-review"), false);
+  assert.equal(groups.has("folder-root-review"), false);
+  assert.equal(groups.has("folder-child-review"), true);
+
+  const rootRecord = result.searchedRoots.find(
+    ({ path: rootPath }) => rootPath === path.join(workspace, ".agents", "skills"),
+  );
+  const folderRecord = result.searchedRoots.find(
+    ({ path: rootPath }) => rootPath === path.join(workspace, ".cursor", "skills"),
+  );
+  assert.ok(rootRecord);
+  assert.ok(folderRecord);
+  assert.equal(rootRecord.path, path.join(workspace, ".agents", "skills"));
+  assert.equal(rootRecord.physicalPath, await realpath(rootPlugin));
+  assert.equal(rootRecord.origin, "plugin");
+  assert.equal(rootRecord.singleSkill, true);
+  assert.equal(rootRecord.pluginRoot, rootPlugin);
+  assert.equal(folderRecord.path, path.join(workspace, ".cursor", "skills"));
+  assert.equal(folderRecord.physicalPath, await realpath(folderSkills));
+  assert.equal(folderRecord.origin, "plugin");
+  assert.equal(folderRecord.includeRootSkill, false);
+  assert.equal(folderRecord.pluginRoot, folderPlugin);
+});
+
+test("discovery groups standard and plugin copies while keeping conflicting plugin identities selectable", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-candidates-"));
+  const home = path.join(root, "home");
+  const workspace = path.join(root, "workspace");
+  const standardSkill = await writeSkill(
+    path.join(workspace, ".agents", "skills"),
+    "review",
+    "review",
+    "Use the shared workflow.\n",
+  );
+  const firstSkill = await writeSkill(
+    path.join(root, "plugin-one", "skills"),
+    "review",
+    "review",
+    "Use the shared workflow.\n",
+  );
+  const secondSkill = await writeSkill(
+    path.join(root, "plugin-two", "skills"),
+    "review",
+    "review",
+    "Use the shared workflow.\n",
+  );
+  const firstIdentity = "local:plugin:test:one";
+  const secondIdentity = "local:plugin:test:two";
+  const pluginRoot = (skill, name, identity) => ({
+    path: path.dirname(skill),
+    owner: "plugin:test",
+    owners: ["plugin:test"],
+    scope: "global",
+    origin: "plugin",
+    plugin: { host: "test", marketplace: "fixture", name },
+    pluginIdentity: identity,
+    pluginEvidence: [{
+      kind: "plugin",
+      host: "test",
+      plugin: name,
+      marketplace: "fixture",
+      identity,
+      provenance: { kind: "plugin", host: "test", plugin: name },
+    }],
+  });
+
+  const result = await discoverSkills({
+    input: "review",
+    home,
+    cwd: workspace,
+    env: {},
+    managerRecords: [],
+    pluginDiscovery: async () => ({
+      roots: [
+        pluginRoot(firstSkill, "one", firstIdentity),
+        pluginRoot(secondSkill, "two", secondIdentity),
+      ],
+      diagnostics: [],
+    }),
+  });
+
+  assert.equal(result.groups.length, 1);
+  const group = result.groups[0];
+  assert.equal(group.copies.length, 3);
+  assert.deepEqual(
+    group.copies.map(({ path: copyPath }) => copyPath).sort(),
+    [firstSkill, secondSkill, standardSkill].sort(),
+  );
+  assert.deepEqual(group.provenance, [firstIdentity, secondIdentity]);
+  assert.equal(group.conflict, true);
+
+  const selected = confirmDiscoverySelection({
+    discovery: result,
+    choice: {
+      name: group.name,
+      fingerprint: group.fingerprint,
+      path: secondSkill,
+      owner: "plugin:test",
+    },
+    interactive: true,
+    confirmedProvenance: secondIdentity,
+  });
+  assert.equal(selected.copy.path, secondSkill);
+  assert.equal(selected.provenance, secondIdentity);
+});
+
 test("discovery isolates an invalid sibling candidate and reports its diagnostic", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-invalid-sibling-"));
   await writeSkill(root, "review");
@@ -1646,6 +1860,56 @@ test("discovery orders explicit, Git, manager, and embedded evidence", async () 
     ["explicit", "git", "manager", "embedded"],
   );
   assert.equal(result.groups[0].conflict, false);
+});
+
+test("discovery keeps Git evidence ahead of plugin evidence without hiding a conflict", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "git-plugin-evidence-"));
+  const home = path.join(root, "repository");
+  const install = path.join(
+    home,
+    ".claude",
+    "plugins",
+    "cache",
+    "official",
+    "reviewer",
+    "1",
+  );
+  await writeSkill(path.join(install, "skills"), "review");
+  await mkdir(path.join(install, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(install, ".claude-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "reviewer",
+      repository: "https://github.com/example/plugin-reviewer",
+    }),
+  );
+  const { spawnSync } = await import("node:child_process");
+  assert.equal(spawnSync("git", ["init", "-q", home]).status, 0);
+  assert.equal(
+    spawnSync("git", ["-C", home, "remote", "add", "origin", "https://github.com/example/git-reviewer"]).status,
+    0,
+  );
+
+  const result = await discoverSkills({
+    input: "review",
+    home,
+    cwd: path.join(home, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.deepEqual(result.groups[0].evidence.map(({ kind }) => kind), [
+    "git",
+    "plugin",
+  ]);
+  assert.equal(result.groups[0].provenance.length, 2);
+  assert.equal(result.groups[0].conflict, true);
+  assert.ok(result.groups[0].provenance.includes(
+    "repository:https://github.com/example/plugin-reviewer",
+  ));
+  assert.ok(result.groups[0].provenance.some((value) =>
+    value.startsWith("repository:https://github.com/example/git-reviewer#"),
+  ));
 });
 
 test("discovery surfaces provenance conflicts instead of merging silently", async () => {
