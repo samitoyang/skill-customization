@@ -11,7 +11,7 @@ import {
   discoverSkills,
   hostSkillRoots,
 } from "../src/discovery.js";
-import { fingerprintFile } from "../src/fingerprint.js";
+import { fingerprintPath } from "../src/fingerprint.js";
 
 async function writeSkill(root, folder, name = folder, body = "Use this skill.\n") {
   const directory = path.join(root, folder);
@@ -780,7 +780,7 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
   );
   assert.equal(
     inventory.groups.some(({ name }) => name === "cursor-root-after-escape"),
-    true,
+    false,
   );
   assert.equal(
     inventory.groups.some(({ name }) => name === "cursor-broken-marketplace-review"),
@@ -1618,9 +1618,7 @@ test("discovery preserves plugin root-skill scan and fingerprint policy through 
   });
   const groups = new Map(result.groups.map((group) => [group.name, group]));
 
-  assert.equal(groups.get("root-review").fingerprint, await fingerprintFile(
-    path.join(rootPlugin, "SKILL.md"),
-  ));
+  assert.equal(groups.get("root-review").fingerprint, await fingerprintPath(rootPlugin));
   assert.equal(groups.has("root-extra-review"), false);
   assert.equal(groups.has("folder-root-review"), false);
   assert.equal(groups.has("folder-child-review"), true);
@@ -1643,6 +1641,51 @@ test("discovery preserves plugin root-skill scan and fingerprint policy through 
   assert.equal(folderRecord.origin, "plugin");
   assert.equal(folderRecord.includeRootSkill, false);
   assert.equal(folderRecord.pluginRoot, folderPlugin);
+});
+
+test("Cursor root-skill fallback fingerprints its full source and rejects symlinked entrypoints", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-root-fingerprint-"));
+  const home = path.join(root, "home");
+  const localRoot = path.join(home, ".cursor", "plugins", "local");
+  const workflow = "---\nname: root-review\ndescription: Fixture\n---\nUse the root workflow.\n";
+
+  const first = path.join(localRoot, "first");
+  await mkdir(path.join(first, "references"), { recursive: true });
+  await writeFile(path.join(first, "SKILL.md"), workflow);
+  await writeFile(path.join(first, "references", "guide.md"), "first guidance\n");
+  await writeFile(path.join(first, "plugin.json"), JSON.stringify({ name: "first" }));
+
+  const second = path.join(localRoot, "second");
+  await mkdir(path.join(second, "references"), { recursive: true });
+  await writeFile(path.join(second, "SKILL.md"), workflow);
+  await writeFile(path.join(second, "references", "guide.md"), "second guidance\n");
+  await writeFile(path.join(second, "plugin.json"), JSON.stringify({ name: "second" }));
+
+  const symlinked = path.join(localRoot, "symlinked");
+  await mkdir(symlinked, { recursive: true });
+  await writeFile(path.join(symlinked, "workflow.md"), workflow);
+  await symlink("workflow.md", path.join(symlinked, "SKILL.md"));
+  await writeFile(
+    path.join(symlinked, "plugin.json"),
+    JSON.stringify({ name: "symlinked" }),
+  );
+
+  const result = await discoverSkills({
+    input: "root-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.deepEqual(
+    result.groups.map(({ fingerprint }) => fingerprint).sort(),
+    [await fingerprintPath(first), await fingerprintPath(second)].sort(),
+  );
+  assert.ok(result.candidateDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "FINGERPRINT_SYMLINK" && diagnosticPath === symlinked,
+  ));
 });
 
 test("discovery groups standard and plugin copies while keeping conflicting plugin identities selectable", async () => {

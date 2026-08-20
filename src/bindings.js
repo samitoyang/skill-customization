@@ -243,8 +243,13 @@ async function inspectBindingSource({
   if (descriptor.source.kind === "repository") {
     repository = normalizeRepositoryUrl(descriptor.source.repository);
     upstreamPath = normalizeUpstreamEntrypoint(descriptor.source.upstream_path);
+    const repositoryProvenance = `repository:${repository}`;
     const expectedProvenance = `repository:${repository}#${upstreamPath}`;
-    if (selection && selection.provenance !== expectedProvenance) {
+    if (
+      selection
+      && selection.provenance !== repositoryProvenance
+      && selection.provenance !== expectedProvenance
+    ) {
       throw new BindingError(
         "confirmed source provenance does not match the descriptor",
         {

@@ -556,6 +556,81 @@ test("binding persists and revalidates an auditable provenance choice", async ()
   assert.equal(afterDrift.source.selection.provenance, binding.source.selection.provenance);
 });
 
+test("binding accepts confirmed repository-only plugin provenance", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-repository-only-"));
+  const source = path.join(root, "skills", "review");
+  const statePath = path.join(root, "bindings.json");
+  const repository = "https://github.com/example/skills";
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  assert.equal(spawnSync("git", ["init", "-q", root]).status, 0);
+  assert.equal(
+    spawnSync("git", [
+      "-C",
+      root,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/other/skills",
+    ]).status,
+    0,
+  );
+  const pluginIdentity = "local:plugin:fixture-host:fixture-marketplace:reviewer";
+  const roots = [{
+    path: path.dirname(source),
+    owner: "plugin:fixture-host",
+    scope: "global",
+    origin: "plugin",
+    pluginRoot: root,
+    pluginIdentity,
+    pluginEvidence: [{
+      kind: "plugin",
+      host: "fixture-host",
+      marketplace: "fixture-marketplace",
+      plugin: "reviewer",
+      identity: pluginIdentity,
+      repository,
+    }],
+  }];
+  const discovery = await discoverSkills({ input: source, roots, managerRecords: [] });
+  const group = discovery.groups[0];
+  const chosenCopy = group.copies.find(({ owner }) => owner === "plugin:fixture-host");
+  const repositoryOnlyProvenance = `repository:${repository}`;
+  assert.equal(group.conflict, true);
+  assert.ok(chosenCopy.provenance.includes(repositoryOnlyProvenance));
+  const confirmedSelection = confirmDiscoverySelection({
+    discovery,
+    choice: {
+      name: group.name,
+      fingerprint: group.fingerprint,
+      path: chosenCopy.path,
+      owner: chosenCopy.owner,
+    },
+    interactive: true,
+    confirmedProvenance: repositoryOnlyProvenance,
+    confirmationEvidence: {
+      actor: "human",
+      reason: "selected repository-only plugin evidence over conflicting Git evidence",
+    },
+  });
+
+  const binding = await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots,
+    managerRecords: [],
+    confirmedSelection,
+    interactive: true,
+    confirm: async () => true,
+  });
+
+  assert.equal(binding.source.repository, repository);
+  assert.equal(binding.source.upstreamPath, "skills/review/SKILL.md");
+  assert.equal(binding.source.selection.provenance, repositoryOnlyProvenance);
+});
+
 test("binding preserves a provenance choice made through a customization alias", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-customization-alias-"));
   const source = path.join(root, "review-fork");
