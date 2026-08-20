@@ -1462,6 +1462,69 @@ test("Codex config.toml local marketplaces discover bounded external roots", asy
   ));
 });
 
+test("Codex config.toml accepts multiline marketplace source strings", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-multiline-config-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, ".codex");
+  const marketplaceRoots = new Map();
+  for (const kind of ["basic", "literal"]) {
+    const marketplaceRoot = path.join(root, `${kind}-marketplace`);
+    const plugin = path.join(marketplaceRoot, "plugins", `${kind}-plugin`);
+    await writeSkill(plugin, "skills", `${kind}-multiline-review`);
+    await mkdir(path.join(marketplaceRoot, ".agents", "plugins"), { recursive: true });
+    await writeFile(
+      path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json"),
+      JSON.stringify({
+        name: `${kind}-marketplace`,
+        plugins: [{
+          name: `${kind}-plugin`,
+          source: { source: "local", path: `./plugins/${kind}-plugin` },
+        }],
+      }),
+    );
+    marketplaceRoots.set(kind, marketplaceRoot);
+  }
+  await mkdir(codexHome, { recursive: true });
+  await writeFile(
+    path.join(codexHome, "config.toml"),
+    [
+      "[marketplaces.basic]",
+      'source_type = "local"',
+      'source = """',
+      marketplaceRoots.get("basic"),
+      '"""',
+      "",
+      "[marketplaces.literal]",
+      "source_type = 'local'",
+      "source = '''",
+      marketplaceRoots.get("literal"),
+      "'''",
+      "",
+    ].join("\n"),
+  );
+
+  const result = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: codexHome },
+    managerRecords: [],
+  });
+  const byName = new Map(result.groups.map((group) => [group.name, group]));
+
+  for (const kind of marketplaceRoots.keys()) {
+    const group = byName.get(`${kind}-multiline-review`);
+    assert.ok(
+      group,
+      `missing ${kind} multiline marketplace; discovered: ${[...byName.keys()].join(", ")}`,
+    );
+    assert.equal(group.copies[0].plugin.marketplace, `${kind}-marketplace`);
+  }
+  assert.equal(
+    result.pluginDiagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_CONFIGURATION"),
+    false,
+  );
+});
+
 test("Codex cache versions and synced or bundled marketplace copies remain auditable", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-cache-layouts-"));
   const home = path.join(root, "home");

@@ -1093,11 +1093,106 @@ function tomlAssignmentKey(line) {
   return match ? tomlKeyValue(match[1], match[2], match[3]) : undefined;
 }
 
+function tomlMultilineBasicValue(value) {
+  let result = "";
+  const escapes = new Map([
+    ["b", "\b"],
+    ["t", "\t"],
+    ["n", "\n"],
+    ["f", "\f"],
+    ["r", "\r"],
+    ['"', '"'],
+    ["\\", "\\"],
+  ]);
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character !== "\\") {
+      result += character;
+      continue;
+    }
+    const escaped = value[index + 1];
+    if (escaped === "\n" || escaped === "\r") {
+      index += escaped === "\r" && value[index + 2] === "\n" ? 2 : 1;
+      while ([" ", "\t", "\n", "\r"].includes(value[index + 1])) index += 1;
+      continue;
+    }
+    if (escapes.has(escaped)) {
+      result += escapes.get(escaped);
+      index += 1;
+      continue;
+    }
+    const digits = escaped === "u" ? 4 : escaped === "U" ? 8 : 0;
+    const hexadecimal = digits > 0 ? value.slice(index + 2, index + 2 + digits) : "";
+    if (
+      !digits
+      || hexadecimal.length !== digits
+      || !/^[0-9A-Fa-f]+$/.test(hexadecimal)
+    ) {
+      return undefined;
+    }
+    const codePoint = Number.parseInt(hexadecimal, 16);
+    if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+      return undefined;
+    }
+    result += String.fromCodePoint(codePoint);
+    index += digits + 1;
+  }
+  return result;
+}
+
+function tomlMultilineDelimiterIndex(value, delimiter, literal) {
+  let from = 0;
+  while (from < value.length) {
+    const found = value.indexOf(delimiter, from);
+    if (found < 0 || literal) return found;
+    let backslashes = 0;
+    for (let index = found - 1; index >= 0 && value[index] === "\\"; index -= 1) {
+      backslashes += 1;
+    }
+    if (backslashes % 2 === 0) return found;
+    from = found + delimiter.length;
+  }
+  return -1;
+}
+
+function tomlMultilineValue(lines, start, assignmentValue) {
+  const delimiter = assignmentValue.startsWith('"""')
+    ? '"""'
+    : assignmentValue.startsWith("'''")
+      ? "'''"
+      : undefined;
+  if (!delimiter) return undefined;
+  const literal = delimiter === "'''";
+  const pieces = [];
+  let line = start;
+  let fragment = assignmentValue.slice(delimiter.length);
+  while (line < lines.length) {
+    const closing = tomlMultilineDelimiterIndex(fragment, delimiter, literal);
+    if (closing >= 0) {
+      const trailing = fragment.slice(closing + delimiter.length).trim();
+      if (trailing && !trailing.startsWith("#")) return undefined;
+      pieces.push(fragment.slice(0, closing));
+      let value = pieces.join("\n");
+      if (pieces.length > 1 && pieces[0] === "") value = value.slice(1);
+      return {
+        value: literal ? value : tomlMultilineBasicValue(value),
+        end: line,
+      };
+    }
+    pieces.push(fragment);
+    line += 1;
+    fragment = lines[line] ?? "";
+  }
+  return undefined;
+}
+
 function codexMarketplaceConfigEntries(contents) {
   const entries = [];
   const invalid = [];
+  const lines = contents.split(/\r?\n/);
   let current;
-  for (const [index, line] of contents.split(/\r?\n/).entries()) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const section = trimmed.match(
@@ -1123,7 +1218,20 @@ function codexMarketplaceConfigEntries(contents) {
     );
     if (!assignment) {
       const key = tomlAssignmentKey(trimmed);
-      if (key === "source" || key === "source_type") invalid.push(index + 1);
+      const assignmentValue = trimmed.slice(trimmed.indexOf("=") + 1).trimStart();
+      const multiline = key
+        ? tomlMultilineValue(lines, index, assignmentValue)
+        : undefined;
+      if (multiline) {
+        if (
+          multiline.value !== undefined
+          && (key === "source" || key === "source_type")
+        ) current[key] = multiline.value;
+        else if (key === "source" || key === "source_type") invalid.push(index + 1);
+        index = multiline.end;
+      } else if (key === "source" || key === "source_type") {
+        invalid.push(index + 1);
+      }
       continue;
     }
     const key = tomlKeyValue(assignment[1], assignment[2], assignment[3]);
