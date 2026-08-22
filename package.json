@@ -53,10 +53,11 @@
     "changeset": "changeset",
     "release": "changeset publish",
     "test": "node scripts/run-tests.js",
+    "test:ambient": "node scripts/run-tests.js --lane ambient",
     "test:performance": "node scripts/run-performance.js test/performance/fixture-discovery.performance.js",
     "verify:artifact": "node scripts/verify-typescript.js",
     "verify:typescript": "node scripts/verify-typescript.js",
-    "verify": "node scripts/verify.js && npm test && npm run check:package",
+    "verify": "node scripts/verify.js && npm test && npm run test:ambient && npm run check:package",
     "version-packages": "changeset version && npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
     "prepublishOnly": "npm run verify"
   },

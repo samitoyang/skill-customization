@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { access } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const scenarioRoot = path.join(root, "test", "performance");
+const canonicalScenarioRoot = await realpath(scenarioRoot);
 const args = process.argv.slice(2);
 
 function fail() {
@@ -17,13 +18,18 @@ function fail() {
 if (args.length !== 1) {
   fail();
 } else {
-  const scenario = path.resolve(root, args[0]);
-  const relative = path.relative(scenarioRoot, scenario);
+  const requestedScenario = path.resolve(root, args[0]);
+  const scenario = await realpath(requestedScenario).catch(() => undefined);
+  const relative = scenario
+    ? path.relative(canonicalScenarioRoot, scenario)
+    : undefined;
   const valid = relative
     && !relative.startsWith("..")
     && !path.isAbsolute(relative)
-    && scenario.endsWith(".performance.js");
-  if (!valid || !(await access(scenario).then(() => true, () => false))) {
+    && requestedScenario.endsWith(".performance.js")
+    && scenario.endsWith(".performance.js")
+    && await stat(scenario).then((entry) => entry.isFile(), () => false);
+  if (!valid) {
     fail();
   } else {
     const result = spawnSync(process.execPath, [scenario], {

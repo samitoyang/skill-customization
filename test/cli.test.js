@@ -566,7 +566,12 @@ test("CLI discovery uses ambient Claude plugins and supports the deterministic o
     JSON.stringify({ name: "cli-reviewer" }),
   );
 
-  const environment = { ...process.env, HOME: home, PATH: "" };
+  const environment = {
+    ...process.env,
+    HOME: home,
+    CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
+    PATH: "",
+  };
   const discovered = await run(["discover", "cli-plugin-review"], { env: environment });
   assert.equal(discovered.code, 0, discovered.stderr);
   const result = JSON.parse(discovered.stdout);

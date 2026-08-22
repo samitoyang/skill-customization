@@ -3,6 +3,7 @@ import { access, copyFile, cp, mkdir, readFile, readdir, rm } from "node:fs/prom
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isolatedTestEnvironment } from "./test-environment.js";
 
 export const repositoryRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -177,14 +178,20 @@ async function assertEmittedTestSuite(root, outputDirectory) {
     .filter((file) => path.basename(file) !== "typescript-lane.test.js")
     .sort();
   if (tests.length === 0) throw new Error("TypeScript artifact emitted no test files");
-  const result = spawnSync(process.execPath, ["--test", ...tests], {
-    cwd: root,
-    encoding: "utf8",
-    maxBuffer: 20 * 1024 * 1024,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || "emitted test suite failed");
+  const isolated = await isolatedTestEnvironment();
+  try {
+    const result = spawnSync(process.execPath, ["--test", ...tests], {
+      cwd: root,
+      encoding: "utf8",
+      env: isolated.env,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(result.stderr || result.stdout || "emitted test suite failed");
+    }
+  } finally {
+    await isolated.cleanup();
   }
 }
 

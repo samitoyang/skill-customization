@@ -40,7 +40,9 @@ export async function discoverAmbientSkills(options = {}) {
     throw new TypeError("home, cwd, and env must be explicit in ambient discovery");
   }
   requireExplicitArray(options, "managerRecords", "ambient");
-  if (Object.hasOwn(options, "roots")) {
+  if (["roots", "additionalRoots", "customPath"].some((name) =>
+    Object.hasOwn(options, name),
+  )) {
     throw new TypeError("ambient discovery does not accept explicit roots");
   }
   if (options.includePlugins === false) {
