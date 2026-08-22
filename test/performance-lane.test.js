@@ -11,7 +11,7 @@ const runner = path.join(root, "scripts", "run-performance.js");
 test("performance runner accepts exactly one repository scenario", () => {
   for (const args of [
     [],
-    ["test/discovery.test.js"],
+    ["test/contract-v1.test.js"],
     ["test/performance/one.performance.js", "test/performance/two.performance.js"],
   ]) {
     const result = spawnSync(process.execPath, [runner, ...args], {
