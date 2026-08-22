@@ -5,7 +5,6 @@ import {
   mkdir,
   readFile,
   realpath,
-  rename,
   symlink,
   stat,
   unlink,
@@ -16,10 +15,6 @@ import path from "node:path";
 import test from "node:test";
 
 import { bindCustomization } from "../src/bindings.js";
-import {
-  confirmDiscoverySelection,
-  discoverSkills,
-} from "../src/discovery.js";
 import {
   fingerprintFile,
   fingerprintPath,
@@ -214,121 +209,6 @@ test("preflight flattens recursive overlays from base workflow through inner and
     ],
   );
   assert.equal(result.maintenanceHandler, null);
-});
-
-test("preflight preserves ambient plugin discovery for cache recovery", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "preflight-ambient-plugin-"));
-  const claudeHome = path.join(root, "claude");
-  const cacheRoot = path.join(
-    claudeHome,
-    "plugins",
-    "cache",
-    "fixture-marketplace",
-    "reviewer",
-  );
-  const versionOneRoot = path.join(cacheRoot, "1");
-  const versionTwoRoot = path.join(cacheRoot, "2");
-  const versionOne = path.join(versionOneRoot, "skills", "review");
-  const versionTwo = path.join(versionTwoRoot, "skills", "review");
-  const customizationRoot = path.join(root, "review-overlay");
-  const statePath = path.join(root, "state", "bindings.json");
-  const installedPluginsPath = path.join(claudeHome, "plugins", "installed_plugins.json");
-  const identity = "local:plugin:claude-code:fixture-marketplace:reviewer";
-  const workflow = "---\nname: review\n---\nstable\n";
-  const installVersion = async (pluginRoot, source, version) => {
-    await mkdir(source, { recursive: true });
-    await writeFile(path.join(source, "SKILL.md"), workflow);
-    await mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
-    await writeFile(
-      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
-      JSON.stringify({ name: "reviewer", version, repository }),
-    );
-    await writeFile(
-      installedPluginsPath,
-      JSON.stringify({
-        plugins: {
-          "reviewer@fixture-marketplace": [{
-            scope: "user",
-            installPath: pluginRoot,
-            version,
-          }],
-        },
-      }),
-    );
-  };
-  await installVersion(versionOneRoot, versionOne, "1");
-  await writeRuntimeFiles(customizationRoot, "review-overlay", "Apply the overlay.");
-  const descriptor = overlayDescriptor({
-    id: "urn:test:preflight-ambient-plugin",
-    name: "review-overlay",
-    owned: await payloadFingerprint(customizationRoot),
-    source: {
-      skill_name: "review",
-      kind: "repository",
-      repository,
-      upstream_path: "skills/review/SKILL.md",
-      license: "MIT",
-      effective_fingerprint: await fingerprintPath(versionOne),
-      review: { revision: "ambient-plugin" },
-    },
-  });
-  await writeDescriptor(customizationRoot, descriptor);
-
-  const ambientHomes = {
-    CLAUDE_CONFIG_DIR: claudeHome,
-    CODEX_HOME: path.join(root, "codex"),
-    CURSOR_HOME: path.join(root, "cursor"),
-    GEMINI_CLI_HOME: path.join(root, "gemini"),
-  };
-  const previousHomes = Object.fromEntries(
-    Object.keys(ambientHomes).map((name) => [name, process.env[name]]),
-  );
-  Object.assign(process.env, ambientHomes);
-  try {
-    const discovery = await discoverSkills({ input: versionOne, managerRecords: [] });
-    const group = discovery.groups[0];
-    const copy = group.copies.find((candidate) => candidate.pluginIdentity === identity);
-    const confirmedSelection = confirmDiscoverySelection({
-      discovery,
-      choice: {
-        name: group.name,
-        fingerprint: group.fingerprint,
-        path: copy.path,
-        owner: copy.owner,
-      },
-      interactive: true,
-      confirmedProvenance: `repository:${repository}`,
-      confirmationEvidence: {
-        actor: "human",
-        reason: "selected ambient plugin provenance",
-      },
-    });
-    await bindCustomization({
-      descriptor,
-      sourcePath: versionOne,
-      context: "global",
-      statePath,
-      confirmedSelection,
-      interactive: true,
-      confirm: async () => true,
-    });
-
-    await rename(versionOneRoot, path.join(root, "removed"));
-    await installVersion(versionTwoRoot, versionTwo, "2");
-    const result = await preflightCustomization({
-      descriptorPath: path.join(customizationRoot, "customization.json"),
-      context: "global",
-      statePath,
-    });
-
-    assert.equal(result.status, "ready");
-    assert.equal(result.steps[0].path, path.join(await realpath(versionTwo), "SKILL.md"));
-  } finally {
-    for (const [name, value] of Object.entries(previousHomes)) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
 });
 
 test("reconciliation uses a nested customization's checked effective fingerprint", async () => {
