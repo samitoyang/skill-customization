@@ -1077,6 +1077,22 @@ test("binding persists and revalidates an auditable provenance choice", async ()
     managerRecords,
   });
   assert.equal(afterDrift.source.selection.provenance, binding.source.selection.provenance);
+
+  const tamperedStore = await readBindingStore(statePath);
+  tamperedStore.bindings[bindingKey(descriptor().id, "global")]
+    .source.selection.confirmation.provenance =
+    "repository:https://github.com/other/skills#skills/review/SKILL.md";
+  await writeFile(statePath, `${JSON.stringify(tamperedStore)}\n`);
+  await assert.rejects(
+    resolveBinding({
+      descriptor: descriptor(),
+      context: "global",
+      statePath,
+      roots,
+      managerRecords,
+    }),
+    (error) => error.code === "BINDING_SOURCE_PROVENANCE_MISMATCH",
+  );
 });
 
 test("binding accepts confirmed repository-only plugin provenance", async () => {

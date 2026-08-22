@@ -253,7 +253,6 @@ async function confirmedSelectionFor({
     confirmation
       ? {
           ...confirmation,
-          provenance: confirmedSelection.provenance,
           ...(confirmation.confirmationEvidence
             ? { evidence: confirmation.confirmationEvidence }
             : {}),
@@ -346,7 +345,7 @@ async function inspectBindingSource({
       : path.dirname(entrypoint),
   });
   const selection = selectionResult.selection;
-  const provenanceDecision = selectionResult.decision;
+  const provenanceSelection = selectionResult.decision;
   const sourceCopies = group.copies.filter(
     (copy) => path.resolve(copy.realPath ?? copy.path) === sourceRoot,
   );
@@ -459,11 +458,11 @@ async function inspectBindingSource({
       : {}),
     provenance: selection
       ? [selection.provenance]
-      : provenanceDecision.decision.provenance,
-    evidence: [...provenanceDecision.decision.evidence],
+      : provenanceSelection.decision.provenance,
+    evidence: [...provenanceSelection.decision.evidence],
     searchedRoots: discovery.searchedRoots,
     selection,
-    provenanceDecision,
+    provenanceSelection,
     ...(bindingPluginIdentity
       ? { pluginIdentity: bindingPluginIdentity }
       : {}),
