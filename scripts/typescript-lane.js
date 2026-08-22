@@ -181,7 +181,7 @@ async function assertEmittedTestSuite(root, outputDirectory) {
   const isolated = await isolatedTestEnvironment();
   try {
     const result = spawnSync(process.execPath, ["--test", ...tests], {
-      cwd: root,
+      cwd: isolated.cwd,
       encoding: "utf8",
       env: isolated.env,
       maxBuffer: 20 * 1024 * 1024,

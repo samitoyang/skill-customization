@@ -12,11 +12,13 @@ export async function isolatedTestEnvironment({
   const config = path.join(directory, "config");
   const data = path.join(directory, "data");
   const state = path.join(directory, "state");
-  await Promise.all([home, config, data, state].map((target) =>
+  const workspace = path.join(directory, "workspace");
+  await Promise.all([home, config, data, state, workspace].map((target) =>
     mkdir(target, { recursive: true }),
   ));
   return {
     directory,
+    cwd: workspace,
     env: {
       ...baseEnv,
       HOME: home,

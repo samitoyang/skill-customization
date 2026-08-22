@@ -37,7 +37,7 @@ if (tests.length === 0) throw new Error(`test lane ${lane} has no test files`);
 const isolated = await isolatedTestEnvironment();
 try {
   const result = spawnSync(process.execPath, ["--test", ...tests], {
-    cwd: root,
+    cwd: isolated.cwd,
     env: isolated.env,
     stdio: "inherit",
   });

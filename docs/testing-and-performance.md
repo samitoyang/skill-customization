@@ -12,7 +12,7 @@ These test seams do not change the production interface: `discoverSkills` retain
 
 | Lane | Command | Ownership |
 | --- | --- | --- |
-| Behavior | `npm test` | Public behavior through `node:test`; the runner excludes dedicated ambient files and supplies an empty isolated host inventory. New discovery tests use fixture mode unless host integration is the behavior under test. |
+| Behavior | `npm test` | Public behavior through `node:test`; the runner excludes dedicated ambient files and supplies empty isolated personal and workspace inventories. New discovery tests use fixture mode unless host integration is the behavior under test. |
 | Ambient integration | `npm run test:ambient` | Documented host roots, plugin manifests, manager adapters, and environment isolation. Dedicated files and integration test names say `ambient`. |
 | Emitted artifact | `npm run verify:artifact` | TypeScript compilation, declarations, source maps, emitted tests, and emitted CLI/library compatibility. `verify:typescript` remains an alias during the migration. |
 | Package | `npm run check:package` | Packed paths, required assets, executable metadata, and package exclusions. It calls the emitted-artifact verifier rather than duplicating that policy. |

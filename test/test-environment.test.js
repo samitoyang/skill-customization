@@ -12,6 +12,11 @@ test("test lanes receive an isolated empty host inventory", async () => {
   try {
     assert.notEqual(isolated.env.HOME, "/developer/home");
     assert.equal(isolated.env.PATH, "/fixture/bin");
+    assert.ok(isolated.cwd.startsWith(isolated.directory));
+    assert.equal(
+      await access(isolated.cwd).then(() => true, () => false),
+      true,
+    );
     for (const name of [
       "HOME",
       "XDG_CONFIG_HOME",
