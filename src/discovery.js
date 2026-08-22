@@ -25,20 +25,15 @@ import {
 } from "./normalization.js";
 import { parseSkillMetadata } from "./skill-metadata.js";
 import { discoverPluginSkillRoots } from "./plugin-discovery.js";
+import {
+  checkProvenance,
+  confirmProvenanceDecision,
+} from "./provenance.js";
 import { isPathContained } from "./paths.js";
 import { registrySkillRoots } from "./skill-root-registry.js";
 import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 
 const execFile = promisify(execFileCallback);
-const EVIDENCE_ORDER = new Map([
-  ["explicit", 0],
-  ["git", 1],
-  ["plugin", 2],
-  ["manager", 3],
-  ["embedded", 4],
-  ["confirmation", 5],
-]);
-
 function root(pathname, owner, scope, origin = owner, metadata = {}) {
   return {
     ...metadata,
@@ -185,17 +180,6 @@ async function uniquePhysicalRoots(roots) {
     byPhysicalPath.set(physicalPath, { ...merged, physicalPath });
   }
   return [...byPhysicalPath.values()];
-}
-
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 function canonicalManagerProvenance(record) {
@@ -642,74 +626,6 @@ function managerEvidenceFor(candidate, records) {
     });
 }
 
-function uniqueOrderedEvidence(evidence) {
-  const unique = new Map();
-  for (const item of evidence) unique.set(JSON.stringify(item), item);
-  return [...unique.values()].sort(
-    (left, right) =>
-      (EVIDENCE_ORDER.get(left.kind) ?? 99)
-      - (EVIDENCE_ORDER.get(right.kind) ?? 99),
-  );
-}
-
-function evidenceIdentity(evidence) {
-  if (evidence.repository) {
-    const upstreamPath = normalizeUpstreamEntrypoint(
-      evidence.upstream_path ?? evidence.upstreamPath,
-    );
-    return `repository:${evidence.repository}${upstreamPath ? `#${upstreamPath}` : ""}`;
-  }
-  if (evidence.identity) {
-    return evidence.identity.startsWith("local:")
-      ? evidence.identity
-      : `local:${evidence.identity}`;
-  }
-  if (evidence.provenance) return `manager-source:${stableJson(evidence.provenance)}`;
-  return undefined;
-}
-
-function summarizeProvenance(evidence) {
-  const repositories = new Map();
-  const local = new Set();
-  for (const item of evidence) {
-    if (item.repository) {
-      const repository = normalizeRepositoryUrl(item.repository);
-      const upstreamPath = normalizeUpstreamEntrypoint(
-        item.upstream_path ?? item.upstreamPath,
-      );
-      const summary = repositories.get(repository) ?? {
-        repositoryOnly: false,
-        paths: new Set(),
-      };
-      if (upstreamPath) summary.paths.add(upstreamPath);
-      else summary.repositoryOnly = true;
-      repositories.set(repository, summary);
-      continue;
-    }
-    const identity = evidenceIdentity(item);
-    if (identity) local.add(identity);
-  }
-  const identities = [];
-  for (const [repository, summary] of repositories) {
-    if (summary.repositoryOnly) identities.push(`repository:${repository}`);
-    for (const upstreamPath of summary.paths) {
-      identities.push(`repository:${repository}#${upstreamPath}`);
-    }
-  }
-  identities.push(...local);
-  const repositoryPathConflict = [...repositories.values()].some(
-    ({ paths }) => paths.size > 1,
-  );
-  return {
-    identities: identities.sort(),
-    conflict:
-      repositories.size > 1
-      || repositoryPathConflict
-      || local.size > 1
-      || (repositories.size > 0 && local.size > 0),
-  };
-}
-
 function groupCandidates(candidates) {
   const groups = new Map();
   for (const candidate of candidates) {
@@ -722,9 +638,8 @@ function groupCandidates(candidates) {
       provenance: [],
       conflict: false,
     };
-    const copyEvidence = uniqueOrderedEvidence(candidate.evidence);
-    const copyProvenance = summarizeProvenance(copyEvidence);
-    group.copies.push({
+    const copyDecision = checkProvenance({ observations: candidate.evidence });
+    const copy = {
       path: candidate.path,
       realPath: candidate.realPath,
       owner: candidate.owner,
@@ -736,29 +651,61 @@ function groupCandidates(candidates) {
         ? { pluginMetadata: structuredClone(candidate.pluginMetadata) }
         : {}),
       ...(candidate.pluginIdentity ? { pluginIdentity: candidate.pluginIdentity } : {}),
-      evidence: copyEvidence,
-      provenance: copyProvenance.identities,
-      conflict: copyProvenance.conflict,
+      evidence: [...copyDecision.evidence],
+      provenance: [...copyDecision.provenance],
+      conflict: copyDecision.conflict,
       classification: candidate.classification,
       ...(candidate.active === false ? { active: false } : {}),
       ...(candidate.customization
         ? { customization: structuredClone(candidate.customization) }
         : {}),
+    };
+    Object.defineProperty(copy, "provenanceDecision", {
+      value: copyDecision,
+      enumerable: false,
+      writable: false,
     });
+    group.copies.push(copy);
     group.evidence.push(...candidate.evidence);
     groups.set(key, group);
   }
   for (const group of groups.values()) {
-    group.evidence = uniqueOrderedEvidence(group.evidence);
-    const provenance = summarizeProvenance(group.evidence);
-    group.provenance = provenance.identities;
-    group.conflict = provenance.conflict;
+    const decision = checkProvenance({ observations: group.evidence });
+    group.evidence = [...decision.evidence];
+    group.provenance = [...decision.provenance];
+    group.conflict = decision.conflict;
+    Object.defineProperty(group, "provenanceDecision", {
+      value: decision,
+      enumerable: false,
+      writable: false,
+    });
   }
   const result = [...groups.values()];
   const nameCounts = new Map();
   for (const group of result) nameCounts.set(group.name, (nameCounts.get(group.name) ?? 0) + 1);
   for (const group of result) group.nameCollision = nameCounts.get(group.name) > 1;
   return result.sort((left, right) => left.name.localeCompare(right.name, "en"));
+}
+
+function candidateMatchesRepository(candidate, locator) {
+  const decision = checkProvenance({ observations: candidate.evidence });
+  const repositoryIdentity = `repository:${locator.repository}`;
+  const hasRepositoryIdentity = () => {
+    if (!locator.subdir) {
+      return decision.provenance.some((identity) =>
+        identity === repositoryIdentity
+        || identity.startsWith(`${repositoryIdentity}#`),
+      );
+    }
+    const upstreamPath = normalizeUpstreamEntrypoint(locator.subdir);
+    return decision.provenance.includes(
+      `${repositoryIdentity}#${upstreamPath}`,
+    );
+  };
+  // Keep conflicting repository copies visible so confirmation can choose one;
+  // malformed or otherwise ineligible evidence is filtered at this seam.
+  if (!decision.selectionEligible && !decision.conflict) return false;
+  return hasRepositoryIdentity();
 }
 
 export async function discoverSkills({
@@ -888,16 +835,7 @@ export async function discoverSkills({
       );
     } else if (repositoryInput) {
       const locator = normalizeRepositoryLocator(input);
-      selected = selected.filter((candidate) =>
-        candidate.evidence.some(
-          ({ repository, upstream_path: upstreamPath, upstreamPath: legacyUpstreamPath }) => {
-            if (repository !== locator.repository) return false;
-            if (!locator.subdir) return true;
-            return normalizeUpstreamEntrypoint(upstreamPath ?? legacyUpstreamPath)
-              === normalizeUpstreamEntrypoint(locator.subdir);
-          },
-        ),
-      );
+      selected = selected.filter((candidate) => candidateMatchesRepository(candidate, locator));
     } else if (filesystemInput.exists || /[/\\]/.test(input)) {
       selected = [];
     } else {
@@ -982,50 +920,43 @@ export function confirmDiscoverySelection({
       details: group.copies,
     });
   }
-  if (
-    copy.conflict
-    && (!confirmedProvenance || !copy.provenance.includes(confirmedProvenance))
-  ) {
+  const baseDecision = copy.provenanceDecision
+    ?? checkProvenance({ observations: copy.evidence });
+  const provenanceDecision = confirmProvenanceDecision(baseDecision, {
+    path: copy.path,
+    ...(confirmedProvenance ? { provenance: confirmedProvenance } : {}),
+    ...(confirmationEvidence !== undefined ? { evidence: confirmationEvidence } : {}),
+  });
+  const diagnostic = provenanceDecision.diagnostics[0];
+  if (diagnostic?.code === "PROVENANCE_CONFIRMATION_REQUIRED") {
     throw new DiscoveryError("conflicting provenance requires an explicit choice", {
       code: "PROVENANCE_CONFIRMATION_REQUIRED",
       details: copy.provenance,
     });
   }
-  if (confirmedProvenance && !copy.provenance.includes(confirmedProvenance)) {
+  if (diagnostic?.code === "PROVENANCE_CONFIRMATION_MISMATCH") {
     throw new DiscoveryError("confirmed provenance does not belong to the selected copy", {
       code: "PROVENANCE_COPY_MISMATCH",
       details: { copy, confirmedProvenance },
     });
   }
-  if (
-    confirmationEvidence !== undefined
-    && (
-      !confirmationEvidence
-      || typeof confirmationEvidence !== "object"
-      || Array.isArray(confirmationEvidence)
-      || Object.keys(confirmationEvidence).length === 0
-    )
-  ) {
+  if (diagnostic?.code === "INVALID_CONFIRMATION_EVIDENCE") {
     throw new DiscoveryError("confirmation evidence must be a non-empty object", {
       code: "INVALID_CONFIRMATION_EVIDENCE",
+    });
+  }
+  if (!provenanceDecision.selectionEligible) {
+    throw new DiscoveryError("invalid provenance evidence", {
+      code: "INVALID_PROVENANCE_EVIDENCE",
+      details: provenanceDecision.diagnostics,
     });
   }
   return {
     name: group.name,
     fingerprint: group.fingerprint,
     copy,
-    provenance: confirmedProvenance ?? copy.provenance[0],
-    evidence: [
-      ...copy.evidence,
-      {
-        kind: "confirmation",
-        path: copy.path,
-        ...(confirmedProvenance ? { provenance: confirmedProvenance } : {}),
-        ...(confirmationEvidence
-          ? { confirmationEvidence: structuredClone(confirmationEvidence) }
-          : {}),
-      },
-    ],
+    provenance: provenanceDecision.selectedProvenance,
+    evidence: [...provenanceDecision.evidence],
   };
 }
 

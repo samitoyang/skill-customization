@@ -12,6 +12,7 @@ export * from "./naming.js";
 export * from "./normalization.js";
 export * from "./paths.js";
 export * from "./preflight.js";
+export * from "./provenance.js";
 export * from "./reconcile.js";
 export * from "./state.js";
 export * from "./skill-metadata.js";
