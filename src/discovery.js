@@ -30,7 +30,10 @@ import {
   confirmProvenanceDecision,
 } from "./provenance.js";
 import { isPathContained } from "./paths.js";
-import { registrySkillRoots } from "./skill-root-registry.js";
+import {
+  normalizeSkillRootObservations,
+  registrySkillRoots,
+} from "./skill-root-registry.js";
 import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 
 const execFile = promisify(execFileCallback);
@@ -158,7 +161,8 @@ function uniqueRoots(roots) {
 async function uniquePhysicalRoots(roots) {
   const byPhysicalPath = new Map();
   for (const item of uniqueRoots(roots)) {
-    const physicalPath = await realpath(item.path).catch(() => item.path);
+    const physicalPath = item.physicalPath
+      ?? await realpath(item.path).catch(() => item.path);
     const existing = byPhysicalPath.get(physicalPath);
     if (!existing) {
       byPhysicalPath.set(physicalPath, { ...item, physicalPath });
@@ -230,22 +234,29 @@ export function hostSkillRoots({
   ];
   for (const directory of additions) {
     roots.push(
-      root(
-        path.basename(directory) === "skills"
+      {
+        kind: "configured",
+        path: path.basename(directory) === "skills"
           ? directory
           : path.join(directory, ".claude", "skills"),
-        "claude-additional",
-        "workspace",
-        "host-added",
-      ),
+        owner: "claude-additional",
+        scope: "workspace",
+        origin: "host-added",
+      },
     );
   }
   for (const directory of (env.COPILOT_SKILLS_DIRS ?? "")
     .split(path.delimiter)
     .filter(Boolean)) {
-    roots.push(root(directory, "copilot-env", "workspace", "host-added"));
+    roots.push({
+      kind: "configured",
+      path: directory,
+      owner: "copilot-env",
+      scope: "workspace",
+      origin: "host-added",
+    });
   }
-  return uniqueRoots(roots);
+  return normalizeSkillRootObservations(roots).roots;
 }
 
 function resolveConfiguredDirectory(value, { base, home }) {

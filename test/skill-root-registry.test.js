@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { hostSkillRoots } from "../src/discovery.js";
 import {
+  normalizeSkillRootObservations,
   registrySkillRoots,
   SKILL_ROOT_REGISTRY,
   SKILL_ROOT_REGISTRY_CHECKPOINT,
@@ -139,6 +142,124 @@ test("OpenClaw resolution covers every checkpointed legacy home", () => {
       roots.find((root) => root.owner === "openclaw")?.path,
       path.join(home, expected),
     );
+  }
+});
+
+test("registry normalizes standard and configured root observations", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "skill-root-registry-"));
+  try {
+    const physical = path.join(fixture, "physical");
+    const standardAlias = path.join(fixture, "workspace", ".agents", "skills");
+    const configuredAlias = path.join(fixture, "configured", "skills");
+    await mkdir(physical, { recursive: true });
+    await mkdir(path.dirname(standardAlias), { recursive: true });
+    await mkdir(path.dirname(configuredAlias), { recursive: true });
+    await symlink(physical, standardAlias, "dir");
+    await symlink(physical, configuredAlias, "dir");
+
+    const result = normalizeSkillRootObservations([
+      {
+        kind: "standard",
+        path: standardAlias,
+        owner: "agents",
+        scope: "workspace",
+        origin: "project",
+        registry: "legacy",
+      },
+      {
+        kind: "configured",
+        path: configuredAlias,
+        owner: "claude-additional",
+        scope: "workspace",
+        origin: "host-added",
+      },
+    ]);
+
+    assert.deepEqual(result.diagnostics, []);
+    assert.deepEqual(result.roots, [{
+      path: standardAlias,
+      physicalPath: await realpath(physical),
+      aliases: [standardAlias, configuredAlias],
+      owner: "agents",
+      owners: ["agents", "claude-additional"],
+      scope: "workspace",
+      origin: "project",
+      registry: "legacy",
+      registries: ["legacy"],
+    }]);
+    assert.equal(Object.isFrozen(result), true);
+    assert.equal(Object.isFrozen(result.roots), true);
+    assert.equal(Object.isFrozen(result.roots[0]), true);
+    assert.equal(Object.isFrozen(result.roots[0].aliases), true);
+
+    assert.throws(
+      () => result.roots.push({}),
+      TypeError,
+    );
+    assert.throws(
+      () => result.roots[0].owners.push("other"),
+      TypeError,
+    );
+
+    const invalid = normalizeSkillRootObservations([{
+      kind: "configured",
+      path: "",
+      owner: "claude-additional",
+      scope: "workspace",
+      origin: "host-added",
+    }]);
+    assert.deepEqual(invalid.roots, []);
+    assert.deepEqual(invalid.diagnostics, [{
+      code: "INVALID_ROOT_PATH",
+      message: "skill root observation requires a non-empty path",
+      observationIndex: 0,
+    }]);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("host roots feed standard and configured observations through the registry", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "host-skill-roots-"));
+  try {
+    const home = path.join(fixture, "home");
+    const workspace = path.join(fixture, "workspace");
+    const physical = path.join(fixture, "physical");
+    const standardAlias = path.join(workspace, ".agents", "skills");
+    const configuredAlias = path.join(workspace, "configured", "skills");
+    await mkdir(physical, { recursive: true });
+    await mkdir(path.dirname(standardAlias), { recursive: true });
+    await mkdir(path.dirname(configuredAlias), { recursive: true });
+    await symlink(physical, standardAlias, "dir");
+    await symlink(physical, configuredAlias, "dir");
+
+    const record = hostSkillRoots({
+      home,
+      cwd: workspace,
+      env: {},
+      claudeSettings: { additionalDirectories: [configuredAlias] },
+    }).find(({ path: rootPath }) => rootPath === standardAlias);
+
+    assert.equal(record.owner, "agents");
+    assert.equal(record.path, standardAlias);
+    assert.equal(record.physicalPath, await realpath(physical));
+    assert.deepEqual(record.aliases, [standardAlias, configuredAlias]);
+    assert.equal(record.scope, "workspace");
+    assert.equal(record.origin, "project");
+    assert.deepEqual(record.registries, ["legacy", "vercel-skills"]);
+    for (const owner of [
+      "agents",
+      "amp",
+      "codex",
+      "cursor",
+      "github-copilot",
+      "universal",
+      "claude-additional",
+    ]) {
+      assert.ok(record.owners.includes(owner));
+    }
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
   }
 });
 
