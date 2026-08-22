@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+### Minor Changes
+
+- [#20](https://github.com/samitoyang/skill-customization/pull/20) [`fa693f9`](https://github.com/samitoyang/skill-customization/commit/fa693f9efc60559ba5be6b0b9fecbcd69e0cffd0) Thanks [@samitoyang](https://github.com/samitoyang)! - Discover plugin-backed skills with bounded, manifest-aware provenance across Claude Code, Codex, Gemini CLI, and Cursor.
+
 ## 0.2.0
 
 ### Minor Changes
