@@ -1,16 +1,19 @@
 import { lstat, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { assertValidDescriptor, readDescriptor } from "./descriptor.js";
 import { discoverSkills } from "./discovery.js";
 import { BindingError } from "./errors.js";
+import { inspectCustomizationExecution } from "./execution-graph.js";
 import { fingerprintFile, fingerprintPath } from "./fingerprint.js";
 import {
   generateLocalIdentity,
   normalizeRepositoryUrl,
   normalizeUpstreamEntrypoint,
 } from "./normalization.js";
+import { isPathContained } from "./paths.js";
 import { readSkillName } from "./skill-metadata.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
@@ -47,14 +50,9 @@ export async function readBindingStore(statePath = bindingStorePath()) {
   );
 }
 
-function contains(rootPath, targetPath) {
-  const relative = path.relative(path.resolve(rootPath), path.resolve(targetPath));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
 function matchingRoot(targetPath, roots) {
   return roots
-    .filter((candidate) => candidate.path && contains(candidate.path, targetPath))
+    .filter((candidate) => candidate.path && isPathContained(candidate.path, targetPath))
     .sort((left, right) => path.resolve(right.path).length - path.resolve(left.path).length)[0];
 }
 
@@ -117,6 +115,41 @@ async function confirmOrFail(callback, payload, code, message) {
   if (typeof callback !== "function" || !(await callback(payload))) {
     throw new BindingError(message, { code });
   }
+}
+
+function normalizedRepositoryEvidence(evidence) {
+  return evidence
+    .filter((item) => item.repository)
+    .map((item) => ({
+      repository: normalizeRepositoryUrl(item.repository),
+      upstreamPath: normalizeUpstreamEntrypoint(
+        item.upstream_path ?? item.upstreamPath,
+      ),
+      kind: item.kind,
+    }));
+}
+
+function observedRepositoryPaths(evidence, repository) {
+  return [
+    ...new Set(
+      evidence
+        .filter((item) => item.repository === repository)
+        .map((item) => item.upstreamPath)
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function versionedPluginCachesFor(copy, identity) {
+  if (!identity) return [];
+  return (copy.evidence ?? []).flatMap((evidence) =>
+    evidence.kind === "plugin"
+      && evidence.identity === identity
+      && evidence.cache?.kind === "versioned"
+      && evidence.cache.scope === copy.scope
+      ? [evidence.cache]
+      : []
+  );
 }
 
 async function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
@@ -235,13 +268,45 @@ async function inspectBindingSource({
       ? sourceRoot
       : path.dirname(entrypoint),
   );
+  const sourceCopies = group.copies.filter(
+    (copy) => path.resolve(copy.realPath ?? copy.path) === sourceRoot,
+  );
+  const sourcePluginEvidence = sourceCopies.flatMap((copy) =>
+    (copy.evidence ?? []).filter(({ kind }) => kind === "plugin")
+  );
+  const pluginIdentities = [...new Set([
+    ...sourceCopies.map(({ pluginIdentity }) => pluginIdentity),
+    ...sourcePluginEvidence
+      .filter(({ identity }) => typeof identity === "string")
+      .map(({ identity }) => identity),
+  ].filter(Boolean))];
+  const bindingPluginIdentity = selection
+    && pluginIdentities.includes(selection.provenance)
+    ? selection.provenance
+    : pluginIdentities.length === 1
+      ? pluginIdentities[0]
+      : undefined;
+  const bindingPluginCaches = [...new Map(
+    sourceCopies
+      .flatMap((copy) => versionedPluginCachesFor(copy, bindingPluginIdentity))
+      .map((cache) => [JSON.stringify(cache), cache]),
+  ).values()];
+  const bindingPluginCache = bindingPluginCaches.length === 1
+    ? bindingPluginCaches[0]
+    : undefined;
   let repository;
   let upstreamPath;
   if (descriptor.source.kind === "repository") {
     repository = normalizeRepositoryUrl(descriptor.source.repository);
     upstreamPath = normalizeUpstreamEntrypoint(descriptor.source.upstream_path);
+    const repositoryProvenance = `repository:${repository}`;
     const expectedProvenance = `repository:${repository}#${upstreamPath}`;
-    if (selection && selection.provenance !== expectedProvenance) {
+    const repositoryEvidence = normalizedRepositoryEvidence(group.evidence);
+    if (
+      selection
+      && selection.provenance !== repositoryProvenance
+      && selection.provenance !== expectedProvenance
+    ) {
       throw new BindingError(
         "confirmed source provenance does not match the descriptor",
         {
@@ -254,15 +319,6 @@ async function inspectBindingSource({
       );
     }
     if (!selection) {
-      const repositoryEvidence = group.evidence
-        .filter((item) => item.repository)
-        .map((item) => ({
-          repository: normalizeRepositoryUrl(item.repository),
-          upstreamPath: normalizeUpstreamEntrypoint(
-            item.upstream_path ?? item.upstreamPath,
-          ),
-          kind: item.kind,
-        }));
       const conflictingRepositories = repositoryEvidence.filter(
         (item) => item.repository !== repository,
       );
@@ -272,14 +328,9 @@ async function inspectBindingSource({
           details: { expected: repository, actual: conflictingRepositories },
         });
       }
-      const observedPaths = [
-        ...new Set(
-          repositoryEvidence
-            .filter((item) => item.repository === repository)
-            .map((item) => item.upstreamPath)
-            .filter(Boolean),
-        ),
-      ];
+    }
+    if (!selection || selection.provenance === repositoryProvenance) {
+      const observedPaths = observedRepositoryPaths(repositoryEvidence, repository);
       if (observedPaths.some((value) => value !== upstreamPath)) {
         throw new BindingError(
           "binding source upstream entrypoint does not match the descriptor",
@@ -371,8 +422,146 @@ async function inspectBindingSource({
       : {}),
     provenance: selection ? [selection.provenance] : group.provenance,
     evidence: group.evidence,
+    searchedRoots: discovery.searchedRoots,
     selection,
+    ...(bindingPluginIdentity
+      ? { pluginIdentity: bindingPluginIdentity }
+      : {}),
+    ...(bindingPluginCache
+      ? { pluginCache: structuredClone(bindingPluginCache) }
+      : {}),
   };
+}
+
+function compatibleProvenance(descriptor, copy) {
+  const repository = descriptor.source.kind === "repository"
+    ? normalizeRepositoryUrl(descriptor.source.repository)
+    : undefined;
+  const upstreamPath = descriptor.source.kind === "repository"
+    ? normalizeUpstreamEntrypoint(descriptor.source.upstream_path)
+    : undefined;
+  if (repository) {
+    const observedPaths = observedRepositoryPaths(
+      normalizedRepositoryEvidence(copy.evidence),
+      repository,
+    );
+    if (observedPaths.some((value) => value !== upstreamPath)) return undefined;
+  }
+  return copy.provenance.find((identity) => {
+    if (repository) {
+      return identity === `repository:${repository}`
+        || identity === `repository:${repository}#${upstreamPath}`;
+    }
+    return identity === descriptor.source.identity
+      || identity === `local:${descriptor.source.identity}`;
+  });
+}
+
+const BINDING_OPERATIONS = Object.freeze({
+  bindingKey,
+  readBindingStore,
+  resolveBinding,
+  validateBinding,
+});
+
+function matchesCustomizationCopy(source, group, copy) {
+  return copy.classification === "customization"
+    && group.name === source.skill_name
+    && copy.customization?.id === source.id
+    && copy.customization?.type === source.type
+    && copy.customization?.license === source.license;
+}
+
+async function recoveryFingerprint({
+  descriptor,
+  group,
+  copy,
+  context,
+  statePath,
+  roots,
+  managerRecords,
+  activeSkills,
+}) {
+  if (descriptor.source.kind !== "customization") {
+    return fingerprintPath(copy.path).catch(() => undefined);
+  }
+  if (!matchesCustomizationCopy(descriptor.source, group, copy)) return undefined;
+  const execution = await inspectCustomizationExecution({
+    descriptorPath: path.join(copy.path, "customization.json"),
+    context,
+    statePath,
+    roots,
+    managerRecords,
+    activeSkills,
+    bindings: BINDING_OPERATIONS,
+  }).catch(() => undefined);
+  return execution?.status === "maintenance-required"
+    ? undefined
+    : execution?.effectiveFingerprint;
+}
+
+async function recoverMissingPluginBinding({
+  descriptor,
+  binding,
+  context,
+  statePath,
+  roots,
+  managerRecords,
+  activeSkills,
+}) {
+  const { pluginCache, pluginIdentity } = binding.source;
+  if (
+    !pluginIdentity
+    || pluginCache?.kind !== "versioned"
+    || pluginCache.scope !== binding.scope
+  ) return undefined;
+  // A cache path is replaceable local state; continuity is safe only for one
+  // stable plugin identity and one already reviewed effective fingerprint.
+  let discovery;
+  try {
+    discovery = await discoverSkills({
+      input: descriptor.source.skill_name,
+      roots,
+      managerRecords,
+    });
+  } catch (error) {
+    if (error.code === "NO_LOCAL_COPY") return undefined;
+    throw error;
+  }
+  const matches = [];
+  for (const group of discovery.groups) {
+    for (const copy of group.copies) {
+      if (copy.scope !== pluginCache.scope) continue;
+      const compatibleCache = versionedPluginCachesFor(copy, pluginIdentity).length > 0;
+      if (!compatibleCache) continue;
+      const effectiveFingerprint = await recoveryFingerprint({
+        descriptor,
+        group,
+        copy,
+        context,
+        statePath,
+        roots,
+        managerRecords,
+        activeSkills,
+      });
+      if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
+      const provenance = compatibleProvenance(descriptor, copy);
+      if (provenance || ["local", "customization"].includes(descriptor.source.kind)) {
+        matches.push({ group, copy, provenance });
+      }
+    }
+  }
+  if (matches.length !== 1) return undefined;
+  const { group, copy, provenance } = matches[0];
+  // A replacement cache copy is not a substitute for human provenance review.
+  if (group.conflict || copy.conflict) return undefined;
+  const { alias: _alias, selection: _selection, ...stableSource } = binding.source;
+  const source = {
+    ...stableSource,
+    path: path.resolve(copy.path),
+    target: await realpath(copy.path),
+  };
+  return { ...binding, source, updatedAt: new Date().toISOString() };
 }
 
 function assertReplacementInventory(descriptor, activeSkills) {
@@ -396,7 +585,7 @@ export async function bindCustomization({
   sourcePath,
   context,
   statePath = bindingStorePath(),
-  roots = [],
+  roots,
   requestedScope,
   interactive = Boolean(process.stdin.isTTY),
   confirm,
@@ -434,7 +623,13 @@ export async function bindCustomization({
     managerRecords,
     confirmedSelection,
   });
-  const classified = await classifyBindingScope({ sourcePath, roots, requestedScope });
+  const classified = await classifyBindingScope({
+    sourcePath,
+    roots: roots ?? inspection.searchedRoots.filter(
+      ({ scope }) => scope === "global" || scope === "workspace",
+    ),
+    requestedScope,
+  });
   await confirmOrFail(
     confirm,
     { descriptor, context, source: classified, inspection },
@@ -477,6 +672,12 @@ export async function bindCustomization({
           : { customization: inspection.customization }),
       fingerprint: inspection.fingerprint,
       provenance: inspection.provenance,
+      ...(inspection.pluginIdentity
+        ? { pluginIdentity: inspection.pluginIdentity }
+        : {}),
+      ...(inspection.pluginCache?.scope === classified.scope
+        ? { pluginCache: inspection.pluginCache }
+        : {}),
       ...(inspection.selection ? { selection: inspection.selection } : {}),
       confirmation: inspection.selection
         ? "provenance-confirmed"
@@ -510,18 +711,22 @@ export async function bindCustomization({
   }).then((result) => result.binding);
 }
 
-async function invalidate(statePath, key) {
+async function invalidate(statePath, key, expectedBinding) {
+  let invalidated = false;
   await updateJsonAtomic(statePath, EMPTY_STORE, async (store) => {
     assertBindingStore(store, statePath);
+    if (!isDeepStrictEqual(store.bindings[key], expectedBinding)) return store;
     delete store.bindings[key];
+    invalidated = true;
     return store;
   });
+  return invalidated;
 }
 
 export async function validateBinding({
   descriptor,
   binding,
-  roots = [],
+  roots,
   managerRecords = [],
   activeSkills,
 }) {
@@ -622,7 +827,7 @@ export async function resolveBinding({
   descriptor,
   context,
   statePath = bindingStorePath(),
-  roots = [],
+  roots,
   managerRecords = [],
   activeSkills,
 }) {
@@ -646,6 +851,36 @@ export async function resolveBinding({
       })
     ).binding;
   } catch (error) {
+    if (error.code === "BINDING_TARGET_MISSING") {
+      const recovered = await recoverMissingPluginBinding({
+        descriptor,
+        binding,
+        context,
+        statePath,
+        roots,
+        managerRecords,
+        activeSkills,
+      });
+      if (recovered) {
+        let persisted = false;
+        await updateJsonAtomic(statePath, EMPTY_STORE, async (store) => {
+          assertBindingStore(store, statePath);
+          if (!isDeepStrictEqual(store.bindings[key], binding)) return store;
+          store.bindings[key] = recovered;
+          persisted = true;
+          return store;
+        });
+        if (persisted) return recovered;
+        return resolveBinding({
+          descriptor,
+          context,
+          statePath,
+          roots,
+          managerRecords,
+          activeSkills,
+        });
+      }
+    }
     if (
       new Set([
         "INVALID_BINDING_RECORD",
@@ -665,7 +900,17 @@ export async function resolveBinding({
         "BINDING_SOURCE_KIND_MISMATCH",
       ]).has(error.code)
     ) {
-      await invalidate(statePath, key);
+      const invalidated = await invalidate(statePath, key, binding);
+      if (!invalidated) {
+        return resolveBinding({
+          descriptor,
+          context,
+          statePath,
+          roots,
+          managerRecords,
+          activeSkills,
+        });
+      }
     }
     throw error;
   }

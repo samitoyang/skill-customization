@@ -155,6 +155,29 @@ test("skill helper policy covers installed, linked, registry, and stopped paths"
   }
 });
 
+test("contract-2 maintenance text uses Skill-tool routing and keeps human examples", async () => {
+  const [overlay, fork, reconciliation, adr, overlayEvals, forkEvals, readme] = await Promise.all([
+    read("skills/skill-overlay/SKILL.md"),
+    read("skills/skill-fork/SKILL.md"),
+    read("docs/reconciliation.md"),
+    read("docs/adr/0001-managed-recursive-runtime.md"),
+    read("skills/skill-overlay/evals/evals.json"),
+    read("skills/skill-fork/evals/evals.json"),
+    read("README.md"),
+  ]);
+  for (const markdown of [overlay, fork]) {
+    assert.match(markdown, /A dispatcher must Call the Skill tool with this skill/);
+    assert.doesNotMatch(markdown, /A dispatcher delegates here/);
+  }
+  assert.match(reconciliation, /Call the Skill tool with `skill-overlay`/);
+  assert.match(adr, /Call the Skill tool with exactly one maintenance skill/);
+  for (const evals of [overlayEvals, forkEvals]) {
+    assert.match(evals, /Call the Skill tool with/);
+  }
+  assert.match(readme, /\/skill-overlay customize/);
+  assert.match(readme, /\/skill-fork make/);
+});
+
 test("fork maintenance guidance preserves reviewed materialization and advisory tracking", async () => {
   const markdown = await read("skills/skill-fork/SKILL.md");
   const intake = await read("skills/skill-fork/references/intake.md");
@@ -395,6 +418,7 @@ test("public documentation pointers resolve", async () => {
     "docs/agents/issue-tracker.md",
     "docs/agents/triage-labels.md",
     "docs/adr/0001-managed-recursive-runtime.md",
+    "docs/adr/0002-bounded-plugin-provenance-discovery.md",
   ];
   for (const document of documents) {
     const markdown = await read(document);
@@ -418,6 +442,7 @@ test("the package uses a public-document allowlist and verifies its Node 22.14 f
     "docs/library.md",
     "docs/reconciliation.md",
     "docs/adr/0001-managed-recursive-runtime.md",
+    "docs/adr/0002-bounded-plugin-provenance-discovery.md",
   ]);
   assert.ok(publicDocs.every((file) => !file.includes("*")));
   assert.equal(packageJson.engines.node, ">=22.14.0");

@@ -31,6 +31,6 @@ Resolve these fields:
 
 [ADR 0001](https://github.com/samitoyang/skill-customization/blob/main/docs/adr/0001-managed-recursive-runtime.md) is the rationale: one canonical renderer owns the thin-dispatcher seam, and the complete checked plan is loaded and its semantic deltas are composed before any workflow action.
 
-Before finalizing, invoke any available skill-creation or agent-writing skill, such as `skill-creator` or `writing-for-agents`. Review the proposed independent workflow against source conventions, trigger behavior, realistic examples, and checkable completion criteria. Fold material findings into the brief.
+Before finalizing, if an available skill-creation or agent-writing skill is needed, **Call the Skill tool with "skill-creator" or "writing-for-agents".** Review the proposed independent workflow against source conventions, trigger behavior, realistic examples, and checkable completion criteria. Fold material findings into the brief.
 
 Present one brief containing every field above and ask for one confirmation. Intake is complete only when source identity, independent workflow, placement, name, activation, materialization/tracking choices, distribution intent, approved frontmatter, canonical rendering, conditional helper permission, and any workflow-model switch are explicit. Helper-backed creation begins after confirmation.

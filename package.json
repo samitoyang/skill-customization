@@ -38,6 +38,7 @@
     "docs/library.md",
     "docs/reconciliation.md",
     "docs/adr/0001-managed-recursive-runtime.md",
+    "docs/adr/0002-bounded-plugin-provenance-discovery.md",
     "customization.schema.json",
     "CHANGELOG.md",
     "CONTRIBUTING.md",

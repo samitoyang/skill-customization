@@ -34,12 +34,14 @@ test("helper contract 2: new dispatchers negotiate only contract 2 and stop safe
     });
     assert.match(dispatcher, /skill-customization supports 2/);
     assert.match(dispatcher, /compatible contract-2 result/);
-    assert.match(dispatcher, /Otherwise delegate once to/);
+    assert.match(dispatcher, /Otherwise Call the Skill tool with/);
     assert.ok(
       dispatcher.includes(
-        `\`${maintenanceHandler}\` and execute no customization instructions.`,
+        `\`${maintenanceHandler}\` once and execute no customization instructions.`,
       ),
     );
+    assert.match(dispatcher, /For \`maintenance-required\`, Call the Skill tool with its returned handler/);
+    assert.doesNotMatch(dispatcher, /\bdelegate\b/i);
     assert.doesNotMatch(dispatcher, /skill-customization supports 1|contract-1 result/);
   }
 });

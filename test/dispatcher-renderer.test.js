@@ -21,13 +21,13 @@ disable-model-invocation: true
 # Managed dispatcher
 
 1. Run \`skill-customization supports 2\` and accept only a well-formed,
-   compatible contract-2 result. Otherwise delegate once to
-   \`skill-overlay\` and execute no customization instructions.
+   compatible contract-2 result. Otherwise Call the Skill tool with
+   \`skill-overlay\` once and execute no customization instructions.
 
 2. Run \`skill-customization preflight
    <this-skill-directory>/customization.json --context <current-context>\`.
-   For \`maintenance-required\`, delegate once to its returned handler.
-   For malformed or failed preflight, delegate once to
+   For \`maintenance-required\`, Call the Skill tool with its returned handler.
+   For malformed or failed preflight, Call the Skill tool with
    \`skill-overlay\`. Continue only for \`ready\` or
    \`ready-with-advisory\`: load the complete plan, then compose its workflow
    with deltas inner-to-outer so later deltas refine earlier instructions.
@@ -51,13 +51,13 @@ description: "Review work with an independent local workflow."
 # Managed dispatcher
 
 1. Run \`skill-customization supports 2\` and accept only a well-formed,
-   compatible contract-2 result. Otherwise delegate once to
-   \`skill-fork\` and execute no customization instructions.
+   compatible contract-2 result. Otherwise Call the Skill tool with
+   \`skill-fork\` once and execute no customization instructions.
 
 2. Run \`skill-customization preflight
    <this-skill-directory>/customization.json --context <current-context>\`.
-   For \`maintenance-required\`, delegate once to its returned handler.
-   For malformed or failed preflight, delegate once to
+   For \`maintenance-required\`, Call the Skill tool with its returned handler.
+   For malformed or failed preflight, Call the Skill tool with
    \`skill-fork\`. Continue only for \`ready\` or
    \`ready-with-advisory\`: load the complete plan, then compose its workflow
    with deltas inner-to-outer so later deltas refine earlier instructions.

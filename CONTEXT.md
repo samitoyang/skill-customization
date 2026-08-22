@@ -1,5 +1,7 @@
 # Domain context
 
+## Language
+
 - **Customization**: portable v1 descriptor plus a thin dispatcher and runtime-owned workflow material.
 - **Semantic overlay**: a live-source customization whose `CUSTOMIZATION.md` is one semantic delta.
 - **Fork**: an independent runtime leaf whose `CUSTOMIZATION.md` is the complete workflow and whose provenance owns a snapshot directory and diff.
@@ -12,3 +14,11 @@
 - **Tracking binding**: optional fork binding used only for drift advisories; adoption and rebase remain explicit.
 - **Materialization**: reviewed concrete snapshot directory of an overlay chain, recording both chain effective and snapshot fingerprints plus review time and evidence.
 - **Reconciliation**: targeted semantic or provenance review for one maintenance decision; recursive traversal belongs to preflight.
+
+## Discovery
+
+- **Plugin skill root**: declared directory whose skills are shipped by an agent plugin and exposed through host-supported installation metadata or a plugin manifest.
+- **Plugin-backed source**: full source discovered through a plugin skill root; repository identity still requires repository-bearing discovery evidence.
+- **Synced source**: source materialized by an agent sync mechanism; sync status alone does not establish repository provenance.
+- **Provenance evidence**: normalized observation supporting a source identity, ordered from explicit input through Git, plugin, manager, embedded metadata, and confirmation.
+- **Local plugin identity**: host-local identifier used to group a plugin-backed source when repository evidence is absent; it is never portable repository provenance.
