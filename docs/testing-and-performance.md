@@ -12,13 +12,13 @@ These test seams do not change the production interface: `discoverSkills` retain
 
 | Lane | Command | Ownership |
 | --- | --- | --- |
-| Behavior | `npm test` | Public behavior through `node:test`; the runner excludes dedicated ambient files and supplies empty isolated personal and workspace inventories. New discovery tests use fixture mode unless host integration is the behavior under test. |
+| Behavior | `npm test` | Public behavior through `node:test`; the runner excludes dedicated ambient and emitted-artifact files and supplies empty isolated personal and workspace inventories. New discovery tests use fixture mode unless host integration is the behavior under test. |
 | Ambient integration | `npm run test:ambient` | Documented host roots, plugin manifests, manager adapters, and environment isolation. Dedicated files and integration test names say `ambient`. |
-| Emitted artifact | `npm run verify:artifact` | TypeScript compilation, declarations, source maps, emitted tests, and emitted CLI/library compatibility. `verify:typescript` remains an alias during the migration. |
+| Emitted artifact | `npm run test:artifact` | Runs the emitted-artifact contract test, which owns TypeScript compilation, declarations, source maps, emitted tests, and emitted CLI/library compatibility. `verify:artifact` is the direct verifier and `verify:typescript` remains its alias during the migration. |
 | Package | `npm run check:package` | Packed paths, required assets, executable metadata, and package exclusions. It calls the emitted-artifact verifier rather than duplicating that policy. |
 | Performance | `npm run test:performance` | One controlled scenario in one fresh Node.js process. It reports measurements but does not replace correctness verification. |
 
-`npm run verify` remains the required complete correctness check and runs both behavior and ambient integration lanes. Concurrent `node:test` durations and whole-suite wall-clock time are diagnostic only; they are not performance evidence or regression gates.
+`npm run verify` remains the required complete correctness check and runs behavior, ambient integration, and emitted-artifact lanes before the package audit. Concurrent `node:test` durations and whole-suite wall-clock time are diagnostic only; they are not performance evidence or regression gates.
 
 ## Performance scenarios
 
