@@ -19,6 +19,7 @@ import {
   checkProvenanceCache,
   checkProvenanceSelection,
   confirmProvenanceDecision,
+  stableProvenanceKey,
 } from "./provenance.js";
 import { readSkillName } from "./skill-metadata.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
@@ -279,6 +280,137 @@ async function confirmedSelectionFor({
   };
 }
 
+function rejectCustomizationCandidate(group) {
+  if (group.copies.some((copy) => copy.classification === "customization")) {
+    throw new BindingError("a customization candidate requires source.kind customization", {
+      code: "BINDING_SOURCE_KIND_MISMATCH",
+    });
+  }
+}
+
+function inspectRepositorySource({ descriptor, group }) {
+  rejectCustomizationCandidate(group);
+  return {
+    repository: normalizeRepositoryUrl(descriptor.source.repository),
+    upstreamPath: normalizeUpstreamEntrypoint(descriptor.source.upstream_path),
+  };
+}
+
+function inspectLocalSource({ group }) {
+  rejectCustomizationCandidate(group);
+  return {};
+}
+
+async function inspectCustomizationSource({ descriptor, info, sourceRoot }) {
+  if (!info.isDirectory()) {
+    throw new BindingError("a customization source must be bound by its directory", {
+      code: "BINDING_SOURCE_INVALID",
+    });
+  }
+  let customization;
+  try {
+    customization = await readDescriptor(path.join(sourceRoot, "customization.json"));
+  } catch (error) {
+    throw new BindingError(`bound customization metadata is invalid: ${error.message}`, {
+      code: "BINDING_CUSTOMIZATION_METADATA_INVALID",
+    });
+  }
+  if (
+    customization.id !== descriptor.source.id
+    || customization.type !== descriptor.source.type
+    || customization.name !== descriptor.source.skill_name
+    || customization.license !== descriptor.source.license
+  ) {
+    throw new BindingError("bound customization identity does not match the descriptor source", {
+      code: "BINDING_CUSTOMIZATION_SOURCE_MISMATCH",
+      details: {
+        expected: descriptor.source,
+        actual: {
+          id: customization.id,
+          type: customization.type,
+          skill_name: customization.name,
+          license: customization.license,
+        },
+      },
+    });
+  }
+  return {
+    customization: {
+      id: customization.id,
+      type: customization.type,
+      license: customization.license,
+    },
+  };
+}
+
+function localSourceIdentity({ skillName, fingerprint }) {
+  return {
+    fingerprint,
+    identity: generateLocalIdentity({ skillName, fingerprint }),
+  };
+}
+
+function assertLocalInspection({
+  descriptor,
+  localIdentity,
+  requireLocalIdentityMatch,
+}) {
+  if (
+    requireLocalIdentityMatch
+    && localIdentity !== descriptor.source.identity
+  ) {
+    throw new BindingError("binding source does not match the descriptor local identity", {
+      code: "BINDING_LOCAL_IDENTITY_MISMATCH",
+      details: { expected: descriptor.source.identity, actual: localIdentity },
+    });
+  }
+}
+
+function assertRepositoryBinding({ descriptor, binding }) {
+  const expectedRepository = normalizeRepositoryUrl(descriptor.source.repository);
+  const expectedUpstreamPath = normalizeUpstreamEntrypoint(
+    descriptor.source.upstream_path,
+  );
+  if (
+    binding.source.repository !== expectedRepository
+    || binding.source.upstreamPath !== expectedUpstreamPath
+  ) {
+    throw new BindingError("binding repository source no longer matches the descriptor", {
+      code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
+      details: {
+        expected: {
+          repository: expectedRepository,
+          upstreamPath: expectedUpstreamPath,
+        },
+        actual: {
+          repository: binding.source.repository,
+          upstreamPath: binding.source.upstreamPath,
+        },
+      },
+    });
+  }
+}
+
+function assertLocalBinding({ descriptor, binding }) {
+  if (binding.source.localIdentity !== descriptor.source.identity) {
+    throw new BindingError("binding local source no longer matches the descriptor", {
+      code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
+    });
+  }
+}
+
+function assertCustomizationBinding({ descriptor, binding }) {
+  if (
+    binding.source.customization?.id !== descriptor.source.id
+    || binding.source.customization?.type !== descriptor.source.type
+    || binding.source.customization?.license !== descriptor.source.license
+  ) {
+    throw new BindingError("binding customization source no longer matches the descriptor", {
+      code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
+    });
+  }
+}
+
 async function inspectBindingSource({
   descriptor,
   sourcePath,
@@ -288,6 +420,7 @@ async function inspectBindingSource({
   requireLocalIdentityMatch = true,
 }) {
   const resolved = path.resolve(sourcePath);
+  const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
   let info;
   try {
     info = await stat(resolved);
@@ -315,7 +448,7 @@ async function inspectBindingSource({
   let discovery;
   try {
     discovery = await discoverSkills({
-      input: descriptor.source.kind === "customization" ? sourceRoot : resolved,
+      input: sourcePolicy.discoveryInput({ resolved, sourceRoot }),
       roots,
       managerRecords,
     });
@@ -335,9 +468,7 @@ async function inspectBindingSource({
     descriptor,
     group,
     confirmedSelection,
-    sourceDirectory: descriptor.source.kind === "customization"
-      ? sourceRoot
-      : path.dirname(entrypoint),
+    sourceDirectory: sourcePolicy.sourceDirectory({ sourceRoot, entrypoint }),
   });
   const selection = selectionResult.selection;
   const provenanceSelection = selectionResult.decision;
@@ -369,55 +500,17 @@ async function inspectBindingSource({
       })
     : [];
   const uniqueBindingPluginCaches = [
-    ...new Map(bindingPluginCaches.map((cache) => [JSON.stringify(cache), cache])).values(),
+    ...new Map(bindingPluginCaches.map((cache) => [stableProvenanceKey(cache), cache])).values(),
   ];
   const bindingPluginCache = uniqueBindingPluginCaches.length === 1
     ? uniqueBindingPluginCaches[0]
     : undefined;
-  let repository;
-  let upstreamPath;
-  if (descriptor.source.kind === "repository") {
-    repository = normalizeRepositoryUrl(descriptor.source.repository);
-    upstreamPath = normalizeUpstreamEntrypoint(descriptor.source.upstream_path);
-  }
-  let customization;
-  if (descriptor.source.kind === "customization") {
-    if (!info.isDirectory()) {
-      throw new BindingError("a customization source must be bound by its directory", {
-        code: "BINDING_SOURCE_INVALID",
-      });
-    }
-    try {
-      customization = await readDescriptor(path.join(sourceRoot, "customization.json"));
-    } catch (error) {
-      throw new BindingError(`bound customization metadata is invalid: ${error.message}`, {
-        code: "BINDING_CUSTOMIZATION_METADATA_INVALID",
-      });
-    }
-    if (
-      customization.id !== descriptor.source.id
-      || customization.type !== descriptor.source.type
-      || customization.name !== descriptor.source.skill_name
-      || customization.license !== descriptor.source.license
-    ) {
-      throw new BindingError("bound customization identity does not match the descriptor source", {
-        code: "BINDING_CUSTOMIZATION_SOURCE_MISMATCH",
-        details: {
-          expected: descriptor.source,
-          actual: {
-            id: customization.id,
-            type: customization.type,
-            skill_name: customization.name,
-            license: customization.license,
-          },
-        },
-      });
-    }
-  } else if (group.copies.some((copy) => copy.classification === "customization")) {
-    throw new BindingError("a customization candidate requires source.kind customization", {
-      code: "BINDING_SOURCE_KIND_MISMATCH",
-    });
-  }
+  const sourceMetadata = await sourcePolicy.inspect({
+    descriptor,
+    group,
+    info,
+    sourceRoot,
+  });
   let fingerprint;
   let entrypointFingerprint;
   try {
@@ -428,36 +521,22 @@ async function inspectBindingSource({
       code: "BINDING_SOURCE_INVALID",
     });
   }
-  const localIdentity = generateLocalIdentity({
+  const localEvidence = localSourceIdentity({
     skillName: descriptor.source.skill_name,
     fingerprint: entrypointFingerprint,
   });
-  if (
-    descriptor.source.kind === "local" &&
-    requireLocalIdentityMatch &&
-    localIdentity !== descriptor.source.identity
-  ) {
-    throw new BindingError("binding source does not match the descriptor local identity", {
-      code: "BINDING_LOCAL_IDENTITY_MISMATCH",
-      details: { expected: descriptor.source.identity, actual: localIdentity },
-    });
-  }
+  sourcePolicy.assertInspection({
+    descriptor,
+    localIdentity: localEvidence.identity,
+    requireLocalIdentityMatch,
+  });
   return {
     declaredName,
     entrypoint,
     fingerprint,
     entrypointFingerprint,
-    localIdentity,
-    ...(repository ? { repository, upstreamPath } : {}),
-    ...(customization
-      ? {
-          customization: {
-            id: customization.id,
-            type: customization.type,
-            license: customization.license,
-          },
-        }
-      : {}),
+    localIdentity: localEvidence.identity,
+    ...sourceMetadata,
     provenance: selection
       ? [selection.provenance]
       : provenanceSelection.decision.provenance,
@@ -489,7 +568,11 @@ function matchesCustomizationCopy(source, group, copy) {
     && copy.customization?.license === source.license;
 }
 
-async function recoveryFingerprint({
+async function recoverStandardFingerprint({ copy }) {
+  return fingerprintPath(copy.path).catch(() => undefined);
+}
+
+async function recoverCustomizationFingerprint({
   descriptor,
   group,
   copy,
@@ -499,9 +582,6 @@ async function recoveryFingerprint({
   managerRecords,
   activeSkills,
 }) {
-  if (descriptor.source.kind !== "customization") {
-    return fingerprintPath(copy.path).catch(() => undefined);
-  }
   if (!matchesCustomizationCopy(descriptor.source, group, copy)) return undefined;
   const execution = await inspectCustomizationExecution({
     descriptorPath: path.join(copy.path, "customization.json"),
@@ -517,17 +597,62 @@ async function recoveryFingerprint({
     : execution?.effectiveFingerprint;
 }
 
-async function matchesLocalSourceIdentity(descriptor, copy) {
-  if (descriptor.source.kind !== "local") return true;
+async function matchesLocalRecoveredSource({ descriptor, copy }) {
   try {
-    const identity = generateLocalIdentity({
+    const localEvidence = localSourceIdentity({
       skillName: descriptor.source.skill_name,
       fingerprint: await fingerprintFile(path.join(copy.path, "SKILL.md")),
     });
-    return identity === descriptor.source.identity;
+    return localEvidence.identity === descriptor.source.identity;
   } catch {
     return false;
   }
+}
+
+const BINDING_SOURCE_POLICIES = Object.freeze({
+  repository: Object.freeze({
+    discoveryInput: ({ resolved }) => resolved,
+    sourceDirectory: ({ entrypoint }) => path.dirname(entrypoint),
+    inspect: inspectRepositorySource,
+    assertInspection: () => {},
+    bindingFields: ({ inspection }) => ({
+      repository: inspection.repository,
+      upstreamPath: inspection.upstreamPath,
+    }),
+    validateBinding: assertRepositoryBinding,
+    recoveryFingerprint: recoverStandardFingerprint,
+    matchesRecoveredCopy: async () => true,
+  }),
+  local: Object.freeze({
+    discoveryInput: ({ resolved }) => resolved,
+    sourceDirectory: ({ entrypoint }) => path.dirname(entrypoint),
+    inspect: inspectLocalSource,
+    assertInspection: assertLocalInspection,
+    bindingFields: ({ inspection }) => inspection,
+    validateBinding: assertLocalBinding,
+    recoveryFingerprint: recoverStandardFingerprint,
+    matchesRecoveredCopy: matchesLocalRecoveredSource,
+  }),
+  customization: Object.freeze({
+    discoveryInput: ({ sourceRoot }) => sourceRoot,
+    sourceDirectory: ({ sourceRoot }) => sourceRoot,
+    inspect: inspectCustomizationSource,
+    assertInspection: () => {},
+    bindingFields: ({ inspection }) => ({ customization: inspection.customization }),
+    validateBinding: assertCustomizationBinding,
+    recoveryFingerprint: recoverCustomizationFingerprint,
+    matchesRecoveredCopy: async () => true,
+  }),
+});
+
+function bindingSourcePolicyFor(kind) {
+  const policy = BINDING_SOURCE_POLICIES[kind];
+  if (!policy) {
+    throw new BindingError(`unsupported binding source kind ${kind}`, {
+      code: "BINDING_SOURCE_INVALID",
+    });
+  }
+  return policy;
 }
 
 async function recoverMissingPluginBinding({
@@ -540,6 +665,7 @@ async function recoverMissingPluginBinding({
   activeSkills,
 }) {
   const { pluginCache, pluginIdentity } = binding.source;
+  const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
   if (
     !pluginIdentity
     || pluginCache?.kind !== "versioned"
@@ -567,7 +693,7 @@ async function recoverMissingPluginBinding({
         { pluginIdentity, pluginCache, sourceScope: copy.scope },
       );
       if (!cacheDecision.cacheEligible) continue;
-      const effectiveFingerprint = await recoveryFingerprint({
+      const effectiveFingerprint = await sourcePolicy.recoveryFingerprint({
         descriptor,
         group,
         copy,
@@ -578,7 +704,7 @@ async function recoverMissingPluginBinding({
         activeSkills,
       });
       if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
-      if (!(await matchesLocalSourceIdentity(descriptor, copy))) continue;
+      if (!(await sourcePolicy.matchesRecoveredCopy({ descriptor, copy }))) continue;
       const provenanceDecision = checkProvenanceSelection(
         cacheDecision.decision,
         descriptor.source,
@@ -669,6 +795,7 @@ export async function bindCustomization({
     ),
     requestedScope,
   });
+  const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
   await confirmOrFail(
     confirm,
     { descriptor, context, source: classified, inspection },
@@ -701,14 +828,7 @@ export async function bindCustomization({
       ...(classified.aliasPath ? { alias: classified.aliasPath } : {}),
       skillName: inspection.declaredName,
       kind: descriptor.source.kind,
-      ...(descriptor.source.kind === "repository"
-        ? {
-            repository: inspection.repository,
-            upstreamPath: inspection.upstreamPath,
-          }
-        : descriptor.source.kind === "local"
-          ? { localIdentity: inspection.localIdentity }
-          : { customization: inspection.customization }),
+      ...sourcePolicy.bindingFields({ inspection }),
       fingerprint: inspection.fingerprint,
       provenance: inspection.provenance,
       ...(inspection.pluginIdentity
@@ -792,48 +912,7 @@ export async function validateBinding({
       code: "BINDING_DESCRIPTOR_ACTIVATION_MISMATCH",
     });
   }
-  if (descriptor.source.kind === "repository") {
-    const expectedRepository = normalizeRepositoryUrl(descriptor.source.repository);
-    const expectedUpstreamPath = normalizeUpstreamEntrypoint(
-      descriptor.source.upstream_path,
-    );
-    if (
-      binding.source.repository !== expectedRepository ||
-      binding.source.upstreamPath !== expectedUpstreamPath
-    ) {
-      throw new BindingError("binding repository source no longer matches the descriptor", {
-        code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
-        details: {
-          expected: {
-            repository: expectedRepository,
-            upstreamPath: expectedUpstreamPath,
-          },
-          actual: {
-            repository: binding.source.repository,
-            upstreamPath: binding.source.upstreamPath,
-          },
-        },
-      });
-    }
-  } else if (
-    descriptor.source.kind === "local"
-    && binding.source.localIdentity !== descriptor.source.identity
-  ) {
-    throw new BindingError("binding local source no longer matches the descriptor", {
-      code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
-    });
-  } else if (
-    descriptor.source.kind === "customization"
-    && (
-      binding.source.customization?.id !== descriptor.source.id
-      || binding.source.customization?.type !== descriptor.source.type
-      || binding.source.customization?.license !== descriptor.source.license
-    )
-  ) {
-    throw new BindingError("binding customization source no longer matches the descriptor", {
-      code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
-    });
-  }
+  bindingSourcePolicyFor(descriptor.source.kind).validateBinding({ descriptor, binding });
   assertReplacementInventory(descriptor, activeSkills);
 
   const lookupPath = binding.source.alias ?? binding.source.path;

@@ -6,6 +6,7 @@ import {
   checkProvenanceCache,
   checkProvenanceSelection,
   confirmProvenanceDecision,
+  stableProvenanceKey,
 } from "../src/provenance.js";
 
 test("Provenance evidence is normalized, ordered, and immutable", () => {
@@ -468,4 +469,11 @@ test("invalid plugin cache observations fail at the Provenance evidence seam", (
   assert.deepEqual(invalidScope.diagnostics.map(({ code }) => code), [
     "INVALID_PLUGIN_CACHE_SCOPE",
   ]);
+});
+
+test("stable Provenance keys canonicalize cache record ordering", () => {
+  assert.equal(
+    stableProvenanceKey({ kind: "versioned", scope: "global" }),
+    stableProvenanceKey({ scope: "global", kind: "versioned" }),
+  );
 });

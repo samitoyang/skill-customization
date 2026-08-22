@@ -157,19 +157,29 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function stableJson(value, seen = new Set()) {
-  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item, seen)).join(",")}]`;
-  if (isRecord(value)) {
-    if (seen.has(value)) return '"[Circular]"';
-    seen.add(value);
-    const result = `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key], seen)}`)
-      .join(",")}}`;
-    seen.delete(value);
-    return result;
-  }
-  return JSON.stringify(value);
+/**
+ * Return a deterministic key for values carried by checked provenance.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function stableProvenanceKey(value) {
+  const seen = new Set();
+  const serialize = (current) => {
+    if (Array.isArray(current)) return `[${current.map(serialize).join(",")}]`;
+    if (isRecord(current)) {
+      if (seen.has(current)) return '"[Circular]"';
+      seen.add(current);
+      const result = `{${Object.keys(current)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${serialize(current[key])}`)
+        .join(",")}}`;
+      seen.delete(current);
+      return result;
+    }
+    return JSON.stringify(current);
+  };
+  return serialize(value);
 }
 
 function clone(value) {
@@ -562,7 +572,7 @@ function normalizeObservation(observation, diagnostics, observationIndex) {
 
 function uniqueOrderedEvidence(evidence) {
   const unique = new Map();
-  for (const item of evidence) unique.set(stableJson(item), item);
+  for (const item of evidence) unique.set(stableProvenanceKey(item), item);
   return [...unique.values()].sort(
     (left, right) => EVIDENCE_ORDER.get(left.kind) - EVIDENCE_ORDER.get(right.kind),
   );
@@ -580,7 +590,7 @@ function evidenceIdentity(evidence) {
       ? evidence.identity
       : `local:${evidence.identity}`;
   }
-  if (evidence.provenance) return `manager-source:${stableJson(evidence.provenance)}`;
+  if (evidence.provenance) return `manager-source:${stableProvenanceKey(evidence.provenance)}`;
   return undefined;
 }
 
@@ -841,7 +851,7 @@ export function checkProvenanceCache(decision, selection = {}) {
     : [];
   const compatibleCaches = [
     ...new Map(
-      compatibleEvidence.map((evidence) => [stableJson(evidence.cache), evidence.cache]),
+      compatibleEvidence.map((evidence) => [stableProvenanceKey(evidence.cache), evidence.cache]),
     ).values(),
   ];
 
@@ -883,6 +893,126 @@ export function checkProvenanceCache(decision, selection = {}) {
   };
   return /** @type {ProvenanceCacheDecision} */ (freezeDeep(result));
 }
+
+function checkRepositorySelection({ checked, source, diagnostics }) {
+  let repository;
+  let upstreamPath;
+  try {
+    repository = normalizeRepositoryUrl(source.repository);
+    upstreamPath = normalizeUpstreamEntrypoint(
+      source.upstream_path ?? source.upstreamPath,
+    );
+  } catch {
+    diagnostics.push(diagnostic(
+      "INVALID_SOURCE_PROVENANCE",
+      "repository source provenance is not a valid repository locator or entrypoint",
+    ));
+  }
+  if (!repository || !upstreamPath) {
+    diagnostics.push(diagnostic(
+      "INVALID_SOURCE_PROVENANCE",
+      "repository source provenance requires a repository locator and entrypoint",
+    ));
+  }
+
+  let compatibleProvenance = [...checked.provenance];
+  if (repository && upstreamPath && checked.provenance.length > 0) {
+    const repositoryPrefix = `repository:${repository}`;
+    const expected = `${repositoryPrefix}#${upstreamPath}`;
+    const observedPaths = new Set(
+      checked.evidence
+        .filter((item) => item.repository === repository)
+        .map((item) => normalizeUpstreamEntrypoint(
+          item.upstream_path ?? item.upstreamPath,
+        ))
+        .filter(Boolean),
+    );
+    const hasConfirmation = checked.evidence.some(
+      (item) => item.kind === "confirmation",
+    );
+    compatibleProvenance = checked.provenance.filter((identity) =>
+      identity === repositoryPrefix || identity === expected,
+    );
+    if (compatibleProvenance.length === 0) {
+      const repositoryIdentities = checked.provenance.filter((identity) =>
+        identity === repositoryPrefix || identity.startsWith(`${repositoryPrefix}#`),
+      );
+      diagnostics.push(diagnostic(
+        repositoryIdentities.length > 0
+          ? "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH"
+          : "PROVENANCE_SOURCE_REPOSITORY_MISMATCH",
+        repositoryIdentities.length > 0
+          ? "checked provenance does not contain the descriptor upstream entrypoint"
+          : "checked provenance does not contain the descriptor repository",
+      ));
+    }
+    if (
+      [...observedPaths].some((value) => value !== upstreamPath)
+      && !(hasConfirmation && checked.selectedProvenance === expected)
+      && !diagnostics.some(({ code }) => code === "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH")
+    ) {
+      diagnostics.push(diagnostic(
+        "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH",
+        "checked repository evidence contains an incompatible upstream entrypoint",
+      ));
+    }
+    if (
+      checked.selectedProvenance
+      && compatibleProvenance.length > 0
+      && !compatibleProvenance.includes(checked.selectedProvenance)
+    ) {
+      diagnostics.push(diagnostic(
+        "PROVENANCE_SOURCE_SELECTION_MISMATCH",
+        "checked provenance confirmation does not match the descriptor source",
+      ));
+    }
+  }
+  return { compatibleProvenance, requiresProvenanceMatch: true };
+}
+
+function checkLocalSelection({ checked, source, diagnostics }) {
+  if (typeof source.identity === "string") {
+    const expectedIdentity = source.identity.startsWith("local:")
+      ? source.identity
+      : `local:${source.identity}`;
+    const observedLocalIdentities = checked.provenance.filter(
+      (identity) => identity.startsWith("local:")
+        && !identity.startsWith("local:plugin:"),
+    );
+    const selectedLocalIdentity = checked.selectedProvenance?.startsWith("local:")
+      && !checked.selectedProvenance.startsWith("local:plugin:")
+      ? checked.selectedProvenance
+      : undefined;
+    if (
+      observedLocalIdentities.length > 0
+      && (
+        !observedLocalIdentities.includes(expectedIdentity)
+        || (
+          selectedLocalIdentity !== undefined
+          && selectedLocalIdentity !== expectedIdentity
+        )
+      )
+    ) {
+      diagnostics.push(diagnostic(
+        "PROVENANCE_SOURCE_LOCAL_IDENTITY_MISMATCH",
+        "checked local provenance does not match the descriptor identity",
+      ));
+    }
+  }
+  return {
+    compatibleProvenance: [...checked.provenance],
+    requiresProvenanceMatch: false,
+  };
+}
+
+const PROVENANCE_SOURCE_SELECTION_HANDLERS = Object.freeze({
+  repository: checkRepositorySelection,
+  local: checkLocalSelection,
+  customization: ({ checked }) => ({
+    compatibleProvenance: [...checked.provenance],
+    requiresProvenanceMatch: false,
+  }),
+});
 
 /**
  * Check whether a descriptor source can use an already checked evidence decision.
@@ -936,118 +1066,32 @@ export function checkProvenanceSelection(decision, source, selection = {}) {
     }
   }
 
-  if (!["repository", "local", "customization"].includes(source?.kind)) {
+  const sourceHandler = PROVENANCE_SOURCE_SELECTION_HANDLERS[source?.kind];
+  if (!sourceHandler) {
     diagnostics.push(diagnostic(
       "INVALID_SOURCE_PROVENANCE",
       "provenance selection requires a repository, local, or customization source",
     ));
-  } else if (source.kind === "repository") {
-    let repository;
-    let upstreamPath;
-    try {
-      repository = normalizeRepositoryUrl(source.repository);
-      upstreamPath = normalizeUpstreamEntrypoint(
-        source.upstream_path ?? source.upstreamPath,
-      );
-    } catch {
-      diagnostics.push(diagnostic(
-        "INVALID_SOURCE_PROVENANCE",
-        "repository source provenance is not a valid repository locator or entrypoint",
-      ));
-    }
-    if (!repository || !upstreamPath) {
-      diagnostics.push(diagnostic(
-        "INVALID_SOURCE_PROVENANCE",
-        "repository source provenance requires a repository locator and entrypoint",
-      ));
-    }
-    if (repository && upstreamPath && checked.provenance.length > 0) {
-      const repositoryPrefix = `repository:${repository}`;
-      const expected = `${repositoryPrefix}#${upstreamPath}`;
-      const observedPaths = new Set(
-        checked.evidence
-          .filter((item) => item.repository === repository)
-          .map((item) => normalizeUpstreamEntrypoint(
-            item.upstream_path ?? item.upstreamPath,
-          ))
-          .filter(Boolean),
-      );
-      const hasConfirmation = checked.evidence.some(
-        (item) => item.kind === "confirmation",
-      );
-      compatibleProvenance = checked.provenance.filter((identity) =>
-        identity === repositoryPrefix || identity === expected,
-      );
-      if (compatibleProvenance.length === 0) {
-        const repositoryIdentities = checked.provenance.filter((identity) =>
-          identity === repositoryPrefix || identity.startsWith(`${repositoryPrefix}#`),
-        );
-        diagnostics.push(diagnostic(
-          repositoryIdentities.length > 0
-            ? "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH"
-            : "PROVENANCE_SOURCE_REPOSITORY_MISMATCH",
-          repositoryIdentities.length > 0
-            ? "checked provenance does not contain the descriptor upstream entrypoint"
-            : "checked provenance does not contain the descriptor repository",
-        ));
-      }
-      if (
-        [...observedPaths].some((value) => value !== upstreamPath)
-        && !(hasConfirmation && checked.selectedProvenance === expected)
-        && !diagnostics.some(({ code }) => code === "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH")
-      ) {
-        diagnostics.push(diagnostic(
-          "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH",
-          "checked repository evidence contains an incompatible upstream entrypoint",
-        ));
-      }
-      if (
-        checked.selectedProvenance
-        && compatibleProvenance.length > 0
-        && !compatibleProvenance.includes(checked.selectedProvenance)
-      ) {
-        diagnostics.push(diagnostic(
-          "PROVENANCE_SOURCE_SELECTION_MISMATCH",
-          "checked provenance confirmation does not match the descriptor source",
-        ));
-      }
-    }
-  } else if (source.kind === "local" && typeof source.identity === "string") {
-    const expectedIdentity = source.identity.startsWith("local:")
-      ? source.identity
-      : `local:${source.identity}`;
-    const observedLocalIdentities = checked.provenance.filter(
-      (identity) => identity.startsWith("local:")
-        && !identity.startsWith("local:plugin:"),
-    );
-    const selectedLocalIdentity = checked.selectedProvenance?.startsWith("local:")
-      && !checked.selectedProvenance.startsWith("local:plugin:")
-      ? checked.selectedProvenance
-      : undefined;
-    if (
-      observedLocalIdentities.length > 0
-      && (
-        !observedLocalIdentities.includes(expectedIdentity)
-        || (
-          selectedLocalIdentity !== undefined
-          && selectedLocalIdentity !== expectedIdentity
-        )
-      )
-    ) {
-      diagnostics.push(diagnostic(
-        "PROVENANCE_SOURCE_LOCAL_IDENTITY_MISMATCH",
-        "checked local provenance does not match the descriptor identity",
-      ));
-    }
   }
+  const sourceSelection = sourceHandler
+    ? sourceHandler({ checked, source, diagnostics })
+    : {
+        compatibleProvenance: [...checked.provenance],
+        requiresProvenanceMatch: false,
+      };
+  compatibleProvenance = sourceSelection.compatibleProvenance;
 
   const valid = diagnostics.length === 0;
   const hasProvenance = checked.provenance.length > 0;
   const selectionEligible = valid
     && checked.selectionEligible
-    && (source?.kind !== "repository" || !hasProvenance || compatibleProvenance.length > 0);
+    && (
+      !sourceSelection.requiresProvenanceMatch
+      || !hasProvenance
+      || compatibleProvenance.length > 0
+    );
   const selectedProvenance = checked.selectedProvenance
-    ?? (selectionEligible && source?.kind === "repository"
+    ?? (selectionEligible && sourceSelection.requiresProvenanceMatch
       ? compatibleProvenance[0]
       : undefined);
   const result = {
