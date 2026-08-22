@@ -25,6 +25,7 @@ const requiredFiles = [
   "docs/helper-contract-2.md",
   "docs/library.md",
   "docs/reconciliation.md",
+  "docs/testing-and-performance.md",
   "docs/adr/0001-managed-recursive-runtime.md",
   "package.json",
   "skills/skill-fork/SKILL.md",
