@@ -815,12 +815,14 @@ test("symlink bindings record alias and target, then invalidate on retarget", as
     { path: workspaceRoot, scope: "workspace", origin: "project" },
     { path: aliasRoot, scope: "global", origin: "personal" },
   ];
+  const managerRecords = [];
   const binding = await bindCustomization({
     descriptor: descriptor(),
     sourcePath: alias,
     context: "/workspace",
     statePath,
     roots,
+    managerRecords,
     interactive: true,
     confirm: async () => true,
   });
@@ -828,12 +830,29 @@ test("symlink bindings record alias and target, then invalidate on retarget", as
   assert.equal(binding.source.alias, alias);
   const canonicalTargetOne = await realpath(targetOne);
   assert.equal(binding.source.target, canonicalTargetOne);
-  assert.equal((await resolveBinding({ descriptor: descriptor(), context: "/workspace", statePath })).source.target, canonicalTargetOne);
+  assert.equal(
+    (
+      await resolveBinding({
+        descriptor: descriptor(),
+        context: "/workspace",
+        statePath,
+        roots,
+        managerRecords,
+      })
+    ).source.target,
+    canonicalTargetOne,
+  );
 
   await unlink(alias);
   await symlink(targetTwo, alias);
   await assert.rejects(
-    resolveBinding({ descriptor: descriptor(), context: "/workspace", statePath }),
+    resolveBinding({
+      descriptor: descriptor(),
+      context: "/workspace",
+      statePath,
+      roots,
+      managerRecords,
+    }),
     (error) => error.code === "BINDING_RETARGETED",
   );
   assert.equal(Object.keys((await readBindingStore(statePath)).bindings).length, 0);
@@ -842,6 +861,8 @@ test("symlink bindings record alias and target, then invalidate on retarget", as
 test("replacement binding requires a separate explicit confirmation", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "replace-"));
   const source = path.join(root, "review");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  const managerRecords = [];
   await mkdir(source);
   await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
   await assert.rejects(
@@ -850,7 +871,8 @@ test("replacement binding requires a separate explicit confirmation", async () =
       sourcePath: source,
       context: "global",
       statePath: path.join(root, "bindings.json"),
-      roots: [{ path: root, scope: "global", origin: "personal" }],
+      roots,
+      managerRecords,
       interactive: true,
       confirm: async () => true,
       confirmReplace: async () => false,
@@ -864,7 +886,8 @@ test("replacement binding requires a separate explicit confirmation", async () =
       sourcePath: source,
       context: "global",
       statePath: path.join(root, "ambiguous-bindings.json"),
-      roots: [{ path: root, scope: "global", origin: "personal" }],
+      roots,
+      managerRecords,
       interactive: true,
       confirm: async () => true,
       confirmReplace: async () => true,
@@ -880,6 +903,8 @@ test("replacement binding requires a separate explicit confirmation", async () =
 test("persisted replacement validation requires an unambiguous active inventory", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "replace-validation-"));
   const source = path.join(root, "review");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  const managerRecords = [];
   await mkdir(source);
   await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
   const replacement = descriptor({
@@ -892,7 +917,8 @@ test("persisted replacement validation requires an unambiguous active inventory"
     sourcePath: source,
     context: "global",
     statePath: path.join(root, "bindings.json"),
-    roots: [{ path: root, scope: "global", origin: "personal" }],
+    roots,
+    managerRecords,
     interactive: true,
     confirm: async () => true,
     confirmReplace: async () => true,
@@ -900,13 +926,20 @@ test("persisted replacement validation requires an unambiguous active inventory"
   });
 
   await assert.rejects(
-    validateBinding({ descriptor: replacement, binding }),
+    validateBinding({
+      descriptor: replacement,
+      binding,
+      roots,
+      managerRecords,
+    }),
     (error) => error.code === "REPLACEMENT_INVENTORY_REQUIRED",
   );
   await assert.rejects(
     validateBinding({
       descriptor: replacement,
       binding,
+      roots,
+      managerRecords,
       activeSkills: [
         ...activeSkills,
         { name: "review", path: path.join(root, "other-review") },
@@ -915,7 +948,15 @@ test("persisted replacement validation requires an unambiguous active inventory"
     (error) => error.code === "AMBIGUOUS_REPLACEMENT",
   );
   assert.equal(
-    (await validateBinding({ descriptor: replacement, binding, activeSkills })).binding,
+    (
+      await validateBinding({
+        descriptor: replacement,
+        binding,
+        roots,
+        managerRecords,
+        activeSkills,
+      })
+    ).binding,
     binding,
   );
 });
