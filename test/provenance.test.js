@@ -335,6 +335,25 @@ test("descriptor selection reuses checked local identity evidence", () => {
     "PROVENANCE_SOURCE_LOCAL_IDENTITY_MISMATCH",
   ]);
 
+  const conflicting = checkProvenanceSelection(
+    checkProvenance({
+      observations: [
+        { kind: "embedded", identity: expectedIdentity },
+        { kind: "embedded", identity: `local:sha256:${"b".repeat(64)}` },
+      ],
+      confirmation: {
+        provenance: `local:sha256:${"b".repeat(64)}`,
+        path: "/workspace/review",
+        evidence: { actor: "human" },
+      },
+    }),
+    source,
+  );
+  assert.equal(conflicting.selectionEligible, false);
+  assert.deepEqual(conflicting.diagnostics.map(({ code }) => code), [
+    "PROVENANCE_SOURCE_LOCAL_IDENTITY_MISMATCH",
+  ]);
+
   const pluginBacked = checkProvenanceSelection(
     checkProvenance({
       observations: [{

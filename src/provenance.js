@@ -849,9 +849,19 @@ export function checkProvenanceSelection(decision, source, selection = {}) {
       (identity) => identity.startsWith("local:")
         && !identity.startsWith("local:plugin:"),
     );
+    const selectedLocalIdentity = checked.selectedProvenance?.startsWith("local:")
+      && !checked.selectedProvenance.startsWith("local:plugin:")
+      ? checked.selectedProvenance
+      : undefined;
     if (
       observedLocalIdentities.length > 0
-      && !observedLocalIdentities.includes(expectedIdentity)
+      && (
+        !observedLocalIdentities.includes(expectedIdentity)
+        || (
+          selectedLocalIdentity !== undefined
+          && selectedLocalIdentity !== expectedIdentity
+        )
+      )
     ) {
       diagnostics.push(diagnostic(
         "PROVENANCE_SOURCE_LOCAL_IDENTITY_MISMATCH",
