@@ -24,6 +24,7 @@ import {
 import { preflightCustomization } from "../src/preflight.js";
 import { reconcileCustomization } from "../src/reconcile.js";
 import { acceptMaintenanceUpdate } from "../src/maintenance.js";
+import { discoveryPerformanceChannel } from "../src/performance-diagnostics.js";
 
 const repository = "https://github.com/example/skills";
 
@@ -209,6 +210,44 @@ test("preflight flattens recursive overlays from base workflow through inner and
     ],
   );
   assert.equal(result.maintenanceHandler, null);
+});
+
+test("preflight reuses one discovery snapshot and refreshes it for the next operation", async () => {
+  const item = await recursiveFixture();
+  const metrics = {};
+  const listener = ({ name, amount = 1 }) => {
+    metrics[name] = (metrics[name] ?? 0) + amount;
+  };
+  discoveryPerformanceChannel.subscribe(listener);
+  try {
+    const first = await preflightCustomization({
+      descriptorPath: path.join(item.outer, "customization.json"),
+      context: "workspace:test",
+      statePath: item.statePath,
+      roots: item.roots,
+    });
+    assert.equal(first.status, "ready");
+    assert.equal(metrics.discovery_calls, 1);
+    assert.equal(metrics.root_scans, 1);
+
+    await writeFile(
+      path.join(item.base, "SKILL.md"),
+      "---\nname: review\n---\nChanged base workflow.\n",
+    );
+    const second = await preflightCustomization({
+      descriptorPath: path.join(item.outer, "customization.json"),
+      context: "workspace:test",
+      statePath: item.statePath,
+      roots: item.roots,
+    });
+    assert.equal(second.status, "maintenance-required");
+    assert.equal(second.maintenanceHandler.reason, "source-drift");
+    assert.equal(second.maintenanceHandler.customizationId, item.innerDescriptor.id);
+    assert.equal(metrics.discovery_calls, 2);
+    assert.equal(metrics.root_scans, 2);
+  } finally {
+    discoveryPerformanceChannel.unsubscribe(listener);
+  }
 });
 
 test("reconciliation uses a nested customization's checked effective fingerprint", async () => {

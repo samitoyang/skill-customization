@@ -639,7 +639,7 @@ async function commandPreflight(descriptorPath, options, io) {
   );
   const contextValue = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const { activeSkills } = await discoverInventory(context);
+  const { discovery, activeSkills } = await discoverInventory(context);
   const result = await preflightCustomization({
     descriptorPath: resolvedDescriptorPath,
     context: contextValue,
@@ -647,6 +647,7 @@ async function commandPreflight(descriptorPath, options, io) {
     roots: discoveryRoots(context),
     managerRecords: context.managerRecords,
     activeSkills,
+    discovery,
   });
   outputJson(io, result);
   return result.status === "maintenance-required" ? 2 : 0;

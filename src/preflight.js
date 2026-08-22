@@ -5,6 +5,7 @@ import {
   resolveBinding,
   validateBinding,
 } from "./bindings.js";
+import { createDiscoverySnapshot } from "./discovery.js";
 import {
   inspectCustomizationExecution,
   MAX_CUSTOMIZATION_DEPTH,
@@ -26,7 +27,13 @@ export async function preflightCustomization({
   roots,
   managerRecords = [],
   activeSkills,
+  discovery,
 }) {
+  const discoverySnapshot = createDiscoverySnapshot({
+    discovery,
+    roots,
+    managerRecords,
+  });
   return inspectCustomizationExecution({
     descriptorPath,
     context,
@@ -34,6 +41,7 @@ export async function preflightCustomization({
     roots,
     managerRecords,
     activeSkills,
+    discoverySnapshot,
     bindings,
   });
 }

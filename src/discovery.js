@@ -933,6 +933,86 @@ export async function discoverSkills({
   };
 }
 
+/**
+ * Create a request-scoped discovery snapshot for one operation.
+ *
+ * The inventory is intentionally not process-global. Callers that already
+ * discovered the host can seed the snapshot; otherwise the first inventory
+ * request performs one discovery call. Targeted queries are memoized only for
+ * this operation, so repeated checks observe one consistent input set.
+ */
+export function createDiscoverySnapshot({
+  discovery,
+  roots,
+  managerRecords = [],
+  options = {},
+  discover = discoverSkills,
+} = {}) {
+  if (discovery !== undefined && (!discovery || typeof discovery !== "object")) {
+    throw new TypeError("discovery snapshot seed must be an object");
+  }
+  if (typeof discover !== "function") {
+    throw new TypeError("discovery snapshot adapter must be a function");
+  }
+  const defaults = {
+    ...options,
+    ...(roots === undefined ? {} : { roots }),
+    managerRecords,
+  };
+  let inventoryPromise = discovery === undefined
+    ? undefined
+    : Promise.resolve(discovery);
+  const targeted = new Map();
+
+  async function inventory() {
+    inventoryPromise ??= discover(defaults);
+    return inventoryPromise;
+  }
+
+  async function discoverTarget({ input } = {}) {
+    if (input === undefined) return inventory();
+    const key = JSON.stringify(input);
+    if (!targeted.has(key)) {
+      targeted.set(key, discover({ ...defaults, input }));
+    }
+    return targeted.get(key);
+  }
+
+  return Object.freeze({ inventory, discover: discoverTarget });
+}
+
+/**
+ * Select one source directory from an inventory without rescanning its roots.
+ * Explicit evidence is added because a source-path discovery has historically
+ * marked that concrete path as an explicit observation.
+ */
+export function selectDiscoverySource(
+  discovery,
+  { sourceRoot, explicitInput } = {},
+) {
+  if (!discovery || !Array.isArray(discovery.groups)) return undefined;
+  const canonicalSource = path.resolve(sourceRoot);
+  const groups = discovery.groups.flatMap((group) => {
+    const copies = group.copies.filter((copy) =>
+      path.resolve(copy.realPath ?? copy.path) === canonicalSource,
+    );
+    if (copies.length === 0) return [];
+    const explicitPath = path.resolve(explicitInput ?? sourceRoot);
+    return groupCandidates(
+      copies.map((copy) => ({
+        ...copy,
+        name: group.name,
+        fingerprint: group.fingerprint,
+        evidence: [
+          ...(copy.evidence ?? []),
+          { kind: "explicit", path: explicitPath },
+        ],
+      })),
+    );
+  });
+  return groups[0];
+}
+
 export function confirmDiscoverySelection({
   discovery,
   choice,

@@ -6,6 +6,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const runner = path.join(root, "scripts", "run-performance.js");
 const scenarios = Object.freeze([
   "test/performance/fixture-discovery.performance.js",
+  "test/performance/preflight-discovery.performance.js",
   "test/performance/ambient-discovery.performance.js",
   "test/performance/artifact-verification.performance.js",
 ]);
