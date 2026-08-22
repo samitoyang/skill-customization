@@ -8,6 +8,7 @@ export const repositoryRoot = path.dirname(path.dirname(fileURLToPath(import.met
 
 const emittedEntrypoints = Object.freeze([
   "package.json",
+  "customization.schema.json",
   "bin/skill-customization.js",
   "bin/skill-customization.d.ts",
   "src/index.js",
@@ -80,6 +81,10 @@ export async function buildTypescript({ root = repositoryRoot, outputDirectory =
   await mkdir(resolvedOutput);
   runCompiler(root, resolvedOutput);
   await copyFile(path.join(root, "package.json"), path.join(resolvedOutput, "package.json"));
+  await copyFile(
+    path.join(root, "customization.schema.json"),
+    path.join(resolvedOutput, "customization.schema.json"),
+  );
   return { root, outputDirectory: resolvedOutput };
 }
 
@@ -107,19 +112,34 @@ async function assertEmittedJavaScriptIsNodeCompatible(outputDirectory) {
   }
 }
 
-async function assertSourceMap(root, outputDirectory, emittedPath, mapPath, sourcePath = emittedPath) {
-  const javascript = await readFile(path.join(outputDirectory, emittedPath), "utf8");
-  assert.match(javascript, new RegExp(`sourceMappingURL=${path.basename(mapPath)}$`, "m"));
-  const resolvedMapPath = path.join(outputDirectory, mapPath);
-  const sourceMap = JSON.parse(await readFile(resolvedMapPath, "utf8"));
-  assert.equal(sourceMap.version, 3);
-  const sourceTarget = path.resolve(root, sourcePath);
-  assert.ok(
-    sourceMap.sources.some((source) =>
-      path.resolve(path.dirname(resolvedMapPath), sourceMap.sourceRoot ?? "", source)
-      === sourceTarget
-    ),
+async function assertSourceMaps(root, outputDirectory) {
+  const files = await filesBelow(outputDirectory);
+  for (const file of files) {
+    if (!file.endsWith(".js") && !file.endsWith(".d.ts")) continue;
+    const mapPath = `${file}.map`;
+    const contents = await readFile(file, "utf8");
+    assert.match(contents, new RegExp(`sourceMappingURL=${path.basename(mapPath)}$`, "m"));
+    const sourceMap = JSON.parse(await readFile(mapPath, "utf8"));
+    assert.equal(sourceMap.version, 3);
+    assert.ok(sourceMap.sources.length > 0);
+    for (const source of sourceMap.sources) {
+      const sourceTarget = path.resolve(
+        path.dirname(mapPath),
+        sourceMap.sourceRoot ?? "",
+        source,
+      );
+      assert.ok(sourceTarget === root || sourceTarget.startsWith(`${root}${path.sep}`));
+      await access(sourceTarget);
+    }
+  }
+}
+
+async function assertEmittedSchema(root, outputDirectory) {
+  const source = JSON.parse(await readFile(path.join(root, "customization.schema.json"), "utf8"));
+  const emitted = JSON.parse(
+    await readFile(path.join(outputDirectory, "customization.schema.json"), "utf8"),
   );
+  assert.deepEqual(emitted, source);
 }
 
 function runCli(entrypoint, args, root) {
@@ -176,6 +196,7 @@ function assertPublishedPackageContract(packageJson) {
   assert.equal(packageJson.engines?.node, ">=22.14.0");
   assert.equal(packageJson.main, "./src/index.js");
   assert.equal(packageJson.exports?.["."], "./src/index.js");
+  assert.equal(packageJson.exports?.["./schema"], "./customization.schema.json");
   assert.equal(packageJson.bin?.["skill-customization"], "bin/skill-customization.js");
   assert.equal(packageJson.files?.includes("dist"), false);
   assert.equal(packageJson.dependencies, undefined);
@@ -188,14 +209,8 @@ export async function verifyEmittedArtifact({ root = repositoryRoot, outputDirec
   const artifact = await buildTypescript({ root, outputDirectory });
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   await assertFilesExist(artifact.outputDirectory);
-  await assertSourceMap(root, artifact.outputDirectory, "src/index.js", "src/index.js.map");
-  await assertSourceMap(
-    root,
-    artifact.outputDirectory,
-    "src/index.d.ts",
-    "src/index.d.ts.map",
-    "src/index.js",
-  );
+  await assertEmittedSchema(root, artifact.outputDirectory);
+  await assertSourceMaps(path.resolve(root), artifact.outputDirectory);
   await assertEmittedJavaScriptIsNodeCompatible(artifact.outputDirectory);
   await assertCliContract(root, artifact.outputDirectory);
   await assertLibraryContract(root, artifact.outputDirectory, packageJson.version);

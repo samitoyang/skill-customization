@@ -51,7 +51,7 @@
     "check:package": "node scripts/check-package.js",
     "changeset": "changeset",
     "release": "changeset publish",
-    "test": "node --test test/*.test.js",
+    "test": "node --test",
     "verify:typescript": "node scripts/verify-typescript.js",
     "verify": "node scripts/verify.js && npm test && npm run check:package",
     "version-packages": "changeset version && npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
