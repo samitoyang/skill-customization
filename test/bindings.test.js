@@ -1095,6 +1095,56 @@ test("binding persists and revalidates an auditable provenance choice", async ()
   );
 });
 
+test("binding accepts an unambiguous checked selection with path-only confirmation", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-path-only-confirmation-"));
+  const source = path.join(root, "skills", "review");
+  const statePath = path.join(root, "bindings.json");
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  assert.equal(spawnSync("git", ["init", "-q", root]).status, 0);
+  assert.equal(
+    spawnSync("git", [
+      "-C",
+      root,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/skills",
+    ]).status,
+    0,
+  );
+  const roots = [{ path: path.dirname(source), scope: "global", origin: "personal" }];
+  const discovery = await discoverSkills({ input: source, roots, managerRecords: [] });
+  const group = discovery.groups[0];
+  const copy = group.copies[0];
+  const confirmedSelection = confirmDiscoverySelection({
+    discovery,
+    choice: {
+      name: group.name,
+      fingerprint: group.fingerprint,
+      path: copy.path,
+      owner: copy.owner,
+    },
+    interactive: true,
+  });
+
+  assert.equal(confirmedSelection.provenance, `repository:https://github.com/example/skills#skills/review/SKILL.md`);
+  assert.equal(confirmedSelection.evidence.at(-1).provenance, undefined);
+  const binding = await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots,
+    managerRecords: [],
+    confirmedSelection,
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.equal(binding.source.selection.provenance, confirmedSelection.provenance);
+  assert.equal(binding.source.selection.confirmation.provenance, undefined);
+});
+
 test("binding accepts confirmed repository-only plugin provenance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-repository-only-"));
   const source = path.join(root, "skills", "review");

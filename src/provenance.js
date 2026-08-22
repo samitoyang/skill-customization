@@ -742,7 +742,10 @@ export function checkProvenanceSelection(decision, source, selection = {}) {
       ));
     } else {
       if (
-        confirmation.provenance !== requestedProvenance
+        (
+          confirmation.provenance !== undefined
+          && confirmation.provenance !== requestedProvenance
+        )
         || checked.selectedProvenance !== requestedProvenance
       ) {
         diagnostics.push(diagnostic(
