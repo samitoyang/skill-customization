@@ -22,17 +22,16 @@ if (args.length > 0) {
   if (
     args.length !== 2
     || args[0] !== "--lane"
-    || !["fixture", "ambient", "all"].includes(args[1])
+    || !["fixture", "ambient"].includes(args[1])
   ) {
-    throw new TypeError("run-tests accepts only --lane fixture|ambient|all");
+    throw new TypeError("run-tests accepts only --lane fixture|ambient");
   }
   lane = args[1];
 }
 const discovered = (await filesBelow(path.join(root, "test"))).sort();
 const isAmbient = (file) => file.endsWith(".ambient.test.js");
 const tests = discovered.filter((file) =>
-  lane === "all"
-  || (lane === "ambient" ? isAmbient(file) : !isAmbient(file)),
+  lane === "ambient" ? isAmbient(file) : !isAmbient(file),
 );
 if (tests.length === 0) throw new Error(`test lane ${lane} has no test files`);
 const isolated = await isolatedTestEnvironment();

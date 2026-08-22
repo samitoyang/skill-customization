@@ -4,10 +4,9 @@ import path from "node:path";
 
 export async function isolatedTestEnvironment({
   baseEnv = process.env,
-  temporaryDirectory = os.tmpdir(),
 } = {}) {
   const directory = await mkdtemp(
-    path.join(temporaryDirectory, "skill-customization-test-inventory-"),
+    path.join(os.tmpdir(), "skill-customization-test-inventory-"),
   );
   const home = path.join(directory, "home");
   const config = path.join(directory, "config");
