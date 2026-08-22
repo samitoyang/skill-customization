@@ -1270,6 +1270,96 @@ test("binding persists the confirmed plugin identity", async () => {
   assert.equal(binding.source.pluginIdentity, identities[1]);
 });
 
+test("confirmed aggregated plugin evidence retains versioned-cache recovery", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-confirmed-plugin-cache-"));
+  const versionOneRoot = path.join(root, "plugin", "1");
+  const versionTwoRoot = path.join(root, "plugin", "2");
+  const versionOne = path.join(versionOneRoot, "skills", "review");
+  const versionTwo = path.join(versionTwoRoot, "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const workflow = "---\nname: review\n---\nstable\n";
+  await mkdir(versionOne, { recursive: true });
+  await writeFile(path.join(versionOne, "SKILL.md"), workflow);
+  const identities = [
+    "local:plugin:fixture-host:first:reviewer",
+    "local:plugin:fixture-host:confirmed:reviewer",
+  ];
+  const rootsFor = (source, pluginRoot) => identities.map((identity, index) => ({
+    path: path.dirname(source),
+    owner: "plugin:fixture-host",
+    scope: "global",
+    origin: "plugin",
+    pluginRoot,
+    pluginIdentity: identity,
+    pluginEvidence: [{
+      kind: "plugin",
+      host: "fixture-host",
+      marketplace: index === 0 ? "first" : "confirmed",
+      plugin: "reviewer",
+      identity,
+      cache: { kind: "versioned", scope: "global" },
+    }],
+  }));
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      skill_name: "review",
+      kind: "local",
+      license: "MIT",
+      effective_fingerprint: await fingerprintPath(versionOne),
+      identity: generateLocalIdentity({
+        skillName: "review",
+        fingerprint: await fingerprintFile(path.join(versionOne, "SKILL.md")),
+      }),
+    },
+  };
+  const roots = rootsFor(versionOne, versionOneRoot);
+  const discovery = await discoverSkills({ input: versionOne, roots, managerRecords: [] });
+  const group = discovery.groups[0];
+  const confirmedSelection = confirmDiscoverySelection({
+    discovery,
+    choice: {
+      name: group.name,
+      fingerprint: group.fingerprint,
+      path: group.copies[0].path,
+      owner: group.copies[0].owner,
+    },
+    interactive: true,
+    confirmedProvenance: identities[1],
+    confirmationEvidence: {
+      actor: "human",
+      reason: "selected the non-representative plugin identity",
+    },
+  });
+
+  const binding = await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: versionOne,
+    context: "global",
+    statePath,
+    roots,
+    confirmedSelection,
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.equal(binding.source.pluginIdentity, identities[1]);
+  assert.deepEqual(binding.source.pluginCache, { kind: "versioned", scope: "global" });
+
+  await rename(versionOneRoot, path.join(root, "removed"));
+  await mkdir(versionTwo, { recursive: true });
+  await writeFile(path.join(versionTwo, "SKILL.md"), workflow);
+  const recovered = await resolveBinding({
+    descriptor: sourceDescriptor,
+    context: "global",
+    statePath,
+    roots: [rootsFor(versionTwo, versionTwoRoot)[1]],
+    managerRecords: [],
+  });
+  assert.equal(recovered.source.path, path.resolve(versionTwo));
+  assert.equal(recovered.source.pluginIdentity, identities[1]);
+  assert.deepEqual(recovered.source.pluginCache, { kind: "versioned", scope: "global" });
+});
+
 test("binding preserves a provenance choice made through a customization alias", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-customization-alias-"));
   const source = path.join(root, "review-fork");

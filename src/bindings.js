@@ -144,6 +144,18 @@ function observedRepositoryPaths(evidence, repository) {
   ];
 }
 
+function versionedPluginCachesFor(copy, identity) {
+  if (!identity) return [];
+  return (copy.evidence ?? []).flatMap((evidence) =>
+    evidence.kind === "plugin"
+      && evidence.identity === identity
+      && evidence.cache?.kind === "versioned"
+      && evidence.cache.scope === copy.scope
+      ? [evidence.cache]
+      : []
+  );
+}
+
 async function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
   if (!confirmedSelection) {
     if (group.conflict) {
@@ -279,15 +291,9 @@ async function inspectBindingSource({
       ? pluginIdentities[0]
       : undefined;
   const bindingPluginCaches = [...new Map(
-    sourcePluginEvidence
-      .filter(({ identity, cache }) =>
-        identity === bindingPluginIdentity
-        && cache?.kind === "versioned"
-        && sourceCopies.some((copy) =>
-          copy.pluginIdentity === identity && copy.scope === cache.scope
-        )
-      )
-      .map(({ cache }) => [JSON.stringify(cache), cache]),
+    sourceCopies
+      .flatMap((copy) => versionedPluginCachesFor(copy, bindingPluginIdentity))
+      .map((cache) => [JSON.stringify(cache), cache]),
   ).values()];
   const bindingPluginCache = bindingPluginCaches.length === 1
     ? bindingPluginCaches[0]
@@ -529,14 +535,8 @@ async function recoverMissingPluginBinding({
   const matches = [];
   for (const group of discovery.groups) {
     for (const copy of group.copies) {
-      if (copy.pluginIdentity !== pluginIdentity || copy.scope !== pluginCache.scope) continue;
-      const compatibleCache = copy.evidence.some(
-        ({ kind, identity, cache }) =>
-          kind === "plugin"
-          && identity === pluginIdentity
-          && cache?.kind === "versioned"
-          && cache.scope === pluginCache.scope,
-      );
+      if (copy.scope !== pluginCache.scope) continue;
+      const compatibleCache = versionedPluginCachesFor(copy, pluginIdentity).length > 0;
       if (!compatibleCache) continue;
       const effectiveFingerprint = await recoveryFingerprint({
         descriptor,
