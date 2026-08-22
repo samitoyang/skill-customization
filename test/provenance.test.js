@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   checkProvenance,
+  checkProvenanceSelection,
   confirmProvenanceDecision,
 } from "../src/provenance.js";
 
@@ -241,4 +242,75 @@ test("a prior checked decision is the input to confirmation", () => {
   assert.equal(confirmed.selectionEligible, true);
   assert.equal(confirmed.selectedProvenance, "repository:https://github.com/example/skills");
   assert.equal(confirmed.evidence.at(-1).kind, "confirmation");
+});
+
+test("descriptor selection reuses the checked repository identity and path rules", () => {
+  const repository = "https://github.com/example/skills";
+  const expectedSource = {
+    kind: "repository",
+    repository,
+    upstream_path: "skills/review/SKILL.md",
+  };
+  const repositoryOnly = checkProvenanceSelection(
+    checkProvenance({
+      observations: [{ kind: "plugin", host: "codex", plugin: "reviewer", marketplace: "official", repository }],
+    }),
+    expectedSource,
+  );
+  assert.equal(repositoryOnly.selectionEligible, true);
+  assert.deepEqual(repositoryOnly.compatibleProvenance, [`repository:${repository}`]);
+
+  const incompatiblePath = checkProvenanceSelection(
+    checkProvenance({
+      observations: [{
+        kind: "manager",
+        manager: "asm",
+        repository,
+        upstream_path: "skills/other/SKILL.md",
+      }],
+    }),
+    expectedSource,
+  );
+  assert.equal(incompatiblePath.selectionEligible, false);
+  assert.deepEqual(incompatiblePath.diagnostics.map(({ code }) => code), [
+    "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH",
+  ]);
+
+  const noEvidence = checkProvenanceSelection(
+    checkProvenance(),
+    expectedSource,
+  );
+  assert.equal(noEvidence.selectionEligible, true);
+  assert.deepEqual(noEvidence.compatibleProvenance, []);
+});
+
+test("a confirmed exact upstream identity can resolve an otherwise conflicting decision", () => {
+  const repository = "https://github.com/example/skills";
+  const expected = `repository:${repository}#skills/review/SKILL.md`;
+  const decision = checkProvenance({
+    observations: [
+      { kind: "git", repository, upstream_path: "skills/review/SKILL.md" },
+      { kind: "manager", manager: "asm", repository, upstream_path: "skills/other/SKILL.md" },
+    ],
+  });
+  assert.equal(checkProvenanceSelection(decision, {
+    kind: "repository",
+    repository,
+    upstream_path: "skills/review/SKILL.md",
+  }).selectionEligible, false);
+
+  const confirmed = checkProvenanceSelection(
+    confirmProvenanceDecision(decision, {
+      provenance: expected,
+      path: "/workspace/review",
+      evidence: { actor: "human" },
+    }),
+    {
+      kind: "repository",
+      repository,
+      upstream_path: "skills/review/SKILL.md",
+    },
+  );
+  assert.equal(confirmed.selectionEligible, true);
+  assert.equal(confirmed.selectedProvenance, expected);
 });

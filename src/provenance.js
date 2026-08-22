@@ -99,6 +99,25 @@ import {
  * @property {readonly ProvenanceDiagnostic[]} diagnostics
  */
 
+/**
+ * @typedef {object} ProvenanceSource
+ * @property {"repository" | "local" | "customization"} kind
+ * @property {string} [repository]
+ * @property {string} [upstream_path]
+ * @property {string} [upstreamPath]
+ * @property {string} [identity]
+ */
+
+/**
+ * @typedef {object} ProvenanceSelectionDecision
+ * @property {ProvenanceDecision} decision
+ * @property {readonly string[]} compatibleProvenance
+ * @property {boolean} valid
+ * @property {boolean} selectionEligible
+ * @property {string} [selectedProvenance]
+ * @property {readonly ProvenanceDiagnostic[]} diagnostics
+ */
+
 const EVIDENCE_ORDER = new Map([
   ["explicit", 0],
   ["git", 1],
@@ -688,4 +707,155 @@ export function confirmProvenanceDecision(decision, confirmation) {
     return checkProvenance({ observations: [], confirmation });
   }
   return checkProvenance({ observations: decision.evidence, confirmation });
+}
+
+/**
+ * Check whether a descriptor source can use an already checked evidence decision.
+ * Repository identity and upstream compatibility live here so every caller uses
+ * the same selection, conflict, and confirmation semantics.
+ *
+ * @param {ProvenanceDecision} decision
+ * @param {ProvenanceSource} source
+ * @param {{provenance?: string, path?: string}} [selection]
+ * @returns {ProvenanceSelectionDecision}
+ */
+export function checkProvenanceSelection(decision, source, selection = {}) {
+  const checked = decision
+    && Array.isArray(decision.evidence)
+    && Array.isArray(decision.provenance)
+    ? decision
+    : checkProvenance();
+  const diagnostics = [
+    ...(Array.isArray(checked.diagnostics) ? checked.diagnostics : []),
+  ];
+  let compatibleProvenance = [...checked.provenance];
+  const requestedProvenance = selection?.provenance;
+  const confirmations = checked.evidence.filter(
+    (item) => item.kind === "confirmation",
+  );
+  const confirmation = confirmations.at(-1);
+  if (requestedProvenance !== undefined) {
+    if (!confirmation) {
+      diagnostics.push(diagnostic(
+        "PROVENANCE_CONFIRMATION_REQUIRED",
+        "a selected provenance identity requires confirmation evidence",
+      ));
+    } else {
+      if (
+        confirmation.provenance !== requestedProvenance
+        || checked.selectedProvenance !== requestedProvenance
+      ) {
+        diagnostics.push(diagnostic(
+          "PROVENANCE_CONFIRMATION_MISMATCH",
+          "confirmation evidence does not match the requested provenance identity",
+        ));
+      }
+      if (
+        selection.path !== undefined
+        && confirmation.path !== selection.path
+      ) {
+        diagnostics.push(diagnostic(
+          "PROVENANCE_CONFIRMATION_PATH_MISMATCH",
+          "confirmation evidence does not identify the selected source copy",
+        ));
+      }
+    }
+  }
+
+  if (!["repository", "local", "customization"].includes(source?.kind)) {
+    diagnostics.push(diagnostic(
+      "INVALID_SOURCE_PROVENANCE",
+      "provenance selection requires a repository, local, or customization source",
+    ));
+  } else if (source.kind === "repository") {
+    let repository;
+    let upstreamPath;
+    try {
+      repository = normalizeRepositoryUrl(source.repository);
+      upstreamPath = normalizeUpstreamEntrypoint(
+        source.upstream_path ?? source.upstreamPath,
+      );
+    } catch {
+      diagnostics.push(diagnostic(
+        "INVALID_SOURCE_PROVENANCE",
+        "repository source provenance is not a valid repository locator or entrypoint",
+      ));
+    }
+    if (!repository || !upstreamPath) {
+      diagnostics.push(diagnostic(
+        "INVALID_SOURCE_PROVENANCE",
+        "repository source provenance requires a repository locator and entrypoint",
+      ));
+    }
+    if (repository && upstreamPath && checked.provenance.length > 0) {
+      const repositoryPrefix = `repository:${repository}`;
+      const expected = `${repositoryPrefix}#${upstreamPath}`;
+      const observedPaths = new Set(
+        checked.evidence
+          .filter((item) => item.repository === repository)
+          .map((item) => normalizeUpstreamEntrypoint(
+            item.upstream_path ?? item.upstreamPath,
+          ))
+          .filter(Boolean),
+      );
+      const hasConfirmation = checked.evidence.some(
+        (item) => item.kind === "confirmation",
+      );
+      compatibleProvenance = checked.provenance.filter((identity) =>
+        identity === repositoryPrefix || identity === expected,
+      );
+      if (compatibleProvenance.length === 0) {
+        const repositoryIdentities = checked.provenance.filter((identity) =>
+          identity === repositoryPrefix || identity.startsWith(`${repositoryPrefix}#`),
+        );
+        diagnostics.push(diagnostic(
+          repositoryIdentities.length > 0
+            ? "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH"
+            : "PROVENANCE_SOURCE_REPOSITORY_MISMATCH",
+          repositoryIdentities.length > 0
+            ? "checked provenance does not contain the descriptor upstream entrypoint"
+            : "checked provenance does not contain the descriptor repository",
+        ));
+      }
+      if (
+        [...observedPaths].some((value) => value !== upstreamPath)
+        && !(hasConfirmation && checked.selectedProvenance === expected)
+        && !diagnostics.some(({ code }) => code === "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH")
+      ) {
+        diagnostics.push(diagnostic(
+          "PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH",
+          "checked repository evidence contains an incompatible upstream entrypoint",
+        ));
+      }
+      if (
+        checked.selectedProvenance
+        && compatibleProvenance.length > 0
+        && !compatibleProvenance.includes(checked.selectedProvenance)
+      ) {
+        diagnostics.push(diagnostic(
+          "PROVENANCE_SOURCE_SELECTION_MISMATCH",
+          "checked provenance confirmation does not match the descriptor source",
+        ));
+      }
+    }
+  }
+
+  const valid = diagnostics.length === 0;
+  const hasProvenance = checked.provenance.length > 0;
+  const selectionEligible = valid
+    && checked.selectionEligible
+    && (source?.kind !== "repository" || !hasProvenance || compatibleProvenance.length > 0);
+  const selectedProvenance = checked.selectedProvenance
+    ?? (selectionEligible && source?.kind === "repository"
+      ? compatibleProvenance[0]
+      : undefined);
+  const result = {
+    decision: checked,
+    compatibleProvenance,
+    valid,
+    selectionEligible,
+    ...(selectedProvenance ? { selectedProvenance } : {}),
+    diagnostics,
+  };
+  return /** @type {ProvenanceSelectionDecision} */ (freezeDeep(result));
 }

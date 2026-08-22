@@ -14,6 +14,11 @@ import {
   normalizeUpstreamEntrypoint,
 } from "./normalization.js";
 import { isPathContained } from "./paths.js";
+import {
+  checkProvenance,
+  checkProvenanceSelection,
+  confirmProvenanceDecision,
+} from "./provenance.js";
 import { readSkillName } from "./skill-metadata.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
@@ -117,32 +122,14 @@ async function confirmOrFail(callback, payload, code, message) {
   }
 }
 
-function normalizedRepositoryEvidence(evidence) {
-  return evidence
-    .filter((item) => item.repository)
-    .map((item) => ({
-      repository: normalizeRepositoryUrl(item.repository),
-      upstreamPath: normalizeUpstreamEntrypoint(
-        item.upstream_path ?? item.upstreamPath,
-      ),
-      kind: item.kind,
-    }));
-}
-
-function observedRepositoryPaths(evidence, repository) {
-  return [
-    ...new Set(
-      evidence
-        .filter((item) => item.repository === repository)
-        .map((item) => item.upstreamPath)
-        .filter(Boolean),
-    ),
-  ];
+function checkedProvenanceFor(candidate) {
+  return candidate.provenanceDecision
+    ?? checkProvenance({ observations: candidate.evidence ?? [] });
 }
 
 function versionedPluginCachesFor(copy, identity) {
   if (!identity) return [];
-  return (copy.evidence ?? []).flatMap((evidence) =>
+  return checkedProvenanceFor(copy).evidence.flatMap((evidence) =>
     evidence.kind === "plugin"
       && evidence.identity === identity
       && evidence.cache?.kind === "versioned"
@@ -152,15 +139,80 @@ function versionedPluginCachesFor(copy, identity) {
   );
 }
 
-async function confirmedSelectionFor(group, confirmedSelection, sourceDirectory) {
-  if (!confirmedSelection) {
-    if (group.conflict) {
-      throw new BindingError("binding source provenance is ambiguous", {
-        code: "BINDING_SOURCE_PROVENANCE_CONFLICT",
-        details: group.provenance,
-      });
+function throwProvenanceSelectionError(
+  selectionDecision,
+  details,
+  { selectionProvided = false } = {},
+) {
+  const codes = new Set(selectionDecision.diagnostics.map(({ code }) => code));
+  if (codes.has("PROVENANCE_CONFIRMATION_REQUIRED")) {
+    if (selectionProvided) {
+      throw new BindingError(
+        "confirmed source selection does not match current discovery evidence",
+        {
+          code: "BINDING_SOURCE_SELECTION_INVALID",
+          details,
+        },
+      );
     }
-    return undefined;
+    throw new BindingError("binding source provenance is ambiguous", {
+      code: "BINDING_SOURCE_PROVENANCE_CONFLICT",
+      details,
+    });
+  }
+  if (codes.has("PROVENANCE_SOURCE_UPSTREAM_PATH_MISMATCH")) {
+    throw new BindingError(
+      "binding source upstream entrypoint does not match the descriptor",
+      {
+        code: "BINDING_SOURCE_UPSTREAM_PATH_MISMATCH",
+        details,
+      },
+    );
+  }
+  if (
+    codes.has("PROVENANCE_SOURCE_REPOSITORY_MISMATCH")
+    || codes.has("PROVENANCE_SOURCE_SELECTION_MISMATCH")
+  ) {
+    throw new BindingError("confirmed source provenance does not match the descriptor", {
+      code: "BINDING_SOURCE_PROVENANCE_MISMATCH",
+      details,
+    });
+  }
+  if (
+    codes.has("PROVENANCE_CONFIRMATION_MISMATCH")
+    || codes.has("PROVENANCE_CONFIRMATION_PATH_MISMATCH")
+    || codes.has("INVALID_CONFIRMATION_KIND")
+    || codes.has("INVALID_CONFIRMATION_PATH")
+    || codes.has("INVALID_CONFIRMATION_PROVENANCE")
+    || codes.has("INVALID_CONFIRMATION_EVIDENCE")
+  ) {
+    throw new BindingError(
+      "confirmed source selection does not match current discovery evidence",
+      {
+        code: "BINDING_SOURCE_SELECTION_INVALID",
+        details,
+      },
+    );
+  }
+  throw new BindingError("invalid provenance evidence", {
+    code: "BINDING_SOURCE_INVALID",
+    details: selectionDecision.diagnostics,
+  });
+}
+
+async function confirmedSelectionFor({
+  descriptor,
+  group,
+  confirmedSelection,
+  sourceDirectory,
+}) {
+  const groupDecision = checkedProvenanceFor(group);
+  if (!confirmedSelection) {
+    const selectionDecision = checkProvenanceSelection(groupDecision, descriptor.source);
+    if (!selectionDecision.selectionEligible) {
+      throwProvenanceSelectionError(selectionDecision, groupDecision.provenance);
+    }
+    return { decision: selectionDecision };
   }
   let confirmedTarget;
   let sourceTarget;
@@ -182,17 +234,11 @@ async function confirmedSelectionFor(group, confirmedSelection, sourceDirectory)
     ?? [...(confirmedSelection.evidence ?? [])]
       .reverse()
       .find((item) => item.kind === "confirmation");
-  const valid =
+  if (!(
     confirmedSelection.name === group.name
     && copy
     && typeof confirmedSelection.provenance === "string"
-    && confirmedSelection.copy?.provenance?.includes(
-      confirmedSelection.provenance,
-    )
-    && copy.provenance.includes(confirmedSelection.provenance)
-    && confirmation?.kind === "confirmation"
-    && confirmation.path === confirmedSelection.copy?.path;
-  if (!valid) {
+  )) {
     throw new BindingError(
       "confirmed source selection does not match current discovery evidence",
       {
@@ -201,11 +247,41 @@ async function confirmedSelectionFor(group, confirmedSelection, sourceDirectory)
       },
     );
   }
+
+  const confirmedDecision = confirmProvenanceDecision(
+    checkedProvenanceFor(copy),
+    confirmation
+      ? {
+          ...confirmation,
+          provenance: confirmedSelection.provenance,
+          ...(confirmation.confirmationEvidence
+            ? { evidence: confirmation.confirmationEvidence }
+            : {}),
+        }
+      : undefined,
+  );
+  const selectionDecision = checkProvenanceSelection(
+    confirmedDecision,
+    descriptor.source,
+    {
+      provenance: confirmedSelection.provenance,
+      path: confirmedSelection.copy?.path,
+    },
+  );
+  if (!selectionDecision.selectionEligible) {
+    throwProvenanceSelectionError(selectionDecision, {
+      confirmedSelection,
+      currentProvenance: group.provenance,
+    }, { selectionProvided: true });
+  }
   return {
-    name: group.name,
-    copy: structuredClone(confirmedSelection.copy),
-    provenance: confirmedSelection.provenance,
-    confirmation: structuredClone(confirmation),
+    decision: selectionDecision,
+    selection: {
+      name: group.name,
+      copy: structuredClone(confirmedSelection.copy),
+      provenance: selectionDecision.selectedProvenance,
+      confirmation: structuredClone(confirmation),
+    },
   };
 }
 
@@ -261,18 +337,21 @@ async function inspectBindingSource({
       code: "BINDING_SOURCE_INVALID",
     });
   }
-  const selection = await confirmedSelectionFor(
+  const selectionResult = await confirmedSelectionFor({
+    descriptor,
     group,
     confirmedSelection,
-    descriptor.source.kind === "customization"
+    sourceDirectory: descriptor.source.kind === "customization"
       ? sourceRoot
       : path.dirname(entrypoint),
-  );
+  });
+  const selection = selectionResult.selection;
+  const provenanceDecision = selectionResult.decision;
   const sourceCopies = group.copies.filter(
     (copy) => path.resolve(copy.realPath ?? copy.path) === sourceRoot,
   );
   const sourcePluginEvidence = sourceCopies.flatMap((copy) =>
-    (copy.evidence ?? []).filter(({ kind }) => kind === "plugin")
+    checkedProvenanceFor(copy).evidence.filter(({ kind }) => kind === "plugin")
   );
   const pluginIdentities = [...new Set([
     ...sourceCopies.map(({ pluginIdentity }) => pluginIdentity),
@@ -299,48 +378,6 @@ async function inspectBindingSource({
   if (descriptor.source.kind === "repository") {
     repository = normalizeRepositoryUrl(descriptor.source.repository);
     upstreamPath = normalizeUpstreamEntrypoint(descriptor.source.upstream_path);
-    const repositoryProvenance = `repository:${repository}`;
-    const expectedProvenance = `repository:${repository}#${upstreamPath}`;
-    const repositoryEvidence = normalizedRepositoryEvidence(group.evidence);
-    if (
-      selection
-      && selection.provenance !== repositoryProvenance
-      && selection.provenance !== expectedProvenance
-    ) {
-      throw new BindingError(
-        "confirmed source provenance does not match the descriptor",
-        {
-          code: "BINDING_SOURCE_PROVENANCE_MISMATCH",
-          details: {
-            expected: expectedProvenance,
-            actual: selection.provenance,
-          },
-        },
-      );
-    }
-    if (!selection) {
-      const conflictingRepositories = repositoryEvidence.filter(
-        (item) => item.repository !== repository,
-      );
-      if (conflictingRepositories.length > 0) {
-        throw new BindingError("binding source repository does not match the descriptor", {
-          code: "BINDING_SOURCE_PROVENANCE_MISMATCH",
-          details: { expected: repository, actual: conflictingRepositories },
-        });
-      }
-    }
-    if (!selection || selection.provenance === repositoryProvenance) {
-      const observedPaths = observedRepositoryPaths(repositoryEvidence, repository);
-      if (observedPaths.some((value) => value !== upstreamPath)) {
-        throw new BindingError(
-          "binding source upstream entrypoint does not match the descriptor",
-          {
-            code: "BINDING_SOURCE_UPSTREAM_PATH_MISMATCH",
-            details: { expected: upstreamPath, actual: observedPaths },
-          },
-        );
-      }
-    }
   }
   let customization;
   if (descriptor.source.kind === "customization") {
@@ -420,10 +457,13 @@ async function inspectBindingSource({
           },
         }
       : {}),
-    provenance: selection ? [selection.provenance] : group.provenance,
-    evidence: group.evidence,
+    provenance: selection
+      ? [selection.provenance]
+      : provenanceDecision.decision.provenance,
+    evidence: [...provenanceDecision.decision.evidence],
     searchedRoots: discovery.searchedRoots,
     selection,
+    provenanceDecision,
     ...(bindingPluginIdentity
       ? { pluginIdentity: bindingPluginIdentity }
       : {}),
@@ -431,30 +471,6 @@ async function inspectBindingSource({
       ? { pluginCache: structuredClone(bindingPluginCache) }
       : {}),
   };
-}
-
-function compatibleProvenance(descriptor, copy) {
-  const repository = descriptor.source.kind === "repository"
-    ? normalizeRepositoryUrl(descriptor.source.repository)
-    : undefined;
-  const upstreamPath = descriptor.source.kind === "repository"
-    ? normalizeUpstreamEntrypoint(descriptor.source.upstream_path)
-    : undefined;
-  if (repository) {
-    const observedPaths = observedRepositoryPaths(
-      normalizedRepositoryEvidence(copy.evidence),
-      repository,
-    );
-    if (observedPaths.some((value) => value !== upstreamPath)) return undefined;
-  }
-  return copy.provenance.find((identity) => {
-    if (repository) {
-      return identity === `repository:${repository}`
-        || identity === `repository:${repository}#${upstreamPath}`;
-    }
-    return identity === descriptor.source.identity
-      || identity === `local:${descriptor.source.identity}`;
-  });
 }
 
 const BINDING_OPERATIONS = Object.freeze({
@@ -545,8 +561,16 @@ async function recoverMissingPluginBinding({
         activeSkills,
       });
       if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
-      const provenance = compatibleProvenance(descriptor, copy);
-      if (provenance || ["local", "customization"].includes(descriptor.source.kind)) {
+      const provenanceDecision = checkProvenanceSelection(
+        checkedProvenanceFor(copy),
+        descriptor.source,
+      );
+      const provenance = provenanceDecision.selectedProvenance
+        ?? provenanceDecision.compatibleProvenance[0];
+      if (
+        provenanceDecision.selectionEligible
+        && (provenance || ["local", "customization"].includes(descriptor.source.kind))
+      ) {
         matches.push({ group, copy, provenance });
       }
     }
