@@ -1124,11 +1124,7 @@ function marketplaceEntries(value) {
 
 function tomlQuotedValue(quote, value) {
   if (quote === "'") return value;
-  try {
-    return JSON.parse(`"${value}"`);
-  } catch {
-    return undefined;
-  }
+  return tomlBasicStringValue(value);
 }
 
 function tomlKeyValue(doubleQuoted, singleQuoted, bare) {
@@ -1177,7 +1173,7 @@ function tomlSinglelineStringValue(value) {
   };
 }
 
-function tomlMultilineBasicValue(value) {
+function tomlBasicStringValue(value) {
   let result = "";
   const escapes = new Map([
     ["b", "\b"],
@@ -1259,7 +1255,7 @@ function tomlMultilineValue(lines, start, assignmentValue) {
       let value = pieces.join("\n");
       if (pieces.length > 1 && pieces[0] === "") value = value.slice(1);
       return {
-        value: literal ? value : tomlMultilineBasicValue(value),
+        value: literal ? value : tomlBasicStringValue(value),
         end: line,
       };
     }
@@ -1616,6 +1612,7 @@ async function discoverCodex(context) {
       host: "codex",
       scope: "global",
       marketplaceName: marketplace.entry.name,
+      active: false,
     });
   }
   for (const workspace of context.workspaceDirectories) {

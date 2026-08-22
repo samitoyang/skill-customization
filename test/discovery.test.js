@@ -1607,6 +1607,48 @@ test("Codex config.toml accepts dotted marketplace assignments", async () => {
   );
 });
 
+test("Codex config.toml decodes uppercase Unicode escapes in basic strings", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-unicode-config-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, ".codex");
+  const marketplaceRoot = path.join(root, "unicode-marketplace");
+  const plugin = path.join(marketplaceRoot, "plugins", "unicode-plugin");
+  await writeSkill(plugin, "skills", "unicode-config-review");
+  await mkdir(path.join(marketplaceRoot, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "unicode-marketplace",
+      plugins: [{
+        name: "unicode-plugin",
+        source: { source: "local", path: "./plugins/unicode-plugin" },
+      }],
+    }),
+  );
+  await mkdir(codexHome, { recursive: true });
+  const escapedMarketplaceRoot = `\\U0000002F${marketplaceRoot.slice(1)}`;
+  await writeFile(
+    path.join(codexHome, "config.toml"),
+    `["\\U0000006Darketplaces"."\\U00000075nicode-marketplace"]\n"source_\\U00000074ype" = "local"\n"\\U00000073ource" = "${escapedMarketplaceRoot}"\n`,
+  );
+
+  const result = await discoverSkills({
+    input: "unicode-config-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: codexHome },
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].copies[0].path, path.join(plugin, "skills"));
+  assert.equal(result.groups[0].copies[0].plugin.marketplace, "unicode-marketplace");
+  assert.equal(
+    result.pluginDiagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_CONFIGURATION"),
+    false,
+  );
+});
+
 test("Codex config.toml accepts multiline marketplace source strings", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-multiline-config-"));
   const home = path.join(root, "home");
@@ -1779,6 +1821,8 @@ test("Codex cache versions and synced or bundled marketplace copies remain audit
 
   const bundled = await discoverSkills({ input: "bundled-review", ...options });
   assert.equal(bundled.groups[0].copies[0].plugin.marketplace, "bundled-marketplace");
+  assert.equal(bundled.groups[0].copies[0].active, false);
+  assert.deepEqual(activeSkillInventory(bundled), []);
   assert.deepEqual(bundled.groups[0].provenance, [
     "repository:https://github.com/example/bundled-plugin",
   ]);
