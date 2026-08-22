@@ -39,6 +39,8 @@ const staticDirectories = Object.freeze([
 const staticFiles = Object.freeze([
   ".gitignore",
   "AGENTS.md",
+  "CHANGELOG.md",
+  "CONTEXT.md",
   "CONTRIBUTING.md",
   "README.md",
   "SECURITY.md",
@@ -174,6 +176,7 @@ async function assertEmittedTestSuite(root, outputDirectory) {
     .filter((file) => file.endsWith(".test.js"))
     .filter((file) => path.basename(file) !== "typescript-lane.test.js")
     .sort();
+  if (tests.length === 0) throw new Error("TypeScript artifact emitted no test files");
   const result = spawnSync(process.execPath, ["--test", ...tests], {
     cwd: root,
     encoding: "utf8",
