@@ -172,15 +172,23 @@ async function assertSourceMaps(root, outputDirectory) {
   }
 }
 
-async function assertEmittedTestSuite(root, outputDirectory) {
+async function assertEmittedTestSuite(root, outputDirectory, { testConcurrency } = {}) {
   const tests = (await filesBelow(path.join(outputDirectory, "test")))
     .filter((file) => file.endsWith(".test.js"))
     .filter((file) => path.basename(file) !== "typescript-lane.test.js")
     .sort();
   if (tests.length === 0) throw new Error("TypeScript artifact emitted no test files");
+  if (testConcurrency !== undefined
+    && (!Number.isInteger(testConcurrency) || testConcurrency <= 0)) {
+    throw new TypeError("emitted test concurrency must be a positive integer");
+  }
   const isolated = await isolatedTestEnvironment();
   try {
-    const result = spawnSync(process.execPath, ["--test", ...tests], {
+    const result = spawnSync(process.execPath, [
+      "--test",
+      ...(testConcurrency === undefined ? [] : [`--test-concurrency=${testConcurrency}`]),
+      ...tests,
+    ], {
       cwd: isolated.cwd,
       encoding: "utf8",
       env: isolated.env,
@@ -265,7 +273,11 @@ function assertPublishedPackageContract(packageJson) {
   assert.equal(packageJson.peerDependencies, undefined);
 }
 
-export async function verifyEmittedArtifact({ root = repositoryRoot, outputDirectory } = {}) {
+export async function verifyEmittedArtifact({
+  root = repositoryRoot,
+  outputDirectory,
+  testConcurrency,
+} = {}) {
   if (!outputDirectory) throw new TypeError("TypeScript verification requires an output directory");
   const artifact = await buildTypescript({ root, outputDirectory });
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
@@ -275,7 +287,7 @@ export async function verifyEmittedArtifact({ root = repositoryRoot, outputDirec
   await assertEmittedJavaScriptIsNodeCompatible(artifact.outputDirectory);
   await assertCliContract(root, artifact.outputDirectory);
   await assertLibraryContract(root, artifact.outputDirectory, packageJson.version);
-  await assertEmittedTestSuite(root, artifact.outputDirectory);
+  await assertEmittedTestSuite(root, artifact.outputDirectory, { testConcurrency });
   assertPublishedPackageContract(packageJson);
   return artifact;
 }

@@ -13,9 +13,11 @@ import {
   normalizeUpstreamEntrypoint,
 } from "./normalization.js";
 import { isPathContained } from "./paths.js";
+import { publishDiscoveryPerformanceMetric } from "./performance-diagnostics.js";
 import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 
 const PLUGIN_OWNER_PREFIX = "plugin:";
+
 const GENERIC_MANIFEST_FILES = [
   "plugin.json",
   "manifest.json",
@@ -311,6 +313,7 @@ function invalidDeclaredSkillDirectoryFields(manifest, declaration = {}) {
 }
 
 async function directoryEntries(target, context, metadata, { reportMissing = false } = {}) {
+  publishDiscoveryPerformanceMetric("plugin_directory_reads");
   try {
     const entries = await readdir(target, { withFileTypes: true });
     return entries.sort((left, right) => left.name.localeCompare(right.name, "en"));

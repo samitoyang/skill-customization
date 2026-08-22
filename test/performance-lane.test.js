@@ -5,8 +5,41 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import {
+  assertPerformanceGate,
+  summarizeDurations,
+} from "../scripts/performance-gate.js";
+
 const root = fileURLToPath(new URL("../", import.meta.url));
 const runner = path.join(root, "scripts", "run-performance.js");
+
+test("performance gates use robust samples and exact work budgets", () => {
+  const durationStats = summarizeDurations([10, 11, 12, 13, 80]);
+  assert.equal(durationStats.median, 12);
+  assert.equal(durationStats.max, 80);
+  assert.equal(typeof durationStats.p95, "number");
+
+  const report = {
+    scenario: "fixture",
+    duration_stats_ms: durationStats,
+    work: { discovery_calls: 5, root_scans: 5 },
+  };
+  assert.doesNotThrow(() => assertPerformanceGate({
+    report,
+    budget: {
+      maxMedianMs: 20,
+      maxP95Ms: 100,
+      exactWork: { discovery_calls: 5, root_scans: 5 },
+    },
+  }));
+  assert.throws(
+    () => assertPerformanceGate({
+      report: { ...report, work: { discovery_calls: 6, root_scans: 5 } },
+      budget: { exactWork: { discovery_calls: 5 } },
+    }),
+    /performance gate failed.*discovery_calls.*exactly 5/,
+  );
+});
 
 test("performance runner accepts exactly one repository scenario", () => {
   for (const args of [

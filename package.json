@@ -55,7 +55,7 @@
     "test": "node scripts/run-tests.js",
     "test:ambient": "node scripts/run-tests.js --lane ambient",
     "test:artifact": "node scripts/run-tests.js --lane artifact",
-    "test:performance": "node scripts/run-performance.js test/performance/fixture-discovery.performance.js",
+    "test:performance": "node scripts/run-performance-suite.js",
     "verify:artifact": "node scripts/verify-typescript.js",
     "verify:typescript": "node scripts/verify-typescript.js",
     "verify": "node scripts/verify.js && npm test && npm run test:ambient && npm run test:artifact && npm run check:package",

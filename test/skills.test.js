@@ -456,7 +456,7 @@ test("the package uses a public-document allowlist and verifies its Node 22.14 f
     packageJson.scripts["verify:artifact"],
     packageJson.scripts["verify:typescript"],
   );
-  assert.match(packageJson.scripts["test:performance"], /run-performance\.js/);
+  assert.match(packageJson.scripts["test:performance"], /run-performance-suite\.js/);
   assert.match(packageJson.scripts["test:ambient"], /--lane ambient/);
   assert.match(packageJson.scripts["test:artifact"], /--lane artifact/);
   assert.match(packageJson.scripts.verify, /npm run test:ambient/);
