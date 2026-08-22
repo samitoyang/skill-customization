@@ -13,6 +13,7 @@ import {
   normalizeRepositoryUrl,
   normalizeUpstreamEntrypoint,
 } from "./normalization.js";
+import { isPathContained } from "./paths.js";
 import { readSkillName } from "./skill-metadata.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
@@ -49,14 +50,9 @@ export async function readBindingStore(statePath = bindingStorePath()) {
   );
 }
 
-function contains(rootPath, targetPath) {
-  const relative = path.relative(path.resolve(rootPath), path.resolve(targetPath));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
 function matchingRoot(targetPath, roots) {
   return roots
-    .filter((candidate) => candidate.path && contains(candidate.path, targetPath))
+    .filter((candidate) => candidate.path && isPathContained(candidate.path, targetPath))
     .sort((left, right) => path.resolve(right.path).length - path.resolve(left.path).length)[0];
 }
 

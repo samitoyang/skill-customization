@@ -15,7 +15,8 @@ export function isMachineAbsolutePath(value) {
 
 export function isPathContained(root, target) {
   const relative = path.relative(path.resolve(root), path.resolve(target));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  const escapesRoot = relative === ".." || relative.startsWith(`..${path.sep}`);
+  return relative === "" || (!escapesRoot && !path.isAbsolute(relative));
 }
 
 async function assertNoSymlinks(target) {

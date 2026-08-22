@@ -403,6 +403,31 @@ test("plugin host roots require canonical containment", async () => {
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
 });
 
+test("plugin discovery accepts contained directories beginning with two dots", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-dot-prefix-"));
+  const home = path.join(root, "home");
+  const plugin = path.join(home, ".cursor", "plugins", "local", "..plugin");
+  const skill = await writeSkill(path.join(plugin, "skills"), "dot-prefix-review");
+  await writeFile(
+    path.join(plugin, "plugin.json"),
+    JSON.stringify({ name: "dot-prefix-plugin" }),
+  );
+
+  const result = await discoverSkills({
+    input: "dot-prefix-review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups[0].copies[0].path, skill);
+  assert.equal(
+    result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"),
+    false,
+  );
+});
+
 test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plugin layouts", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-hosts-"));
   const home = path.join(root, "home");

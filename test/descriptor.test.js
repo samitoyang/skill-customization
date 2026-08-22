@@ -8,7 +8,7 @@ import {
   readDescriptor,
   validateDescriptor,
 } from "../src/descriptor.js";
-import { isMachineAbsolutePath } from "../src/paths.js";
+import { isMachineAbsolutePath, isPathContained } from "../src/paths.js";
 
 const MACHINE_PATHS = [
   "/Users/alice/customization.schema.json",
@@ -57,6 +57,14 @@ function repositoryDescriptor(overrides = {}) {
 
 test("descriptor accepts a strict coexist repository overlay", () => {
   assert.deepEqual(validateDescriptor(repositoryDescriptor()), []);
+});
+
+test("path containment accepts in-root names beginning with two dots", () => {
+  const root = path.resolve(path.sep, "fixture", "root");
+  assert.equal(isPathContained(root, path.join(root, "..skills")), true);
+  assert.equal(isPathContained(root, path.join(root, "..skills", "review")), true);
+  assert.equal(isPathContained(root, path.resolve(root, "..")), false);
+  assert.equal(isPathContained(root, path.resolve(root, "..", "outside")), false);
 });
 
 test("runtime selectors cannot point into excluded owned-payload paths", () => {
