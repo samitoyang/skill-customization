@@ -550,41 +550,61 @@ test("automatic plugin recovery requires a same-scope versioned cache", async ()
       effective_fingerprint: await fingerprintPath(directSource),
     },
   };
-  const directStatePath = path.join(root, "direct-state", "bindings.json");
-  const directBinding = await bindCustomization({
-    descriptor: sourceDescriptor,
-    sourcePath: directSource,
-    context: "workspace-direct",
-    statePath: directStatePath,
-    roots: [rootRecord(directSource, "workspace")],
-    interactive: true,
-    confirm: async () => true,
-  });
-  assert.equal(directBinding.source.pluginIdentity, identity);
-  assert.equal(Object.hasOwn(directBinding.source, "pluginCache"), false);
-  await rename(directSource, path.join(root, "removed-direct"));
-  await mkdir(directReplacement, { recursive: true });
-  await writeFile(path.join(directReplacement, "SKILL.md"), workflow);
-  await assert.rejects(
-    resolveBinding({
+  const assertMissingRecovery = async ({
+    sourcePath,
+    replacementPath,
+    statePath,
+    context,
+    initialRoots,
+    replacementRoots,
+    assertBinding = async () => {},
+  }) => {
+    await mkdir(sourcePath, { recursive: true });
+    await writeFile(path.join(sourcePath, "SKILL.md"), workflow);
+    const binding = await bindCustomization({
       descriptor: sourceDescriptor,
-      context: "workspace-direct",
-      statePath: directStatePath,
-      roots: [rootRecord(directReplacement, "global")],
-    }),
-    (error) => error.code === "BINDING_TARGET_MISSING",
-  );
-  assert.deepEqual((await readBindingStore(directStatePath)).bindings, {});
+      sourcePath,
+      context,
+      statePath,
+      roots: initialRoots,
+      interactive: true,
+      confirm: async () => true,
+    });
+    await assertBinding(binding);
+    await rename(sourcePath, path.join(root, `removed-${context}`));
+    await mkdir(replacementPath, { recursive: true });
+    await writeFile(path.join(replacementPath, "SKILL.md"), workflow);
+    await assert.rejects(
+      resolveBinding({
+        descriptor: sourceDescriptor,
+        context,
+        statePath,
+        roots: replacementRoots,
+      }),
+      (error) => error.code === "BINDING_TARGET_MISSING",
+    );
+    assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+  };
 
-  await mkdir(cacheSource, { recursive: true });
-  await writeFile(path.join(cacheSource, "SKILL.md"), workflow);
-  const cacheStatePath = path.join(root, "cache-state", "bindings.json");
-  const cacheBinding = await bindCustomization({
-    descriptor: sourceDescriptor,
+  await assertMissingRecovery({
+    sourcePath: directSource,
+    replacementPath: directReplacement,
+    statePath: path.join(root, "direct-state", "bindings.json"),
+    context: "workspace-direct",
+    initialRoots: [rootRecord(directSource, "workspace")],
+    replacementRoots: [rootRecord(directReplacement, "global")],
+    assertBinding: async (binding) => {
+      assert.equal(binding.source.pluginIdentity, identity);
+      assert.equal(Object.hasOwn(binding.source, "pluginCache"), false);
+    },
+  });
+
+  await assertMissingRecovery({
     sourcePath: cacheSource,
+    replacementPath: cacheReplacement,
+    statePath: path.join(root, "cache-state", "bindings.json"),
     context: "workspace-cache",
-    statePath: cacheStatePath,
-    roots: [
+    initialRoots: [
       {
         path: cacheSource,
         owner: "workspace",
@@ -593,58 +613,29 @@ test("automatic plugin recovery requires a same-scope versioned cache", async ()
       },
       rootRecord(cacheSource, "workspace", true),
     ],
-    interactive: true,
-    confirm: async () => true,
+    replacementRoots: [rootRecord(cacheReplacement, "global", true)],
+    assertBinding: async (binding) => {
+      assert.equal(binding.source.pluginIdentity, identity);
+      assert.deepEqual(binding.source.pluginCache, {
+        kind: "versioned",
+        scope: "workspace",
+      });
+    },
   });
-  assert.equal(cacheBinding.source.pluginIdentity, identity);
-  assert.deepEqual(cacheBinding.source.pluginCache, {
-    kind: "versioned",
-    scope: "workspace",
-  });
-  await rename(cacheSource, path.join(root, "removed-cache"));
-  await mkdir(cacheReplacement, { recursive: true });
-  await writeFile(path.join(cacheReplacement, "SKILL.md"), workflow);
-  await assert.rejects(
-    resolveBinding({
-      descriptor: sourceDescriptor,
-      context: "workspace-cache",
-      statePath: cacheStatePath,
-      roots: [rootRecord(cacheReplacement, "global", true)],
-    }),
-    (error) => error.code === "BINDING_TARGET_MISSING",
-  );
-  assert.deepEqual((await readBindingStore(cacheStatePath)).bindings, {});
 
   const auditSource = path.join(root, "workspace-audit", "skills", "review");
   const auditReplacement = path.join(root, "workspace-audit-replacement", "skills", "review");
-  const auditStatePath = path.join(root, "audit-state", "bindings.json");
-  await mkdir(auditSource, { recursive: true });
-  await writeFile(path.join(auditSource, "SKILL.md"), workflow);
-  await bindCustomization({
-    descriptor: sourceDescriptor,
+  await assertMissingRecovery({
     sourcePath: auditSource,
+    replacementPath: auditReplacement,
+    statePath: path.join(root, "audit-state", "bindings.json"),
     context: "workspace-audit",
-    statePath: auditStatePath,
-    roots: [rootRecord(auditSource, "workspace", true)],
-    interactive: true,
-    confirm: async () => true,
+    initialRoots: [rootRecord(auditSource, "workspace", true)],
+    replacementRoots: [{
+      ...rootRecord(auditReplacement, "workspace", true),
+      active: false,
+    }],
   });
-  await rename(auditSource, path.join(root, "removed-audit"));
-  await mkdir(auditReplacement, { recursive: true });
-  await writeFile(path.join(auditReplacement, "SKILL.md"), workflow);
-  await assert.rejects(
-    resolveBinding({
-      descriptor: sourceDescriptor,
-      context: "workspace-audit",
-      statePath: auditStatePath,
-      roots: [{
-        ...rootRecord(auditReplacement, "workspace", true),
-        active: false,
-      }],
-    }),
-    (error) => error.code === "BINDING_TARGET_MISSING",
-  );
-  assert.deepEqual((await readBindingStore(auditStatePath)).bindings, {});
 });
 
 test("versioned cache recovery checks a customization execution graph", async () => {

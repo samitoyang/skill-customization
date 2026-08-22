@@ -782,6 +782,16 @@ function checkedProvenanceDecision(decision) {
     : checkProvenance();
 }
 
+function checkedProvenanceContext(decision) {
+  const checked = checkedProvenanceDecision(decision);
+  return {
+    checked,
+    diagnostics: [
+      ...(Array.isArray(checked.diagnostics) ? checked.diagnostics : []),
+    ],
+  };
+}
+
 /**
  * Check whether a checked Provenance decision contains compatible versioned
  * plugin-cache evidence. Every matching plugin observation remains visible in
@@ -793,10 +803,7 @@ function checkedProvenanceDecision(decision) {
  * @returns {ProvenanceCacheDecision}
  */
 export function checkProvenanceCache(decision, selection = {}) {
-  const checked = checkedProvenanceDecision(decision);
-  const diagnostics = [
-    ...(Array.isArray(checked.diagnostics) ? checked.diagnostics : []),
-  ];
+  const { checked, diagnostics } = checkedProvenanceContext(decision);
   const pluginIdentity = typeof selection?.pluginIdentity === "string"
     ? selection.pluginIdentity.trim()
     : selection?.pluginIdentity;
@@ -1025,10 +1032,7 @@ const PROVENANCE_SOURCE_SELECTION_HANDLERS = Object.freeze({
  * @returns {ProvenanceSelectionDecision}
  */
 export function checkProvenanceSelection(decision, source, selection = {}) {
-  const checked = checkedProvenanceDecision(decision);
-  const diagnostics = [
-    ...(Array.isArray(checked.diagnostics) ? checked.diagnostics : []),
-  ];
+  const { checked, diagnostics } = checkedProvenanceContext(decision);
   let compatibleProvenance = [...checked.provenance];
   const requestedProvenance = selection?.provenance;
   const confirmations = checked.evidence.filter(

@@ -525,7 +525,7 @@ async function inspectBindingSource({
     skillName: descriptor.source.skill_name,
     fingerprint: entrypointFingerprint,
   });
-  sourcePolicy.assertInspection({
+  sourcePolicy.assertInspection?.({
     descriptor,
     localIdentity: localEvidence.identity,
     requireLocalIdentityMatch,
@@ -573,15 +573,18 @@ async function recoverStandardFingerprint({ copy }) {
 }
 
 async function recoverCustomizationFingerprint({
-  descriptor,
+  recoveryContext,
   group,
   copy,
-  context,
-  statePath,
-  roots,
-  managerRecords,
-  activeSkills,
 }) {
+  const {
+    descriptor,
+    context,
+    statePath,
+    roots,
+    managerRecords,
+    activeSkills,
+  } = recoveryContext;
   if (!matchesCustomizationCopy(descriptor.source, group, copy)) return undefined;
   const execution = await inspectCustomizationExecution({
     descriptorPath: path.join(copy.path, "customization.json"),
@@ -614,21 +617,21 @@ const BINDING_SOURCE_POLICIES = Object.freeze({
     discoveryInput: ({ resolved }) => resolved,
     sourceDirectory: ({ entrypoint }) => path.dirname(entrypoint),
     inspect: inspectRepositorySource,
-    assertInspection: () => {},
     bindingFields: ({ inspection }) => ({
       repository: inspection.repository,
       upstreamPath: inspection.upstreamPath,
     }),
     validateBinding: assertRepositoryBinding,
     recoveryFingerprint: recoverStandardFingerprint,
-    matchesRecoveredCopy: async () => true,
   }),
   local: Object.freeze({
     discoveryInput: ({ resolved }) => resolved,
     sourceDirectory: ({ entrypoint }) => path.dirname(entrypoint),
     inspect: inspectLocalSource,
     assertInspection: assertLocalInspection,
-    bindingFields: ({ inspection }) => inspection,
+    bindingFields: ({ inspection }) => ({
+      localIdentity: inspection.localIdentity,
+    }),
     validateBinding: assertLocalBinding,
     recoveryFingerprint: recoverStandardFingerprint,
     matchesRecoveredCopy: matchesLocalRecoveredSource,
@@ -637,11 +640,9 @@ const BINDING_SOURCE_POLICIES = Object.freeze({
     discoveryInput: ({ sourceRoot }) => sourceRoot,
     sourceDirectory: ({ sourceRoot }) => sourceRoot,
     inspect: inspectCustomizationSource,
-    assertInspection: () => {},
     bindingFields: ({ inspection }) => ({ customization: inspection.customization }),
     validateBinding: assertCustomizationBinding,
     recoveryFingerprint: recoverCustomizationFingerprint,
-    matchesRecoveredCopy: async () => true,
   }),
 });
 
@@ -656,14 +657,14 @@ function bindingSourcePolicyFor(kind) {
 }
 
 async function recoverMissingPluginBinding({
-  descriptor,
   binding,
-  context,
-  statePath,
-  roots,
-  managerRecords,
-  activeSkills,
+  recoveryContext,
 }) {
+  const {
+    descriptor,
+    roots,
+    managerRecords,
+  } = recoveryContext;
   const { pluginCache, pluginIdentity } = binding.source;
   const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
   if (
@@ -694,17 +695,15 @@ async function recoverMissingPluginBinding({
       );
       if (!cacheDecision.cacheEligible) continue;
       const effectiveFingerprint = await sourcePolicy.recoveryFingerprint({
-        descriptor,
+        recoveryContext,
         group,
         copy,
-        context,
-        statePath,
-        roots,
-        managerRecords,
-        activeSkills,
       });
       if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
-      if (!(await sourcePolicy.matchesRecoveredCopy({ descriptor, copy }))) continue;
+      if (
+        sourcePolicy.matchesRecoveredCopy
+        && !(await sourcePolicy.matchesRecoveredCopy({ descriptor, copy }))
+      ) continue;
       const provenanceDecision = checkProvenanceSelection(
         cacheDecision.decision,
         descriptor.source,
@@ -828,7 +827,7 @@ export async function bindCustomization({
       ...(classified.aliasPath ? { alias: classified.aliasPath } : {}),
       skillName: inspection.declaredName,
       kind: descriptor.source.kind,
-      ...sourcePolicy.bindingFields({ inspection }),
+      ...(sourcePolicy.bindingFields?.({ inspection }) ?? {}),
       fingerprint: inspection.fingerprint,
       provenance: inspection.provenance,
       ...(inspection.pluginIdentity
@@ -970,14 +969,17 @@ export async function resolveBinding({
     ).binding;
   } catch (error) {
     if (error.code === "BINDING_TARGET_MISSING") {
-      const recovered = await recoverMissingPluginBinding({
+      const recoveryContext = {
         descriptor,
-        binding,
         context,
         statePath,
         roots,
         managerRecords,
         activeSkills,
+      };
+      const recovered = await recoverMissingPluginBinding({
+        binding,
+        recoveryContext,
       });
       if (recovered) {
         let persisted = false;
