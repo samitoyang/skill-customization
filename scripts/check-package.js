@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeNpmPackReport } from "./npm-pack-report.js";
 import { isForbiddenPackagePath } from "./package-path-policy.js";
+import { verifyEmittedArtifact } from "./typescript-lane.js";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "skill-customization-pack-"));
@@ -50,6 +51,10 @@ function npmInvocation() {
 }
 
 try {
+  await verifyEmittedArtifact({
+    root,
+    outputDirectory: path.join(temporaryRoot, "typescript"),
+  });
   const invocation = npmInvocation();
   const packed = spawnSync(
     invocation.command,
@@ -74,12 +79,16 @@ try {
   const files = new Set(report.files.map(({ path: file }) => file));
   const missing = requiredFiles.filter((file) => !files.has(file));
   const forbidden = [...files].filter(isForbiddenPackagePath);
+  const emitted = [...files].filter((file) => file === "dist" || file.startsWith("dist/"));
 
   if (missing.length > 0) {
     throw new Error(`npm package is missing required files: ${missing.join(", ")}`);
   }
   if (forbidden.length > 0) {
     throw new Error(`npm package contains private files: ${forbidden.join(", ")}`);
+  }
+  if (emitted.length > 0) {
+    throw new Error(`npm package contains TypeScript build output: ${emitted.join(", ")}`);
   }
 
   const cli = report.files.find(
