@@ -2161,7 +2161,22 @@ test("configured host roots load bounded global and workspace Claude settings", 
   assert.ok(paths.includes(directSkills));
   assert.equal(configured.settingsEvidence.length, 3);
   assert.deepEqual(configured.diagnostics, []);
+  assert.deepEqual(configured.rootDiagnostics, []);
   assert.equal(paths.some((rootPath) => rootPath === root), false);
+});
+
+test("discovery retains root-level registry diagnostics", async () => {
+  const rootDiagnostic = {
+    code: "INVALID_ROOT_PATH",
+    message: "skill root observation requires a non-empty path",
+    observationIndex: 0,
+  };
+  const result = await discoverSkills({
+    roots: [],
+    managerRecords: [],
+    rootDiagnostics: [rootDiagnostic],
+  });
+  assert.deepEqual(result.rootDiagnostics, [rootDiagnostic]);
 });
 
 test("discovery groups equivalent copies and exposes every path and owner", async () => {

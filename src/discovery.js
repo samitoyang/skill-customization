@@ -125,7 +125,9 @@ function uniqueRoots(roots) {
     }
     // Audit-only cache observations stay inactive unless another root identifies
     // the same physical source as an active installation.
-    if (existing.active === false && normalized.active !== false) {
+    if (normalized.active === true) {
+      existing.active = true;
+    } else if (existing.active === false && normalized.active !== false) {
       delete existing.active;
     }
     existing.pluginEvidence = [
@@ -160,24 +162,33 @@ function uniqueRoots(roots) {
 
 async function uniquePhysicalRoots(roots) {
   const byPhysicalPath = new Map();
-  for (const item of uniqueRoots(roots)) {
-    const physicalPath = item.physicalPath
-      ?? await realpath(item.path).catch(() => item.path);
+  for (const item of roots) {
+    const normalized = typeof item === "string"
+      ? root(item, "custom", "custom")
+      : root(
+        item.path,
+        item.owner ?? "custom",
+        item.scope ?? "custom",
+        item.origin,
+        item,
+      );
+    const physicalPath = normalized.physicalPath
+      ?? await realpath(normalized.path).catch(() => normalized.path);
     const existing = byPhysicalPath.get(physicalPath);
     if (!existing) {
-      byPhysicalPath.set(physicalPath, { ...item, physicalPath });
+      byPhysicalPath.set(physicalPath, { ...normalized, physicalPath });
       continue;
     }
     const [merged] = uniqueRoots([
       existing,
       {
-        ...item,
+        ...normalized,
         // Retain the standard-facing alias while uniqueRoots promotes any
         // plugin containment and scan policy attached to the physical source.
         path: existing.path,
         aliases: [
           ...(existing.aliases ?? [existing.path]),
-          ...(item.aliases ?? [item.path]),
+          ...(normalized.aliases ?? [normalized.path]),
         ],
       },
     ]);
@@ -212,7 +223,13 @@ function canonicalManagerProvenance(record) {
   return Object.keys(provenance).length > 0 ? provenance : undefined;
 }
 
-export function hostSkillRoots({
+/**
+ * Collect host standard and configured root observations and normalize them
+ * through the Skill root registry.
+ *
+ * @returns {{readonly roots: readonly object[], readonly diagnostics: readonly object[]}}
+ */
+export function hostSkillRootRegistry({
   home = os.homedir(),
   cwd = process.cwd(),
   env = process.env,
@@ -256,7 +273,16 @@ export function hostSkillRoots({
       origin: "host-added",
     });
   }
-  return normalizeSkillRootObservations(roots).roots;
+  return normalizeSkillRootObservations(roots);
+}
+
+/**
+ * Compatibility array interface for callers that only need host roots.
+ *
+ * @returns {readonly object[]}
+ */
+export function hostSkillRoots(options = {}) {
+  return hostSkillRootRegistry(options).roots;
 }
 
 function resolveConfiguredDirectory(value, { base, home }) {
@@ -338,13 +364,15 @@ export async function configuredHostSkillRoots({
       }
     }
   }
-  return {
-    roots: hostSkillRoots({
+  const rootRegistry = hostSkillRootRegistry({
       home,
       cwd,
       env,
       claudeSettings: { additionalDirectories: [...new Set(additionalDirectories)] },
-    }),
+    });
+  return {
+    roots: rootRegistry.roots,
+    rootDiagnostics: rootRegistry.diagnostics,
     settingsEvidence,
     diagnostics,
   };
@@ -733,8 +761,10 @@ export async function discoverSkills({
   managerOptions,
   managerCollector = collectManagerRecords,
   customPath,
+  rootDiagnostics: suppliedRootDiagnostics = [],
 } = {}) {
   let managerDiagnostics = [];
+  const rootDiagnostics = [...suppliedRootDiagnostics];
   if (managerRecords === undefined) {
     const collected = await managerCollector({ home, cwd, env, ...managerOptions });
     managerRecords = collected.records;
@@ -755,8 +785,14 @@ export async function discoverSkills({
     pluginDiagnostics = plugins.diagnostics ?? [];
   }
   // Manager records and customPath are explicit evidence sources; roots controls ambient host/plugin roots.
+  let ambientRoots = roots;
+  if (!rootsAreExplicit) {
+    const hostRegistry = hostSkillRootRegistry({ home, cwd, env });
+    ambientRoots = hostRegistry.roots;
+    rootDiagnostics.push(...hostRegistry.diagnostics);
+  }
   const declaredRoots = [
-    ...(rootsAreExplicit ? roots : hostSkillRoots({ home, cwd, env })),
+    ...ambientRoots,
     ...(rootsAreExplicit ? [] : additionalRoots),
     ...pluginRoots,
     ...managerSkillRoots(managerRecords),
@@ -882,6 +918,7 @@ export async function discoverSkills({
       { kind: "custom-path" },
     ],
     searchedRoots: normalizedRoots,
+    rootDiagnostics,
     managerDiagnostics,
     pluginDiagnostics,
     candidateDiagnostics,

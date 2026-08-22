@@ -186,6 +186,9 @@ test("registry normalizes standard and configured root observations", async () =
       origin: "project",
       registry: "legacy",
       registries: ["legacy"],
+      active: true,
+      singleSkill: false,
+      includeRootSkill: true,
     }]);
     assert.equal(Object.isFrozen(result), true);
     assert.equal(Object.isFrozen(result.roots), true);
@@ -214,6 +217,17 @@ test("registry normalizes standard and configured root observations", async () =
       message: "skill root observation requires a non-empty path",
       observationIndex: 0,
     }]);
+
+    const laterSource = normalizeSkillRootObservations([{
+      kind: "plugin",
+      path: standardAlias,
+      owner: "plugin:claude-code",
+      scope: "global",
+      origin: "plugin",
+      active: false,
+    }]);
+    assert.deepEqual(laterSource.diagnostics, []);
+    assert.equal(laterSource.roots[0].active, false);
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
@@ -247,6 +261,9 @@ test("host roots feed standard and configured observations through the registry"
     assert.equal(record.scope, "workspace");
     assert.equal(record.origin, "project");
     assert.deepEqual(record.registries, ["legacy", "vercel-skills"]);
+    assert.equal(record.active, true);
+    assert.equal(record.singleSkill, false);
+    assert.equal(record.includeRootSkill, true);
     for (const owner of [
       "agents",
       "amp",

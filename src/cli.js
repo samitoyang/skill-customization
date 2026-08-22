@@ -257,6 +257,7 @@ async function discoveryContext(options = {}) {
       managerRecords: [],
       managerDiagnostics: [],
       hostDiagnostics: [],
+      rootDiagnostics: [],
       settingsEvidence: [],
       additionalRoots: [],
       includePlugins: false,
@@ -273,6 +274,7 @@ async function discoveryContext(options = {}) {
     managerRecords: collected.records,
     managerDiagnostics: collected.diagnostics,
     hostDiagnostics: configured.diagnostics,
+    rootDiagnostics: configured.rootDiagnostics,
     settingsEvidence: configured.settingsEvidence,
   };
 }
@@ -285,6 +287,9 @@ function discoveryOptions(context) {
       : {}),
     includePlugins: context.includePlugins,
     managerRecords: context.managerRecords,
+    ...(context.rootDiagnostics?.length > 0
+      ? { rootDiagnostics: context.rootDiagnostics }
+      : {}),
   };
 }
 

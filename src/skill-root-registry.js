@@ -16,6 +16,9 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {"workspace" | "global"} scope
  * @property {string} origin
  * @property {string} [registry]
+ * @property {boolean} [active]
+ * @property {boolean} [singleSkill]
+ * @property {boolean} [includeRootSkill]
  */
 
 /**
@@ -25,10 +28,25 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {string} owner
  * @property {"workspace" | "global" | "custom"} scope
  * @property {string} origin
+ * @property {boolean} [active]
+ * @property {boolean} [singleSkill]
+ * @property {boolean} [includeRootSkill]
  */
 
 /**
- * @typedef {StandardSkillRootObservation | ConfiguredSkillRootObservation} SkillRootObservation
+ * @typedef {object} LaterSkillRootObservation
+ * @property {"explicit" | "manager" | "plugin"} kind
+ * @property {string} path
+ * @property {string} owner
+ * @property {string} scope
+ * @property {string} origin
+ * @property {boolean} [active]
+ * @property {boolean} [singleSkill]
+ * @property {boolean} [includeRootSkill]
+ */
+
+/**
+ * @typedef {StandardSkillRootObservation | ConfiguredSkillRootObservation | LaterSkillRootObservation} SkillRootObservation
  */
 
 /**
@@ -163,7 +181,13 @@ function normalizeRootObservation(observation, diagnostics, observationIndex) {
     ));
     return undefined;
   }
-  if (observation.kind !== "standard" && observation.kind !== "configured") {
+  if (![
+    "standard",
+    "configured",
+    "explicit",
+    "manager",
+    "plugin",
+  ].includes(observation.kind)) {
     diagnostics.push(rootDiagnostic(
       "UNKNOWN_ROOT_OBSERVATION_KIND",
       `unsupported skill root observation kind: ${String(observation.kind)}`,
@@ -266,6 +290,11 @@ function normalizeRootObservation(observation, diagnostics, observationIndex) {
   ]);
   normalized.scope = scope;
   normalized.origin = origin;
+  if (observation.kind === "standard" || observation.kind === "configured") {
+    normalized.active ??= true;
+    normalized.singleSkill ??= false;
+    normalized.includeRootSkill ??= true;
+  }
   delete normalized.kind;
   return normalized;
 }
@@ -301,7 +330,9 @@ function mergeRootRecord(existing, incoming) {
       ...(incoming.scopes ?? [incoming.scope]),
     ]);
   }
-  if (existing.active === false && incoming.active !== false) {
+  if (incoming.active === true) {
+    existing.active = true;
+  } else if (existing.active === false && incoming.active !== false) {
     delete existing.active;
   }
   mergeBooleanPolicy(existing, incoming, "singleSkill", true);
@@ -369,6 +400,11 @@ function resolveBase(base, { home, env, pathExists }) {
   throw new TypeError(`unsupported skill-root base ${base}`);
 }
 
+/**
+ * Expand the checkpointed standard-root declarations into typed observations.
+ *
+ * @returns {StandardSkillRootObservation[]}
+ */
 export function registrySkillRoots({
   home = os.homedir(),
   workspaceDirectories = [process.cwd()],
