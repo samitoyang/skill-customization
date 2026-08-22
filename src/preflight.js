@@ -23,7 +23,7 @@ export async function preflightCustomization({
   descriptorPath,
   context,
   statePath = bindingStorePath(),
-  roots = [],
+  roots,
   managerRecords = [],
   activeSkills,
 }) {
