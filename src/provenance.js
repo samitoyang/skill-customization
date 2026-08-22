@@ -841,6 +841,23 @@ export function checkProvenanceSelection(decision, source, selection = {}) {
         ));
       }
     }
+  } else if (source.kind === "local" && typeof source.identity === "string") {
+    const expectedIdentity = source.identity.startsWith("local:")
+      ? source.identity
+      : `local:${source.identity}`;
+    const observedLocalIdentities = checked.provenance.filter(
+      (identity) => identity.startsWith("local:")
+        && !identity.startsWith("local:plugin:"),
+    );
+    if (
+      observedLocalIdentities.length > 0
+      && !observedLocalIdentities.includes(expectedIdentity)
+    ) {
+      diagnostics.push(diagnostic(
+        "PROVENANCE_SOURCE_LOCAL_IDENTITY_MISMATCH",
+        "checked local provenance does not match the descriptor identity",
+      ));
+    }
   }
 
   const valid = diagnostics.length === 0;

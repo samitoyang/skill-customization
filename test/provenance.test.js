@@ -314,3 +314,38 @@ test("a confirmed exact upstream identity can resolve an otherwise conflicting d
   assert.equal(confirmed.selectionEligible, true);
   assert.equal(confirmed.selectedProvenance, expected);
 });
+
+test("descriptor selection reuses checked local identity evidence", () => {
+  const expectedIdentity = `local:sha256:${"a".repeat(64)}`;
+  const source = {
+    kind: "local",
+    identity: expectedIdentity,
+  };
+  const mismatch = checkProvenanceSelection(
+    checkProvenance({
+      observations: [{
+        kind: "embedded",
+        identity: `local:sha256:${"b".repeat(64)}`,
+      }],
+    }),
+    source,
+  );
+  assert.equal(mismatch.selectionEligible, false);
+  assert.deepEqual(mismatch.diagnostics.map(({ code }) => code), [
+    "PROVENANCE_SOURCE_LOCAL_IDENTITY_MISMATCH",
+  ]);
+
+  const pluginBacked = checkProvenanceSelection(
+    checkProvenance({
+      observations: [{
+        kind: "plugin",
+        host: "codex",
+        plugin: "reviewer",
+        marketplace: "official",
+        identity: "local:plugin:codex:official:reviewer",
+      }],
+    }),
+    source,
+  );
+  assert.equal(pluginBacked.selectionEligible, true);
+});

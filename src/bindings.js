@@ -178,6 +178,12 @@ function throwProvenanceSelectionError(
       details,
     });
   }
+  if (codes.has("PROVENANCE_SOURCE_LOCAL_IDENTITY_MISMATCH")) {
+    throw new BindingError("binding source does not match the descriptor local identity", {
+      code: "BINDING_LOCAL_IDENTITY_MISMATCH",
+      details,
+    });
+  }
   if (
     codes.has("PROVENANCE_CONFIRMATION_MISMATCH")
     || codes.has("PROVENANCE_CONFIRMATION_PATH_MISMATCH")
@@ -515,6 +521,19 @@ async function recoveryFingerprint({
     : execution?.effectiveFingerprint;
 }
 
+async function matchesLocalSourceIdentity(descriptor, copy) {
+  if (descriptor.source.kind !== "local") return true;
+  try {
+    const identity = generateLocalIdentity({
+      skillName: descriptor.source.skill_name,
+      fingerprint: await fingerprintFile(path.join(copy.path, "SKILL.md")),
+    });
+    return identity === descriptor.source.identity;
+  } catch {
+    return false;
+  }
+}
+
 async function recoverMissingPluginBinding({
   descriptor,
   binding,
@@ -560,16 +579,14 @@ async function recoverMissingPluginBinding({
         activeSkills,
       });
       if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
+      if (!(await matchesLocalSourceIdentity(descriptor, copy))) continue;
       const provenanceDecision = checkProvenanceSelection(
         checkedProvenanceFor(copy),
         descriptor.source,
       );
       const provenance = provenanceDecision.selectedProvenance
         ?? provenanceDecision.compatibleProvenance[0];
-      if (
-        provenanceDecision.selectionEligible
-        && (provenance || ["local", "customization"].includes(descriptor.source.kind))
-      ) {
+      if (provenanceDecision.selectionEligible && provenance) {
         matches.push({ group, copy, provenance });
       }
     }
