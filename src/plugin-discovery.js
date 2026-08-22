@@ -909,6 +909,15 @@ async function cursorMarketplaceManifestStatus(root) {
   }
 }
 
+function marketplaceOwnedRoots(context, host) {
+  let roots = context.marketplaceOwnedRootsByHost.get(host);
+  if (!roots) {
+    roots = new Set();
+    context.marketplaceOwnedRootsByHost.set(host, roots);
+  }
+  return roots;
+}
+
 async function discoverCursorLocalPluginRoots({
   root,
   boundary = root,
@@ -922,24 +931,14 @@ async function discoverCursorLocalPluginRoots({
     { host: "cursor", source: "extension" },
   );
   if (!safeRoot) return;
-  const marketplaceOwnedRoots = new Set(
-    (await Promise.all(
-      context.roots
-        .filter((rootInfo) =>
-          rootInfo.host === "cursor"
-          && rootInfo.pluginMetadata?.source === "marketplace"
-          && rootInfo.pluginRoot
-        )
-        .map((rootInfo) => realpath(rootInfo.pluginRoot).catch(() => undefined)),
-    )).filter(Boolean),
-  );
+  const ownedRoots = marketplaceOwnedRoots(context, "cursor");
   for (const extension of await pluginDirectories(
     safeRoot,
     context,
     { host: "cursor", source: "extension" },
   )) {
     const canonicalExtension = await realpath(extension.path).catch(() => undefined);
-    if (canonicalExtension && marketplaceOwnedRoots.has(canonicalExtension)) continue;
+    if (canonicalExtension && ownedRoots.has(canonicalExtension)) continue;
     const marketplaceManifest = await cursorMarketplaceManifestStatus(extension.path);
     if (marketplaceManifest.present) {
       // A direct child can itself be a documented multi-plugin repository.
@@ -1465,6 +1464,7 @@ async function discoverClaude(context) {
       host: "claude-code",
       scope: "global",
       marketplaceName: marketplace.entry.name,
+      active: false,
     });
   }
 
@@ -1496,6 +1496,7 @@ async function discoverClaude(context) {
           host: "claude-code",
           scope: "global",
           marketplaceName: entry.name,
+          active: false,
         });
       }
     }
@@ -1807,6 +1808,7 @@ async function discoverMarketplaceManifests({
   scope,
   marketplaceName,
   manifestPolicy,
+  active,
 }) {
   const safeBase = await safeDirectory(
     base,
@@ -1815,7 +1817,6 @@ async function discoverMarketplaceManifests({
     { host, source: "marketplace" },
   );
   if (!safeBase) return false;
-  let discovered = false;
   const manifestResult = await readManifest(
     safeBase,
     context,
@@ -1827,6 +1828,7 @@ async function discoverMarketplaceManifests({
     },
   );
   if (manifestResult.status !== "valid") return false;
+  let declaredPlugin = false;
   const { path: file, value: manifest } = manifestResult;
   const marketplace = stringValue(manifest.name) ?? marketplaceName ?? path.basename(safeBase);
   let validCursorMarketplace = true;
@@ -2015,7 +2017,15 @@ async function discoverMarketplaceManifests({
       safeBase,
       declaredPluginRoot,
     );
-    const added = await addPluginInstall({
+    declaredPlugin = true;
+    if (
+      host === "cursor"
+      && await canonicalContained(location.installRoot, location.boundary)
+    ) {
+      const canonicalRoot = await realpath(location.installRoot).catch(() => undefined);
+      if (canonicalRoot) marketplaceOwnedRoots(context, host).add(canonicalRoot);
+    }
+    await addPluginInstall({
       ...location,
       host,
       marketplace,
@@ -2029,11 +2039,11 @@ async function discoverMarketplaceManifests({
         marketplace,
       },
       context,
+      active,
       ...(manifestPolicy ? { manifestPolicy } : {}),
     });
-    discovered ||= added;
   }
-  return discovered;
+  return declaredPlugin;
 }
 
 function normalizeWorkspaceDirectories({ cwd, home, workspaceDirectories }) {
@@ -2071,6 +2081,7 @@ export async function discoverPluginSkillRoots({
     }),
     roots: [],
     diagnostics: [],
+    marketplaceOwnedRootsByHost: new Map(),
   };
   for (const specification of hostSpecifications) {
     if (!specification || typeof specification.discover !== "function") continue;

@@ -717,6 +717,36 @@ test("Cursor root marketplaces own every in-root alias of declared plugins", asy
   ]);
 });
 
+test("Cursor marketplace ownership survives declarations that emit no roots", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-empty-roots-"));
+  const home = path.join(root, "home");
+  const localRoot = path.join(home, ".cursor", "plugins", "local");
+  const plugin = path.join(localRoot, "owned-plugin");
+  await writeSkill(path.join(plugin, "skills"), "owned-review");
+  await writeFile(
+    path.join(plugin, "plugin.json"),
+    JSON.stringify({ name: "owned-plugin" }),
+  );
+  await mkdir(path.join(localRoot, ".cursor-plugin"), { recursive: true });
+  await writeFile(
+    path.join(localRoot, ".cursor-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "team-marketplace",
+      owner: { name: "fixture" },
+      plugins: [{ name: "owned-plugin", source: "owned-plugin", skills: [] }],
+    }),
+  );
+
+  const result = await discoverSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups.some(({ name }) => name === "owned-review"), false);
+});
+
 test("Cursor marketplace plugin roots bound every declared entry", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-plugin-boundary-"));
   const home = path.join(root, "home");
@@ -1958,6 +1988,55 @@ test("Claude marketplace discovery selects its host manifest and repository prov
     result.pluginDiagnostics.some(({ code }) => code === "INVALID_PLUGIN_REPOSITORY"),
     false,
   );
+});
+
+test("Claude marketplace catalogs stay audit-only beside an installed cache copy", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-catalog-active-"));
+  const home = path.join(root, "home");
+  const pluginsRoot = path.join(home, ".claude", "plugins");
+  const marketplace = path.join(pluginsRoot, "marketplaces", "official");
+  const catalogPlugin = path.join(marketplace, "plugins", "reviewer");
+  const cachePlugin = path.join(pluginsRoot, "cache", "official", "reviewer", "1.0.0");
+  const catalogSkill = await writeSkill(path.join(catalogPlugin, "skills"), "review");
+  const cacheSkill = await writeSkill(path.join(cachePlugin, "skills"), "review");
+  await mkdir(path.join(marketplace, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(marketplace, ".claude-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "official",
+      plugins: [{ name: "reviewer", source: "./plugins/reviewer" }],
+    }),
+  );
+  await writeFile(
+    path.join(pluginsRoot, "installed_plugins.json"),
+    JSON.stringify({
+      plugins: {
+        "reviewer@official": [{
+          installPath: cachePlugin,
+          version: "1.0.0",
+          scope: "user",
+        }],
+      },
+    }),
+  );
+
+  const result = await discoverSkills({
+    input: "review",
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].copies.length, 2);
+  assert.equal(
+    result.groups[0].copies.find(({ path: skillPath }) => skillPath === catalogSkill).active,
+    false,
+  );
+  assert.deepEqual(activeSkillInventory(result), [
+    { name: "review", path: cacheSkill, realPath: await realpath(cacheSkill) },
+  ]);
 });
 
 test("host roots include bounded Git ancestors as workspace roots", async () => {
