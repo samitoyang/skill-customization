@@ -16,6 +16,7 @@ import {
 import { isPathContained } from "./paths.js";
 import {
   checkProvenance,
+  checkProvenanceCache,
   checkProvenanceSelection,
   confirmProvenanceDecision,
 } from "./provenance.js";
@@ -125,18 +126,6 @@ async function confirmOrFail(callback, payload, code, message) {
 function checkedProvenanceFor(candidate) {
   return candidate.provenanceDecision
     ?? checkProvenance({ observations: candidate.evidence ?? [] });
-}
-
-function versionedPluginCachesFor(copy, identity) {
-  if (!identity) return [];
-  return checkedProvenanceFor(copy).evidence.flatMap((evidence) =>
-    evidence.kind === "plugin"
-      && evidence.identity === identity
-      && evidence.cache?.kind === "versioned"
-      && evidence.cache.scope === copy.scope
-      ? [evidence.cache]
-      : []
-  );
 }
 
 function throwProvenanceSelectionError(
@@ -355,12 +344,11 @@ async function inspectBindingSource({
   const sourceCopies = group.copies.filter(
     (copy) => path.resolve(copy.realPath ?? copy.path) === sourceRoot,
   );
-  const sourcePluginEvidence = sourceCopies.flatMap((copy) =>
-    checkedProvenanceFor(copy).evidence.filter(({ kind }) => kind === "plugin")
-  );
+  const sourceEvidence = sourceCopies.flatMap((copy) => checkedProvenanceFor(copy).evidence);
   const pluginIdentities = [...new Set([
     ...sourceCopies.map(({ pluginIdentity }) => pluginIdentity),
-    ...sourcePluginEvidence
+    ...sourceEvidence
+      .filter(({ kind }) => kind === "plugin")
       .filter(({ identity }) => typeof identity === "string")
       .map(({ identity }) => identity),
   ].filter(Boolean))];
@@ -370,13 +358,21 @@ async function inspectBindingSource({
     : pluginIdentities.length === 1
       ? pluginIdentities[0]
       : undefined;
-  const bindingPluginCaches = [...new Map(
-    sourceCopies
-      .flatMap((copy) => versionedPluginCachesFor(copy, bindingPluginIdentity))
-      .map((cache) => [JSON.stringify(cache), cache]),
-  ).values()];
-  const bindingPluginCache = bindingPluginCaches.length === 1
-    ? bindingPluginCaches[0]
+  const bindingPluginCaches = bindingPluginIdentity
+    ? sourceCopies.flatMap((copy) => {
+        if (!["global", "workspace"].includes(copy.scope)) return [];
+        return checkProvenanceCache(checkedProvenanceFor(copy), {
+          pluginIdentity: bindingPluginIdentity,
+          pluginCache: { kind: "versioned", scope: copy.scope },
+          sourceScope: copy.scope,
+        }).compatibleCaches;
+      })
+    : [];
+  const uniqueBindingPluginCaches = [
+    ...new Map(bindingPluginCaches.map((cache) => [JSON.stringify(cache), cache])).values(),
+  ];
+  const bindingPluginCache = uniqueBindingPluginCaches.length === 1
+    ? uniqueBindingPluginCaches[0]
     : undefined;
   let repository;
   let upstreamPath;
@@ -565,9 +561,12 @@ async function recoverMissingPluginBinding({
   const matches = [];
   for (const group of discovery.groups) {
     for (const copy of group.copies) {
-      if (copy.scope !== pluginCache.scope) continue;
-      const compatibleCache = versionedPluginCachesFor(copy, pluginIdentity).length > 0;
-      if (!compatibleCache) continue;
+      if (copy.active === false) continue;
+      const cacheDecision = checkProvenanceCache(
+        checkedProvenanceFor(copy),
+        { pluginIdentity, pluginCache, sourceScope: copy.scope },
+      );
+      if (!cacheDecision.cacheEligible) continue;
       const effectiveFingerprint = await recoveryFingerprint({
         descriptor,
         group,
@@ -581,7 +580,7 @@ async function recoverMissingPluginBinding({
       if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
       if (!(await matchesLocalSourceIdentity(descriptor, copy))) continue;
       const provenanceDecision = checkProvenanceSelection(
-        checkedProvenanceFor(copy),
+        cacheDecision.decision,
         descriptor.source,
       );
       const provenance = provenanceDecision.selectedProvenance

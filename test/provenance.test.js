@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   checkProvenance,
+  checkProvenanceCache,
   checkProvenanceSelection,
   confirmProvenanceDecision,
 } from "../src/provenance.js";
@@ -367,4 +368,104 @@ test("descriptor selection reuses checked local identity evidence", () => {
     source,
   );
   assert.equal(pluginBacked.selectionEligible, true);
+});
+
+test("cache eligibility reuses checked plugin evidence without collapsing versions", () => {
+  const pluginIdentity = "local:plugin:codex:official:reviewer";
+  const repository = "https://github.com/example/skills";
+  const decision = checkProvenance({
+    observations: [
+      {
+        kind: "plugin",
+        host: "codex",
+        plugin: "reviewer",
+        marketplace: "official",
+        version: "1",
+        identity: pluginIdentity,
+        repository,
+        upstream_path: "skills/review/SKILL.md",
+        cache: { kind: "versioned", scope: "global" },
+      },
+      {
+        kind: "plugin",
+        host: "codex",
+        plugin: "reviewer",
+        marketplace: "official",
+        version: "2",
+        identity: pluginIdentity,
+        repository,
+        upstream_path: "skills/review/SKILL.md",
+        cache: { kind: "versioned", scope: "global" },
+      },
+    ],
+  });
+
+  const eligible = checkProvenanceCache(decision, {
+    pluginIdentity,
+    pluginCache: { kind: "versioned", scope: "global" },
+  });
+  assert.equal(eligible.cacheEligible, true);
+  assert.deepEqual(eligible.compatibleEvidence.map(({ version }) => version), ["1", "2"]);
+  assert.deepEqual(eligible.compatibleCaches, [
+    { kind: "versioned", scope: "global" },
+  ]);
+  assert.equal(eligible.decision, decision);
+  assert.throws(
+    () => {
+      eligible.compatibleEvidence[0].version = "changed";
+    },
+    TypeError,
+  );
+
+  const wrongIdentity = checkProvenanceCache(decision, {
+    pluginIdentity: "local:plugin:codex:official:other",
+    pluginCache: { kind: "versioned", scope: "global" },
+  });
+  assert.equal(wrongIdentity.cacheEligible, false);
+  assert.equal(wrongIdentity.valid, false);
+  assert.deepEqual(wrongIdentity.diagnostics.map(({ code }) => code), [
+    "PROVENANCE_CACHE_PLUGIN_IDENTITY_MISMATCH",
+  ]);
+
+  const wrongScope = checkProvenanceCache(decision, {
+    pluginIdentity,
+    pluginCache: { kind: "versioned", scope: "workspace" },
+  });
+  assert.equal(wrongScope.cacheEligible, false);
+  assert.equal(wrongScope.valid, false);
+  assert.deepEqual(wrongScope.diagnostics.map(({ code }) => code), [
+    "PROVENANCE_CACHE_SCOPE_MISMATCH",
+  ]);
+});
+
+test("invalid plugin cache observations fail at the Provenance evidence seam", () => {
+  const malformed = checkProvenance({
+    observations: [{
+      kind: "plugin",
+      host: "codex",
+      plugin: "reviewer",
+      marketplace: "official",
+      identity: "local:plugin:codex:official:reviewer",
+      cache: { kind: "latest", scope: "global" },
+    }],
+  });
+  assert.equal(malformed.selectionEligible, false);
+  assert.deepEqual(malformed.diagnostics.map(({ code }) => code), [
+    "INVALID_PLUGIN_CACHE_EVIDENCE",
+  ]);
+
+  const invalidScope = checkProvenance({
+    observations: [{
+      kind: "plugin",
+      host: "codex",
+      plugin: "reviewer",
+      marketplace: "official",
+      identity: "local:plugin:codex:official:reviewer",
+      cache: { kind: "versioned", scope: "session" },
+    }],
+  });
+  assert.equal(invalidScope.selectionEligible, false);
+  assert.deepEqual(invalidScope.diagnostics.map(({ code }) => code), [
+    "INVALID_PLUGIN_CACHE_SCOPE",
+  ]);
 });

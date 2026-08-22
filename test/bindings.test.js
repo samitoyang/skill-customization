@@ -614,6 +614,37 @@ test("automatic plugin recovery requires a same-scope versioned cache", async ()
     (error) => error.code === "BINDING_TARGET_MISSING",
   );
   assert.deepEqual((await readBindingStore(cacheStatePath)).bindings, {});
+
+  const auditSource = path.join(root, "workspace-audit", "skills", "review");
+  const auditReplacement = path.join(root, "workspace-audit-replacement", "skills", "review");
+  const auditStatePath = path.join(root, "audit-state", "bindings.json");
+  await mkdir(auditSource, { recursive: true });
+  await writeFile(path.join(auditSource, "SKILL.md"), workflow);
+  await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: auditSource,
+    context: "workspace-audit",
+    statePath: auditStatePath,
+    roots: [rootRecord(auditSource, "workspace", true)],
+    interactive: true,
+    confirm: async () => true,
+  });
+  await rename(auditSource, path.join(root, "removed-audit"));
+  await mkdir(auditReplacement, { recursive: true });
+  await writeFile(path.join(auditReplacement, "SKILL.md"), workflow);
+  await assert.rejects(
+    resolveBinding({
+      descriptor: sourceDescriptor,
+      context: "workspace-audit",
+      statePath: auditStatePath,
+      roots: [{
+        ...rootRecord(auditReplacement, "workspace", true),
+        active: false,
+      }],
+    }),
+    (error) => error.code === "BINDING_TARGET_MISSING",
+  );
+  assert.deepEqual((await readBindingStore(auditStatePath)).bindings, {});
 });
 
 test("versioned cache recovery checks a customization execution graph", async () => {

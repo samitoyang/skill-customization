@@ -28,6 +28,7 @@ import {
  * @property {string} [repository]
  * @property {string} [upstream_path]
  * @property {string} [upstreamPath]
+ * @property {PluginCacheObservation} [cache]
  * @property {Record<string, unknown>} [installation]
  * @property {Record<string, unknown>} [provenance]
  */
@@ -106,6 +107,29 @@ import {
  * @property {string} [upstream_path]
  * @property {string} [upstreamPath]
  * @property {string} [identity]
+ */
+
+/**
+ * @typedef {object} PluginCacheObservation
+ * @property {"versioned"} kind
+ * @property {"global" | "workspace"} scope
+ */
+
+/**
+ * @typedef {object} ProvenanceCacheSelection
+ * @property {string} pluginIdentity
+ * @property {PluginCacheObservation} [pluginCache]
+ * @property {"global" | "workspace"} [sourceScope]
+ */
+
+/**
+ * @typedef {object} ProvenanceCacheDecision
+ * @property {ProvenanceDecision} decision
+ * @property {readonly PluginProvenanceObservation[]} compatibleEvidence
+ * @property {readonly PluginCacheObservation[]} compatibleCaches
+ * @property {boolean} valid
+ * @property {boolean} cacheEligible
+ * @property {readonly ProvenanceDiagnostic[]} diagnostics
  */
 
 /**
@@ -341,6 +365,34 @@ function normalizeOptionalSource(observation, normalized, diagnostics, observati
   }
 }
 
+function normalizePluginCache(observation, normalized, diagnostics, observationIndex) {
+  if (observation.cache === undefined) return true;
+  if (!isRecord(observation.cache) || observation.cache.kind !== "versioned") {
+    addDiagnostic(
+      diagnostics,
+      "INVALID_PLUGIN_CACHE_EVIDENCE",
+      "plugin cache provenance must identify a versioned cache",
+      observationIndex,
+    );
+    return false;
+  }
+  if (!["global", "workspace"].includes(observation.cache.scope)) {
+    addDiagnostic(
+      diagnostics,
+      "INVALID_PLUGIN_CACHE_SCOPE",
+      "versioned plugin cache provenance must use global or workspace scope",
+      observationIndex,
+    );
+    return false;
+  }
+  normalized.cache = {
+    ...observation.cache,
+    kind: "versioned",
+    scope: observation.cache.scope,
+  };
+  return true;
+}
+
 function normalizeConfirmationObservation(observation, diagnostics, observationIndex) {
   let normalized;
   try {
@@ -465,6 +517,9 @@ function normalizeObservation(observation, diagnostics, observationIndex) {
       return undefined;
     }
     normalizeOptionalSource(observation, normalized, diagnostics, observationIndex);
+    if (!normalizePluginCache(observation, normalized, diagnostics, observationIndex)) {
+      return undefined;
+    }
   } else if (observation.kind === "manager") {
     if (typeof observation.manager !== "string" || !observation.manager.trim()) {
       addDiagnostic(
@@ -709,6 +764,126 @@ export function confirmProvenanceDecision(decision, confirmation) {
   return checkProvenance({ observations: decision.evidence, confirmation });
 }
 
+function checkedProvenanceDecision(decision) {
+  return decision
+    && Array.isArray(decision.evidence)
+    && Array.isArray(decision.provenance)
+    ? decision
+    : checkProvenance();
+}
+
+/**
+ * Check whether a checked Provenance decision contains compatible versioned
+ * plugin-cache evidence. Every matching plugin observation remains visible in
+ * `compatibleEvidence`; `compatibleCaches` collapses only identical cache
+ * scopes for Binding state.
+ *
+ * @param {ProvenanceDecision} decision
+ * @param {ProvenanceCacheSelection} selection
+ * @returns {ProvenanceCacheDecision}
+ */
+export function checkProvenanceCache(decision, selection = {}) {
+  const checked = checkedProvenanceDecision(decision);
+  const diagnostics = [
+    ...(Array.isArray(checked.diagnostics) ? checked.diagnostics : []),
+  ];
+  const pluginIdentity = typeof selection?.pluginIdentity === "string"
+    ? selection.pluginIdentity.trim()
+    : selection?.pluginIdentity;
+  const requestedCache = selection?.pluginCache;
+  const sourceScope = selection?.sourceScope;
+  let requestValid = true;
+  if (typeof pluginIdentity !== "string" || !pluginIdentity.trim()) {
+    diagnostics.push(diagnostic(
+      "INVALID_PROVENANCE_CACHE_SELECTION",
+      "plugin cache eligibility requires a non-empty plugin identity",
+    ));
+    requestValid = false;
+  }
+  if (requestedCache !== undefined) {
+    if (!isRecord(requestedCache) || requestedCache.kind !== "versioned") {
+      diagnostics.push(diagnostic(
+        "INVALID_PROVENANCE_CACHE_SELECTION",
+        "plugin cache eligibility requires a versioned cache",
+      ));
+      requestValid = false;
+    } else if (!["global", "workspace"].includes(requestedCache.scope)) {
+      diagnostics.push(diagnostic(
+        "INVALID_PROVENANCE_CACHE_SELECTION",
+        "plugin cache eligibility requires global or workspace scope",
+      ));
+      requestValid = false;
+    }
+  }
+  if (sourceScope !== undefined && !["global", "workspace"].includes(sourceScope)) {
+    diagnostics.push(diagnostic(
+      "INVALID_PROVENANCE_CACHE_SELECTION",
+      "plugin cache eligibility requires global or workspace source scope",
+    ));
+    requestValid = false;
+  }
+
+  const identityMatches = checked.evidence.filter(
+    (evidence) => evidence.kind === "plugin" && evidence.identity === pluginIdentity,
+  );
+  const compatibleEvidence = requestValid
+    ? identityMatches.filter((evidence) =>
+      evidence.cache?.kind === "versioned"
+      && (
+        requestedCache === undefined
+        || evidence.cache.scope === requestedCache.scope
+      )
+      && (
+        sourceScope === undefined
+        || evidence.cache.scope === sourceScope
+      )
+    )
+    : [];
+  const compatibleCaches = [
+    ...new Map(
+      compatibleEvidence.map((evidence) => [stableJson(evidence.cache), evidence.cache]),
+    ).values(),
+  ];
+
+  if (requestValid && compatibleEvidence.length === 0) {
+    if (identityMatches.length === 0) {
+      diagnostics.push(diagnostic(
+        "PROVENANCE_CACHE_PLUGIN_IDENTITY_MISMATCH",
+        "checked provenance does not contain the requested plugin identity",
+      ));
+    } else if (identityMatches.every(({ cache }) => cache === undefined)) {
+      diagnostics.push(diagnostic(
+        "PROVENANCE_CACHE_MISSING",
+        "checked plugin provenance does not identify a versioned cache",
+      ));
+    } else if (identityMatches.every(({ cache }) => cache?.kind !== "versioned")) {
+      diagnostics.push(diagnostic(
+        "PROVENANCE_CACHE_KIND_MISMATCH",
+        "checked plugin provenance does not identify a versioned cache",
+      ));
+    } else {
+      diagnostics.push(diagnostic(
+        "PROVENANCE_CACHE_SCOPE_MISMATCH",
+        "checked plugin provenance does not contain the requested cache scope",
+      ));
+    }
+  }
+
+  const valid = diagnostics.length === 0;
+  const cacheEligible = valid
+    && checked.selectionEligible
+    && compatibleEvidence.length > 0;
+  const result = {
+    decision: checked,
+    compatibleEvidence,
+    compatibleCaches,
+    valid,
+    cacheEligible,
+    diagnostics,
+  };
+  return /** @type {ProvenanceCacheDecision} */ (freezeDeep(result));
+}
+
 /**
  * Check whether a descriptor source can use an already checked evidence decision.
  * Repository identity and upstream compatibility live here so every caller uses
@@ -720,11 +895,7 @@ export function confirmProvenanceDecision(decision, confirmation) {
  * @returns {ProvenanceSelectionDecision}
  */
 export function checkProvenanceSelection(decision, source, selection = {}) {
-  const checked = decision
-    && Array.isArray(decision.evidence)
-    && Array.isArray(decision.provenance)
-    ? decision
-    : checkProvenance();
+  const checked = checkedProvenanceDecision(decision);
   const diagnostics = [
     ...(Array.isArray(checked.diagnostics) ? checked.diagnostics : []),
   ];
