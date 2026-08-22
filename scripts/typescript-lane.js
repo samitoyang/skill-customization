@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, copyFile, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { access, copyFile, cp, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -26,6 +26,22 @@ const cliCases = Object.freeze([
   ["supports"],
   ["supports", "1", "extra"],
   ["unknown-command"],
+]);
+
+const staticDirectories = Object.freeze([
+  "docs",
+  "skills",
+  "test/fixtures",
+  ".changeset",
+  ".github",
+]);
+
+const staticFiles = Object.freeze([
+  ".gitignore",
+  "AGENTS.md",
+  "CONTRIBUTING.md",
+  "README.md",
+  "SECURITY.md",
 ]);
 
 function compilerPath(root) {
@@ -85,7 +101,24 @@ export async function buildTypescript({ root = repositoryRoot, outputDirectory =
     path.join(root, "customization.schema.json"),
     path.join(resolvedOutput, "customization.schema.json"),
   );
+  await copyStaticAssets(root, resolvedOutput);
   return { root, outputDirectory: resolvedOutput };
+}
+
+async function copyStaticAssets(root, outputDirectory) {
+  for (const relativePath of staticFiles) {
+    const source = path.join(root, relativePath);
+    const target = path.join(outputDirectory, relativePath);
+    await mkdir(path.dirname(target), { recursive: true });
+    await copyFile(source, target);
+  }
+  for (const relativePath of staticDirectories) {
+    await cp(
+      path.join(root, relativePath),
+      path.join(outputDirectory, relativePath),
+      { recursive: true },
+    );
+  }
 }
 
 async function assertFilesExist(outputDirectory) {
@@ -121,6 +154,8 @@ async function assertSourceMaps(root, outputDirectory) {
     assert.match(contents, new RegExp(`sourceMappingURL=${path.basename(mapPath)}$`, "m"));
     const sourceMap = JSON.parse(await readFile(mapPath, "utf8"));
     assert.equal(sourceMap.version, 3);
+    assert.equal(sourceMap.file, path.basename(file));
+    assert.equal(typeof sourceMap.mappings, "string");
     assert.ok(sourceMap.sources.length > 0);
     for (const source of sourceMap.sources) {
       const sourceTarget = path.resolve(
@@ -131,6 +166,22 @@ async function assertSourceMaps(root, outputDirectory) {
       assert.ok(sourceTarget === root || sourceTarget.startsWith(`${root}${path.sep}`));
       await access(sourceTarget);
     }
+  }
+}
+
+async function assertEmittedTestSuite(root, outputDirectory) {
+  const tests = (await filesBelow(path.join(outputDirectory, "test")))
+    .filter((file) => file.endsWith(".test.js"))
+    .filter((file) => path.basename(file) !== "typescript-lane.test.js")
+    .sort();
+  const result = spawnSync(process.execPath, ["--test", ...tests], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 20 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || "emitted test suite failed");
   }
 }
 
@@ -214,6 +265,7 @@ export async function verifyEmittedArtifact({ root = repositoryRoot, outputDirec
   await assertEmittedJavaScriptIsNodeCompatible(artifact.outputDirectory);
   await assertCliContract(root, artifact.outputDirectory);
   await assertLibraryContract(root, artifact.outputDirectory, packageJson.version);
+  await assertEmittedTestSuite(root, artifact.outputDirectory);
   assertPublishedPackageContract(packageJson);
   return artifact;
 }
