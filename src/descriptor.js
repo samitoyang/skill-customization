@@ -128,6 +128,7 @@ import { isMachineAbsolutePath, resolveOwnedPath } from "./paths.js";
  * @property {string} message
  * @property {string} [causeCode]
  * @property {string} [causeMessage]
+ * @property {"descriptor" | "entrypoint" | "customization" | "snapshot" | "diff"} [artifactKind]
  * @property {readonly DescriptorValidationError[] | Record<string, unknown> | string} [details]
  */
 
@@ -539,6 +540,7 @@ function diagnostic({
   message,
   causeCode,
   causeMessage,
+  artifactKind,
   details,
 }) {
   return {
@@ -547,6 +549,7 @@ function diagnostic({
     message,
     ...(causeCode ? { causeCode } : {}),
     ...(causeMessage ? { causeMessage } : {}),
+    ...(artifactKind ? { artifactKind } : {}),
     ...(details !== undefined ? { details } : {}),
   };
 }
@@ -567,7 +570,7 @@ function failed(value) {
  * @param {CheckedDescriptor} value
  * @returns {DescriptorIngestionSuccess}
  */
-function checked(value) {
+function successfulIngestion(value) {
   return /** @type {DescriptorIngestionSuccess} */ (freezeDeep({
     ok: true,
     checked: value,
@@ -595,6 +598,7 @@ async function descriptorFileArtifact(descriptorPath, displayPath = descriptorPa
       error: diagnostic({
         code: "DESCRIPTOR_ARTIFACT_INVALID",
         stage: "artifact",
+        artifactKind: "descriptor",
         message: `descriptor path has invalid artifact type: ${displayPath} must be a regular file`,
         details: [{
           path: descriptorPath,
@@ -828,7 +832,7 @@ export async function ingestDescriptor({ descriptorPath, inventory = [] } = {}) 
     }));
   }
 
-  return checked({
+  return successfulIngestion({
     descriptor: freezeDeep(structuredClone(descriptor)),
     location: {
       descriptorPath: absoluteDescriptorPath,

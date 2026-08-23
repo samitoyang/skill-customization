@@ -16,25 +16,36 @@ import {
 import { bindCustomization } from "../src/bindings.js";
 import { discoverFixtureSkills } from "./support/discovery-modes.js";
 import {
+  fingerprintFile,
   fingerprintPath,
+  fingerprintValues,
   payloadFingerprint,
 } from "../src/fingerprint.js";
 import { preflightCustomization } from "../src/preflight.js";
 
 const repository = "https://github.com/example/skills";
 
-function descriptor({ owned, sourceFingerprint }) {
+function descriptor({
+  id = "urn:test:descriptor-ingestion-overlay",
+  type = "semantic-overlay",
+  name = "review-overlay",
+  owned,
+  source,
+  sourceFingerprint,
+  activation = { mode: "coexist" },
+  fork,
+}) {
   return {
     schema_version: 1,
-    id: "urn:test:descriptor-ingestion-overlay",
-    type: "semantic-overlay",
-    name: "review-overlay",
+    id,
+    type,
+    name,
     license: "MIT",
     entrypoint: "SKILL.md",
     customization: "CUSTOMIZATION.md",
     dependencies: [],
     owned_payload: { reviewed_fingerprint: owned },
-    source: {
+    source: source ?? {
       skill_name: "review",
       kind: "repository",
       repository,
@@ -43,7 +54,8 @@ function descriptor({ owned, sourceFingerprint }) {
       effective_fingerprint: sourceFingerprint,
       review: { revision: "fixture" },
     },
-    activation: { mode: "coexist" },
+    activation,
+    ...(fork ? { fork } : {}),
   };
 }
 
@@ -185,6 +197,174 @@ test("a discovered customization crosses the checked Descriptor, Binding, and Pr
   });
   assert.equal(execution.status, "ready");
   assert.deepEqual(execution.steps.map(({ role }) => role), ["workflow", "delta"]);
+});
+
+test("a discovered customization-source overlay crosses the same runtime interfaces", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-ingestion-nested-"));
+  const sourceRoot = path.join(root, "review");
+  const innerRoot = path.join(root, "review-inner");
+  const outerRoot = path.join(root, "review-outer");
+  await mkdir(sourceRoot);
+  await writeFile(
+    path.join(sourceRoot, "SKILL.md"),
+    "---\nname: review\n---\nSource workflow.\n",
+  );
+  await mkdir(innerRoot);
+  await writeFile(
+    path.join(innerRoot, "SKILL.md"),
+    "---\nname: review-inner\n---\ninner dispatcher\n",
+  );
+  await writeFile(path.join(innerRoot, "CUSTOMIZATION.md"), "inner delta\n");
+  const inner = descriptor({
+    id: "urn:test:descriptor-ingestion-inner",
+    name: "review-inner",
+    owned: await payloadFingerprint(innerRoot),
+    sourceFingerprint: await fingerprintPath(sourceRoot),
+  });
+  await writeDescriptor(innerRoot, inner);
+  const innerEffective = fingerprintValues(
+    [
+      inner.id,
+      "delta",
+      inner.customization,
+      inner.source.effective_fingerprint,
+      inner.owned_payload.reviewed_fingerprint,
+    ],
+    "skill-customization-overlay-effective-v1",
+  );
+
+  await mkdir(outerRoot);
+  await writeFile(path.join(outerRoot, "SKILL.md"), "outer dispatcher\n");
+  await writeFile(path.join(outerRoot, "CUSTOMIZATION.md"), "outer delta\n");
+  const outer = descriptor({
+    id: "urn:test:descriptor-ingestion-outer",
+    name: "review-outer",
+    owned: await payloadFingerprint(outerRoot),
+    source: {
+      skill_name: inner.name,
+      kind: "customization",
+      id: inner.id,
+      type: inner.type,
+      license: inner.license,
+      effective_fingerprint: innerEffective,
+    },
+  });
+  await writeDescriptor(outerRoot, outer);
+
+  const roots = [{ path: root, scope: "workspace", origin: "fixture" }];
+  const discovery = await discoverFixtureSkills({
+    input: outer.name,
+    roots,
+    managerRecords: [],
+  });
+  assert.equal(discovery.groups[0].copies[0].classification, "customization");
+
+  const innerChecked = await readCheckedDescriptor(
+    path.join(innerRoot, "customization.json"),
+  );
+  const outerChecked = await readCheckedDescriptor(
+    path.join(outerRoot, "customization.json"),
+  );
+  const statePath = path.join(root, "state", "bindings.json");
+  for (const [checked, sourcePath] of [
+    [innerChecked, sourceRoot],
+    [outerChecked, innerRoot],
+  ]) {
+    await bindCustomization({
+      descriptor: checked.descriptor,
+      sourcePath,
+      context: "fixture",
+      statePath,
+      roots,
+      interactive: true,
+      confirm: async () => true,
+    });
+  }
+
+  const execution = await preflightCustomization({
+    descriptorPath: outerChecked.location.descriptorPath,
+    context: "fixture",
+    statePath,
+    roots,
+  });
+  assert.equal(execution.status, "ready");
+  assert.deepEqual(execution.steps.map(({ role }) => role), [
+    "workflow",
+    "delta",
+    "delta",
+  ]);
+});
+
+test("a discovered fork is readable through the checked runtime interface", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-ingestion-fork-"));
+  const forkRoot = path.join(root, "review-fork");
+  const snapshotRoot = path.join(forkRoot, "provenance", "source");
+  await mkdir(snapshotRoot, { recursive: true });
+  await writeFile(path.join(snapshotRoot, "SKILL.md"), "Source workflow.\n");
+  await writeFile(path.join(forkRoot, "SKILL.md"), "dispatcher\n");
+  await writeFile(path.join(forkRoot, "CUSTOMIZATION.md"), "fork workflow\n");
+  const diffPath = path.join(forkRoot, "provenance", "source.diff");
+  await writeFile(
+    diffPath,
+    "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-Source workflow.\n+dispatcher\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+fork workflow\n",
+  );
+  const snapshotFingerprint = await fingerprintPath(snapshotRoot);
+  const fork = descriptor({
+    id: "urn:test:descriptor-ingestion-fork",
+    type: "fork",
+    name: "review-fork",
+    owned: await payloadFingerprint(forkRoot),
+    sourceFingerprint: snapshotFingerprint,
+    fork: {
+      snapshot: "provenance/source",
+      diff: "provenance/source.diff",
+      snapshot_fingerprint: snapshotFingerprint,
+      diff_fingerprint: await fingerprintFile(diffPath),
+    },
+  });
+  await writeDescriptor(forkRoot, fork);
+
+  const roots = [{ path: root, scope: "workspace", origin: "fixture" }];
+  const discovery = await discoverFixtureSkills({
+    input: fork.name,
+    roots,
+    managerRecords: [],
+  });
+  assert.equal(discovery.groups[0].copies[0].classification, "customization");
+  const checked = await readCheckedDescriptor(
+    path.join(forkRoot, "customization.json"),
+  );
+  const execution = await preflightCustomization({
+    descriptorPath: checked.location.descriptorPath,
+    context: "fixture",
+    statePath: path.join(root, "state", "bindings.json"),
+    roots,
+  });
+  assert.equal(execution.status, "ready");
+  assert.deepEqual(execution.steps.map(({ role }) => role), ["workflow"]);
+});
+
+test("an invalid descriptor file keeps Discovery's read-style diagnostic", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-ingestion-discovery-read-"));
+  const customizationRoot = path.join(root, "review-overlay");
+  await mkdir(path.join(customizationRoot, "customization.json"), { recursive: true });
+  await writeFile(path.join(customizationRoot, "SKILL.md"), "dispatcher\n");
+
+  await assert.rejects(
+    discoverFixtureSkills({
+      input: "review-overlay",
+      roots: [{ path: root, scope: "workspace", origin: "fixture" }],
+      managerRecords: [],
+    }),
+    (error) => {
+      assert.equal(error.code, "NO_LOCAL_COPY");
+      assert.match(
+        error.details.candidateDiagnostics[0].message,
+        /cannot read adjacent customization metadata/,
+      );
+      return true;
+    },
+  );
 });
 
 test("unsafe discovered customization metadata remains a Discovery diagnostic", async () => {

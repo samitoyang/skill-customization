@@ -428,7 +428,7 @@ async function adjacentCustomization(directory) {
       { code: "MALFORMED_CUSTOMIZATION_METADATA", details: first.details },
     );
   }
-  if (first?.stage === "read") {
+  if (first?.stage === "read" || first?.artifactKind === "descriptor") {
     throw new DiscoveryError(
       `cannot read adjacent customization metadata ${descriptorPath}: ${first.causeMessage ?? first.message}`,
       { code: "MALFORMED_CUSTOMIZATION_METADATA", details: first.details },

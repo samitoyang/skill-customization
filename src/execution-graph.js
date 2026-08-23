@@ -64,6 +64,16 @@ function matchesCustomizationSource(source, descriptor) {
     && source.license === descriptor.license;
 }
 
+async function checkedCustomizationSource(source, root) {
+  const descriptorPath = path.join(root, "customization.json");
+  const checked = await readCheckedDescriptor(descriptorPath);
+  return {
+    descriptorPath,
+    checked,
+    matches: matchesCustomizationSource(source, checked.descriptor),
+  };
+}
+
 async function forkTrackingAdvisory(descriptor, {
   customizationRoot,
   context,
@@ -122,17 +132,15 @@ async function forkTrackingAdvisory(descriptor, {
     const expected = descriptor.source.effective_fingerprint;
     let current;
     if (descriptor.source.kind === "customization") {
-      const nestedDescriptorPath = path.join(root, "customization.json");
-      const nestedCheckedDescriptor = await readCheckedDescriptor(nestedDescriptorPath);
-      const nestedDescriptor = nestedCheckedDescriptor.descriptor;
-      if (!matchesCustomizationSource(descriptor.source, nestedDescriptor)) {
+      const nested = await checkedCustomizationSource(descriptor.source, root);
+      if (!nested.matches) {
         return {
           code: "tracking-binding-invalid",
           message: "The optional fork tracking binding does not match the reviewed customization identity; fork execution is unaffected.",
         };
       }
       const tracked = await visit({
-        descriptorPath: nestedDescriptorPath,
+        descriptorPath: nested.descriptorPath,
         context,
         statePath,
         roots,
@@ -142,7 +150,7 @@ async function forkTrackingAdvisory(descriptor, {
         activeIds,
         activePaths,
         bindings,
-        checkedDescriptor: nestedCheckedDescriptor,
+        checkedDescriptor: nested.checked,
       });
       if (tracked.status === "maintenance-required") {
         return {
@@ -290,10 +298,8 @@ async function visit({
 
   let sourceResult;
   if (descriptor.source.kind === "customization") {
-    const nestedDescriptorPath = path.join(boundRoot, "customization.json");
-    const nestedCheckedDescriptor = await readCheckedDescriptor(nestedDescriptorPath);
-    const nestedDescriptor = nestedCheckedDescriptor.descriptor;
-    if (!matchesCustomizationSource(descriptor.source, nestedDescriptor)) {
+    const nested = await checkedCustomizationSource(descriptor.source, boundRoot);
+    if (!nested.matches) {
       return maintenance(
         descriptor,
         root,
@@ -302,7 +308,7 @@ async function visit({
       );
     }
     sourceResult = await visit({
-      descriptorPath: nestedDescriptorPath,
+      descriptorPath: nested.descriptorPath,
       context,
       statePath,
       roots,
@@ -312,7 +318,7 @@ async function visit({
       activeIds: nextIds,
       activePaths: nextPaths,
       bindings,
-      checkedDescriptor: nestedCheckedDescriptor,
+      checkedDescriptor: nested.checked,
     });
     if (sourceResult.status === "maintenance-required") return sourceResult;
     if (
