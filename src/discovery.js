@@ -441,12 +441,17 @@ async function adjacentCustomization(directory) {
 }
 
 async function candidateFromDirectory(directory, rootInfo) {
-  const entrypoint = path.join(directory, "SKILL.md");
-  const markdown = await readFile(entrypoint, "utf8");
   const realDirectory = await realpath(directory).catch(() => path.resolve(directory));
   const customization = await adjacentCustomization(realDirectory);
+  const entrypoint = path.join(
+    directory,
+    customization?.entrypoint ?? "SKILL.md",
+  );
+  const markdown = await readFile(entrypoint, "utf8");
   return {
-    name: parseSkillMetadata(markdown).name ?? path.basename(directory),
+    name: customization?.name
+      ?? parseSkillMetadata(markdown).name
+      ?? path.basename(directory),
     path: path.resolve(directory),
     realPath: realDirectory,
     entrypoint,

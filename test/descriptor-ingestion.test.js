@@ -391,6 +391,36 @@ test("an invalid descriptor file keeps Discovery's read-style diagnostic", async
   );
 });
 
+test("an invalid declared entrypoint remains a Discovery diagnostic", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-ingestion-entrypoint-"));
+  const customizationRoot = path.join(root, "review-overlay");
+  await mkdir(path.join(customizationRoot, "SKILL.md"), { recursive: true });
+  await writeFile(path.join(customizationRoot, "CUSTOMIZATION.md"), "delta\n");
+  const value = descriptor({
+    owned: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    sourceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  await writeDescriptor(customizationRoot, value);
+
+  await assert.rejects(
+    discoverFixtureSkills({
+      input: "review-overlay",
+      roots: [{ path: root, scope: "workspace", origin: "fixture" }],
+      managerRecords: [],
+    }),
+    (error) => {
+      assert.equal(error.code, "NO_LOCAL_COPY");
+      assert.equal(
+        error.details.candidateDiagnostics[0].code,
+        "MALFORMED_CUSTOMIZATION_METADATA",
+      );
+      assert.match(
+        error.details.candidateDiagnostics[0].message, /invalid customization metadata/);
+      return true;
+    },
+  );
+});
+
 test("unsafe discovered customization metadata remains a Discovery diagnostic", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-ingestion-discovery-error-"));
   const customizationRoot = path.join(root, "review-overlay");
