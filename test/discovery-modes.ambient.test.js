@@ -5,15 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { discoverAmbientSkills } from "./support/discovery-modes.js";
-
-async function writeSkill(root, name) {
-  const directory = path.join(root, name);
-  await mkdir(directory, { recursive: true });
-  await writeFile(
-    path.join(directory, "SKILL.md"),
-    `---\nname: ${name}\ndescription: fixture\n---\nUse it.\n`,
-  );
-}
+import { writeFixtureSkill } from "./support/discovery-fixture.js";
 
 test("ambient discovery is an explicit isolated opt-in", async () => {
   await assert.rejects(
@@ -60,7 +52,7 @@ test("ambient discovery is an explicit isolated opt-in", async () => {
   const home = path.join(temporary, "home");
   const cwd = path.join(temporary, "workspace");
   await Promise.all([mkdir(home), mkdir(cwd)]);
-  await writeSkill(path.join(home, ".codex", "skills"), "review");
+  await writeFixtureSkill(path.join(home, ".codex", "skills"), "review");
 
   const result = await discoverAmbientSkills({
     input: "review",

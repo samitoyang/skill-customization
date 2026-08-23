@@ -71,7 +71,6 @@ async function forkTrackingAdvisory(descriptor, {
   roots,
   managerRecords,
   activeSkills,
-  discoverySnapshot,
   depth,
   activeIds,
   activePaths,
@@ -109,7 +108,6 @@ async function forkTrackingAdvisory(descriptor, {
         roots,
         managerRecords,
         activeSkills: trackingInventory,
-        discoverySnapshot,
       });
     } catch (error) {
       return {
@@ -139,7 +137,6 @@ async function forkTrackingAdvisory(descriptor, {
         roots,
         managerRecords,
         activeSkills,
-        discoverySnapshot,
         depth: depth + 1,
         activeIds,
         activePaths,
@@ -183,7 +180,6 @@ async function visit({
   roots,
   managerRecords,
   activeSkills,
-  discoverySnapshot,
   depth,
   activeIds,
   activePaths,
@@ -238,7 +234,6 @@ async function visit({
       roots,
       managerRecords,
       activeSkills,
-      discoverySnapshot,
       depth,
       activeIds: nextIds,
       activePaths: nextPaths,
@@ -277,7 +272,6 @@ async function visit({
       roots,
       managerRecords,
       activeSkills: bindingInventory,
-      discoverySnapshot,
     });
   } catch (error) {
     return maintenance(descriptor, root, "binding-maintenance", error.message);
@@ -309,7 +303,6 @@ async function visit({
       roots,
       managerRecords,
       activeSkills,
-      discoverySnapshot,
       depth: depth + 1,
       activeIds: nextIds,
       activePaths: nextPaths,
@@ -380,7 +373,6 @@ export async function inspectCustomizationExecution({
   roots,
   managerRecords = [],
   activeSkills,
-  discoverySnapshot,
   bindings,
 }) {
   if (typeof context !== "string" || !context.trim()) {
@@ -393,7 +385,6 @@ export async function inspectCustomizationExecution({
     roots,
     managerRecords,
     activeSkills,
-    discoverySnapshot,
     depth: 1,
     activeIds: new Set(),
     activePaths: new Set(),

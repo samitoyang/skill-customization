@@ -31,10 +31,8 @@ import {
 } from "../src/fingerprint.js";
 import { generateLocalIdentity } from "../src/normalization.js";
 import { preflightCustomization } from "../src/preflight.js";
-import {
-  confirmDiscoverySelection,
-  discoverSkills,
-} from "../src/discovery.js";
+import { confirmDiscoverySelection } from "../src/discovery.js";
+import { discoverFixtureSkills } from "./support/discovery-modes.js";
 import { acquireStateLock } from "../src/state.js";
 
 function descriptor(activation = { mode: "coexist" }) {
@@ -937,7 +935,7 @@ test("binding persists and revalidates an auditable provenance choice", async ()
     },
   ];
   const roots = [{ path: path.dirname(source), scope: "global", origin: "personal" }];
-  const discovery = await discoverSkills({ input: source, roots, managerRecords });
+  const discovery = await discoverFixtureSkills({ input: source, roots, managerRecords });
   const group = discovery.groups[0];
   const chosenCopy = group.copies.find(({ owner }) => owner === "manager:asm");
   const confirmedSelection = confirmDiscoverySelection({
@@ -1036,7 +1034,7 @@ test("binding accepts an unambiguous checked selection with path-only confirmati
     0,
   );
   const roots = [{ path: path.dirname(source), scope: "global", origin: "personal" }];
-  const discovery = await discoverSkills({ input: source, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: source, roots, managerRecords: [] });
   const group = discovery.groups[0];
   const copy = group.copies[0];
   const confirmedSelection = confirmDiscoverySelection({
@@ -1103,7 +1101,7 @@ test("binding accepts confirmed repository-only plugin provenance", async () => 
       repository,
     }],
   }];
-  const discovery = await discoverSkills({ input: source, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: source, roots, managerRecords: [] });
   const group = discovery.groups[0];
   const chosenCopy = group.copies.find(({ owner }) => owner === "plugin:fixture-host");
   const repositoryOnlyProvenance = `repository:${repository}`;
@@ -1146,7 +1144,7 @@ test("binding accepts confirmed repository-only plugin provenance", async () => 
       .status,
     0,
   );
-  const updatedDiscovery = await discoverSkills({
+  const updatedDiscovery = await discoverFixtureSkills({
     input: source,
     roots,
     managerRecords: [],
@@ -1224,7 +1222,7 @@ test("binding persists the confirmed plugin identity", async () => {
       }),
     },
   };
-  const discovery = await discoverSkills({ input: source, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: source, roots, managerRecords: [] });
   const group = discovery.groups[0];
   const chosenCopy = group.copies.find(({ owner }) => owner === "plugin:fixture-host");
   const confirmedSelection = confirmDiscoverySelection({
@@ -1302,7 +1300,7 @@ test("confirmed aggregated plugin evidence retains versioned-cache recovery", as
     },
   };
   const roots = rootsFor(versionOne, versionOneRoot);
-  const discovery = await discoverSkills({ input: versionOne, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: versionOne, roots, managerRecords: [] });
   const group = discovery.groups[0];
   const confirmedSelection = confirmDiscoverySelection({
     discovery,
@@ -1392,7 +1390,7 @@ test("binding preserves a provenance choice made through a customization alias",
     0,
   );
   const roots = [{ path: root, scope: "global", origin: "personal" }];
-  const discovery = await discoverSkills({ input: alias, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: alias, roots, managerRecords: [] });
   const group = discovery.groups[0];
   assert.equal(group.conflict, true);
   const confirmedSelection = confirmDiscoverySelection({

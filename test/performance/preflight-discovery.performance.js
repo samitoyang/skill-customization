@@ -47,7 +47,7 @@ async function writeDescriptor(root, descriptor) {
 }
 
 await runPerformanceScenario({
-  scenario: "preflight-discovery-snapshot",
+  scenario: "preflight-discovery",
   lane: "fixture",
   iterations,
   warmupIterations: 1,
@@ -56,8 +56,8 @@ await runPerformanceScenario({
     maxP95Ms: 3000,
     maxMadMs: 500,
     exactWork: {
-      discovery_calls: iterations,
-      root_scans: iterations,
+      discovery_calls: 2 * iterations,
+      root_scans: 4 * iterations,
       git_probes: 0,
       manager_collections: 0,
       plugin_discovery_calls: 0,
@@ -159,10 +159,10 @@ await runPerformanceScenario({
       })
     );
     if (result.status !== "ready" || result.steps.length !== 3) {
-      throw new Error("preflight discovery snapshot changed");
+      throw new Error("preflight discovery result changed");
     }
-    if (metrics.discovery_calls !== 1 || metrics.root_scans !== 1) {
-      throw new Error("preflight repeated discovery work");
+    if (metrics.discovery_calls !== 2 || metrics.root_scans !== 4) {
+      throw new Error("preflight discovery work changed");
     }
     if (phase === "measure") {
       accumulatePerformanceMetrics(state.metrics, metrics);

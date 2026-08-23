@@ -212,7 +212,7 @@ test("preflight flattens recursive overlays from base workflow through inner and
   assert.equal(result.maintenanceHandler, null);
 });
 
-test("preflight reuses one discovery snapshot and refreshes it for the next operation", async () => {
+test("preflight refreshes discovery for each recursive operation", async () => {
   const item = await recursiveFixture();
   const metrics = {};
   const listener = ({ name, amount = 1 }) => {
@@ -227,8 +227,8 @@ test("preflight reuses one discovery snapshot and refreshes it for the next oper
       roots: item.roots,
     });
     assert.equal(first.status, "ready");
-    assert.equal(metrics.discovery_calls, 1);
-    assert.equal(metrics.root_scans, 1);
+    assert.equal(metrics.discovery_calls, 2);
+    assert.equal(metrics.root_scans, 4);
 
     await writeFile(
       path.join(item.base, "SKILL.md"),
@@ -243,8 +243,8 @@ test("preflight reuses one discovery snapshot and refreshes it for the next oper
     assert.equal(second.status, "maintenance-required");
     assert.equal(second.maintenanceHandler.reason, "source-drift");
     assert.equal(second.maintenanceHandler.customizationId, item.innerDescriptor.id);
-    assert.equal(metrics.discovery_calls, 2);
-    assert.equal(metrics.root_scans, 2);
+    assert.equal(metrics.discovery_calls, 4);
+    assert.equal(metrics.root_scans, 8);
   } finally {
     discoveryPerformanceChannel.unsubscribe(listener);
   }

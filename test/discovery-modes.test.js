@@ -9,16 +9,7 @@ import { discoveryPerformanceChannel } from "../src/performance-diagnostics.js";
 import {
   discoverFixtureSkills,
 } from "./support/discovery-modes.js";
-
-async function writeSkill(root, name) {
-  const directory = path.join(root, name);
-  await mkdir(directory, { recursive: true });
-  await writeFile(
-    path.join(directory, "SKILL.md"),
-    `---\nname: ${name}\ndescription: fixture\n---\nUse it.\n`,
-  );
-  return directory;
-}
+import { writeFixtureSkill } from "./support/discovery-fixture.js";
 
 test("fixture discovery requires declared roots and manager records", async () => {
   await assert.rejects(
@@ -34,7 +25,7 @@ test("fixture discovery requires declared roots and manager records", async () =
 test("fixture discovery cannot invoke ambient plugin or manager inventory", async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "fixture-discovery-mode-"));
   const skillsRoot = path.join(temporary, "skills");
-  const source = await writeSkill(skillsRoot, "review");
+  const source = await writeFixtureSkill(skillsRoot, "review");
   const unexpected = async () => assert.fail("ambient inventory was consulted");
 
   const result = await discoverFixtureSkills({
@@ -52,15 +43,15 @@ test("fixture discovery cannot invoke ambient plugin or manager inventory", asyn
   );
 });
 
-test("Git provenance is cached per repository and skipped for non-repository candidates", async () => {
+test("Git provenance is collected for repository candidates and skipped for non-repository candidates", async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "git-provenance-probe-"));
   const repositoryRoot = path.join(temporary, "repository");
   const repositorySkills = path.join(repositoryRoot, "skills");
   const nonRepositorySkills = path.join(temporary, "non-repository", "skills");
   const repository = "https://github.com/example/provenance";
-  const review = await writeSkill(repositorySkills, "review");
-  const planning = await writeSkill(repositorySkills, "planning");
-  const standalone = await writeSkill(nonRepositorySkills, "standalone");
+  const review = await writeFixtureSkill(repositorySkills, "review");
+  const planning = await writeFixtureSkill(repositorySkills, "planning");
+  const standalone = await writeFixtureSkill(nonRepositorySkills, "standalone");
 
   assert.equal(spawnSync("git", ["init", "-q", repositoryRoot]).status, 0);
   assert.equal(
@@ -86,7 +77,7 @@ test("Git provenance is cached per repository and skipped for non-repository can
     discoveryPerformanceChannel.unsubscribe(listener);
   }
 
-  assert.equal(metrics.git_probes, 1);
+  assert.equal(metrics.git_probes, 2);
   const groups = new Map(result.groups.map((group) => [group.name, group]));
   assert.deepEqual(groups.get("review").provenance, [
     `repository:${repository}#skills/review/SKILL.md`,
@@ -104,7 +95,7 @@ test("Unavailable Git metadata remains fail-soft after a single repository probe
   const temporary = await mkdtemp(path.join(os.tmpdir(), "git-provenance-unavailable-"));
   const repositoryRoot = path.join(temporary, "repository");
   const skillsRoot = path.join(repositoryRoot, "skills");
-  await writeSkill(skillsRoot, "review");
+  await writeFixtureSkill(skillsRoot, "review");
 
   assert.equal(spawnSync("git", ["init", "-q", repositoryRoot]).status, 0);
   assert.equal(

@@ -490,74 +490,32 @@ async function scanRoot(rootInfo) {
   };
 }
 
-function cacheGitRepositoryRoot(cache, paths, repositoryRoot) {
-  for (const directory of paths) cache.set(directory, repositoryRoot);
-}
-
-async function findGitRepositoryRoot(directory, cache) {
-  const canonicalDirectory = await realpath(directory).catch(() =>
-    path.resolve(directory),
-  );
-  const traversed = [];
-  let current = canonicalDirectory;
-  while (true) {
-    if (cache.has(current)) {
-      const repositoryRoot = cache.get(current);
-      cacheGitRepositoryRoot(cache, traversed, repositoryRoot);
-      return { canonicalDirectory, repositoryRoot };
-    }
-    traversed.push(current);
-    try {
-      await lstat(path.join(current, ".git"));
-      cacheGitRepositoryRoot(cache, traversed, current);
-      return { canonicalDirectory, repositoryRoot: current };
-    } catch {
-      const parent = path.dirname(current);
-      if (parent === current) {
-        cacheGitRepositoryRoot(cache, traversed, undefined);
-        return { canonicalDirectory, repositoryRoot: undefined };
-      }
-      current = parent;
-    }
-  }
-}
-
-/**
- * Probe Git provenance once per repository during one discovery pass.
- *
- * The filesystem marker check avoids launching Git for ordinary installed
- * skills. A repository-root cache then lets sibling skills share one remote
- * lookup while their upstream entrypoints are derived locally.
- */
-function createGitEvidenceProbe() {
-  const repositoryRootCache = new Map();
-  const repositoryPromises = new Map();
-
-  return async function gitEvidence(directory) {
-    const { canonicalDirectory, repositoryRoot } =
-      await findGitRepositoryRoot(directory, repositoryRootCache);
-    if (!repositoryRoot) return undefined;
-
-    let repositoryPromise = repositoryPromises.get(repositoryRoot);
-    if (!repositoryPromise) {
-      publishDiscoveryPerformanceMetric("git_probes");
-      repositoryPromise = execFile("git", [
-        "-C",
-        canonicalDirectory,
-        "config",
-        "--get",
-        "remote.origin.url",
-      ])
-        .then(({ stdout }) => normalizeRepositoryUrl(stdout.trim()))
-        .catch(() => undefined);
-      repositoryPromises.set(repositoryRoot, repositoryPromise);
-    }
-    const repository = await repositoryPromise;
-    if (!repository) return undefined;
-
+async function gitEvidence(directory) {
+  try {
+    const { stdout: topLevelOutput } = await execFile("git", [
+      "-C",
+      directory,
+      "rev-parse",
+      "--show-toplevel",
+    ]);
+    publishDiscoveryPerformanceMetric("git_probes");
+    const topLevel = await realpath(topLevelOutput.trim()).catch(() =>
+      path.resolve(topLevelOutput.trim()),
+    );
+    const canonicalDirectory = await realpath(directory).catch(() =>
+      path.resolve(directory),
+    );
+    const { stdout: remoteOutput } = await execFile("git", [
+      "-C",
+      directory,
+      "config",
+      "--get",
+      "remote.origin.url",
+    ]);
+    const repository = normalizeRepositoryUrl(remoteOutput.trim());
     const upstreamPath = normalizeUpstreamEntrypoint(
       path
-        .relative(repositoryRoot, path.join(canonicalDirectory, "SKILL.md"))
+        .relative(topLevel, path.join(canonicalDirectory, "SKILL.md"))
         .split(path.sep)
         .join("/"),
     );
@@ -567,7 +525,9 @@ function createGitEvidenceProbe() {
       upstream_path: upstreamPath,
       upstreamPath,
     };
-  };
+  } catch {
+    return undefined;
+  }
 }
 
 async function embeddedEvidence(directory) {
@@ -872,7 +832,6 @@ export async function discoverSkills({
     if (!deduped.has(key)) deduped.set(key, candidate);
   }
   const enrichmentCandidates = [...deduped.values()];
-  const gitEvidence = createGitEvidenceProbe();
   const enrichmentResults = await Promise.allSettled(
     enrichmentCandidates.map(async (candidate) => {
       if (
@@ -884,7 +843,7 @@ export async function discoverSkills({
           path: path.resolve(explicitDirectory),
         });
       }
-      const git = await gitEvidence(candidate.realPath ?? candidate.path);
+      const git = await gitEvidence(candidate.path);
       if (git) candidate.evidence.push(git);
       candidate.evidence.push(...managerEvidenceFor(candidate, managerRecords));
       const embedded = await embeddedEvidence(candidate.path);
@@ -972,86 +931,6 @@ export async function discoverSkills({
     candidateDiagnostics,
     unresolvedManagerRecords: managerRecords.filter(({ path: managerPath }) => !managerPath),
   };
-}
-
-/**
- * Create a request-scoped discovery snapshot for one operation.
- *
- * The inventory is intentionally not process-global. Callers that already
- * discovered the host can seed the snapshot; otherwise the first inventory
- * request performs one discovery call. Targeted queries are memoized only for
- * this operation, so repeated checks observe one consistent input set.
- */
-export function createDiscoverySnapshot({
-  discovery,
-  roots,
-  managerRecords = [],
-  options = {},
-  discover = discoverSkills,
-} = {}) {
-  if (discovery !== undefined && (!discovery || typeof discovery !== "object")) {
-    throw new TypeError("discovery snapshot seed must be an object");
-  }
-  if (typeof discover !== "function") {
-    throw new TypeError("discovery snapshot adapter must be a function");
-  }
-  const defaults = {
-    ...options,
-    ...(roots === undefined ? {} : { roots }),
-    managerRecords,
-  };
-  let inventoryPromise = discovery === undefined
-    ? undefined
-    : Promise.resolve(discovery);
-  const targeted = new Map();
-
-  async function inventory() {
-    inventoryPromise ??= discover(defaults);
-    return inventoryPromise;
-  }
-
-  async function discoverTarget({ input } = {}) {
-    if (input === undefined) return inventory();
-    const key = JSON.stringify(input);
-    if (!targeted.has(key)) {
-      targeted.set(key, discover({ ...defaults, input }));
-    }
-    return targeted.get(key);
-  }
-
-  return Object.freeze({ inventory, discover: discoverTarget });
-}
-
-/**
- * Select one source directory from an inventory without rescanning its roots.
- * Explicit evidence is added because a source-path discovery has historically
- * marked that concrete path as an explicit observation.
- */
-export function selectDiscoverySource(
-  discovery,
-  { sourceRoot, explicitInput } = {},
-) {
-  if (!discovery || !Array.isArray(discovery.groups)) return undefined;
-  const canonicalSource = path.resolve(sourceRoot);
-  const groups = discovery.groups.flatMap((group) => {
-    const copies = group.copies.filter((copy) =>
-      path.resolve(copy.realPath ?? copy.path) === canonicalSource,
-    );
-    if (copies.length === 0) return [];
-    const explicitPath = path.resolve(explicitInput ?? sourceRoot);
-    return groupCandidates(
-      copies.map((copy) => ({
-        ...copy,
-        name: group.name,
-        fingerprint: group.fingerprint,
-        evidence: [
-          ...(copy.evidence ?? []),
-          { kind: "explicit", path: explicitPath },
-        ],
-      })),
-    );
-  });
-  return groups[0];
 }
 
 export function confirmDiscoverySelection({

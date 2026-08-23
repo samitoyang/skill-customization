@@ -4,10 +4,7 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { assertValidDescriptor, readDescriptor } from "./descriptor.js";
-import {
-  discoverSkills,
-  selectDiscoverySource,
-} from "./discovery.js";
+import { discoverSkills } from "./discovery.js";
 import { BindingError } from "./errors.js";
 import { inspectCustomizationExecution } from "./execution-graph.js";
 import { fingerprintFile, fingerprintPath } from "./fingerprint.js";
@@ -420,7 +417,6 @@ async function inspectBindingSource({
   roots,
   managerRecords,
   confirmedSelection,
-  discoverySnapshot,
   requireLocalIdentityMatch = true,
 }) {
   const resolved = path.resolve(sourcePath);
@@ -449,25 +445,13 @@ async function inspectBindingSource({
       { code: "BINDING_SOURCE_NAME_MISMATCH" },
     );
   }
-  const discoveryInput = sourcePolicy.discoveryInput({ resolved, sourceRoot });
   let discovery;
   try {
-    if (discoverySnapshot) {
-      const inventory = await discoverySnapshot.inventory();
-      const selected = selectDiscoverySource(inventory, {
-        sourceRoot,
-        explicitInput: discoveryInput,
-      });
-      discovery = selected
-        ? { ...inventory, groups: [selected] }
-        : await discoverySnapshot.discover({ input: discoveryInput });
-    } else {
-      discovery = await discoverSkills({
-        input: discoveryInput,
-        roots,
-        managerRecords,
-      });
-    }
+    discovery = await discoverSkills({
+      input: sourcePolicy.discoveryInput({ resolved, sourceRoot }),
+      roots,
+      managerRecords,
+    });
   } catch (error) {
     throw new BindingError(`binding source is not a discoverable skill: ${error.message}`, {
       code: "BINDING_SOURCE_INVALID",
@@ -600,7 +584,6 @@ async function recoverCustomizationFingerprint({
     roots,
     managerRecords,
     activeSkills,
-    discoverySnapshot,
   } = recoveryContext;
   if (!matchesCustomizationCopy(descriptor.source, group, copy)) return undefined;
   const execution = await inspectCustomizationExecution({
@@ -610,7 +593,6 @@ async function recoverCustomizationFingerprint({
     roots,
     managerRecords,
     activeSkills,
-    discoverySnapshot,
     bindings: BINDING_OPERATIONS,
   }).catch(() => undefined);
   return execution?.status === "maintenance-required"
@@ -682,7 +664,6 @@ async function recoverMissingPluginBinding({
     descriptor,
     roots,
     managerRecords,
-    discoverySnapshot,
   } = recoveryContext;
   const { pluginCache, pluginIdentity } = binding.source;
   const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
@@ -695,13 +676,11 @@ async function recoverMissingPluginBinding({
   // stable plugin identity and one already reviewed effective fingerprint.
   let discovery;
   try {
-    discovery = discoverySnapshot
-      ? await discoverySnapshot.inventory()
-      : await discoverSkills({
-          input: descriptor.source.skill_name,
-          roots,
-          managerRecords,
-        });
+    discovery = await discoverSkills({
+      input: descriptor.source.skill_name,
+      roots,
+      managerRecords,
+    });
   } catch (error) {
     if (error.code === "NO_LOCAL_COPY") return undefined;
     throw error;
@@ -778,7 +757,6 @@ export async function bindCustomization({
   activeSkills,
   managerRecords = [],
   confirmedSelection,
-  discoverySnapshot,
   now = () => new Date().toISOString(),
 }) {
   assertValidDescriptor(descriptor);
@@ -795,7 +773,6 @@ export async function bindCustomization({
       roots,
       managerRecords,
       activeSkills,
-      discoverySnapshot,
     });
   }
   if (!interactive) {
@@ -809,7 +786,6 @@ export async function bindCustomization({
     roots,
     managerRecords,
     confirmedSelection,
-    discoverySnapshot,
   });
   const classified = await classifyBindingScope({
     sourcePath,
@@ -890,7 +866,6 @@ export async function bindCustomization({
     roots,
     managerRecords,
     activeSkills,
-    discoverySnapshot,
   }).then((result) => result.binding);
 }
 
@@ -912,7 +887,6 @@ export async function validateBinding({
   roots,
   managerRecords = [],
   activeSkills,
-  discoverySnapshot,
 }) {
   assertValidDescriptor(descriptor);
   if (!binding || typeof binding !== "object" || !binding.source) {
@@ -961,7 +935,6 @@ export async function validateBinding({
     roots,
     managerRecords,
     confirmedSelection: binding.source.selection,
-    discoverySnapshot,
     requireLocalIdentityMatch: false,
   });
   return { binding, inspection, currentTarget };
@@ -974,7 +947,6 @@ export async function resolveBinding({
   roots,
   managerRecords = [],
   activeSkills,
-  discoverySnapshot,
 }) {
   assertValidDescriptor(descriptor);
   const store = await readBindingStore(statePath);
@@ -993,7 +965,6 @@ export async function resolveBinding({
         roots,
         managerRecords,
         activeSkills,
-        discoverySnapshot,
       })
     ).binding;
   } catch (error) {
@@ -1005,7 +976,6 @@ export async function resolveBinding({
         roots,
         managerRecords,
         activeSkills,
-        discoverySnapshot,
       };
       const recovered = await recoverMissingPluginBinding({
         binding,
@@ -1028,7 +998,6 @@ export async function resolveBinding({
           roots,
           managerRecords,
           activeSkills,
-          discoverySnapshot,
         });
       }
     }
@@ -1060,7 +1029,6 @@ export async function resolveBinding({
           roots,
           managerRecords,
           activeSkills,
-          discoverySnapshot,
         });
       }
     }

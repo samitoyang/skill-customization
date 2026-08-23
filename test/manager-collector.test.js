@@ -4,13 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { discoverSkills } from "../src/discovery.js";
 import {
   collectManagerRecords,
   defaultManagerSources,
   managerSkillRoots,
 } from "../src/manager-collector.js";
 import { classifyBindingScope } from "../src/bindings.js";
+import { discoverFixtureSkills } from "./support/discovery-modes.js";
 
 const fixture = async (name) =>
   readFile(new URL(`./fixtures/managers/${name}.json`, import.meta.url), "utf8");
@@ -61,19 +61,25 @@ test("discovery scans manager-owned paths but null-path provenance cannot satisf
     scope: "global",
     source: { kind: "repository", repository },
   };
-  const found = await discoverSkills({
+  const collectedLocal = {
+    records: [localRecord],
+    diagnostics: [],
+  };
+  const found = await discoverFixtureSkills({
     input: repository,
     roots: [],
-    managerCollector: async () => ({ records: [localRecord], diagnostics: [] }),
+    managerRecords: collectedLocal.records,
+    rootDiagnostics: collectedLocal.diagnostics,
   });
   assert.equal(found.groups[0].copies[0].owner, "manager:asm");
 
   const metadataOnly = { ...localRecord, path: null };
   await assert.rejects(
-    discoverSkills({
+    discoverFixtureSkills({
       input: repository,
       roots: [],
-      managerCollector: async () => ({ records: [metadataOnly], diagnostics: [] }),
+      managerRecords: [metadataOnly],
+      rootDiagnostics: [],
     }),
     (error) =>
       error.code === "NO_LOCAL_COPY" && error.details.metadataMatches.length === 1,

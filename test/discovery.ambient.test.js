@@ -8,10 +8,10 @@ import {
   activeSkillInventory,
   confirmDiscoverySelection,
   configuredHostSkillRoots,
-  discoverSkills,
   hostSkillRoots,
 } from "../src/discovery.js";
 import { fingerprintPath } from "../src/fingerprint.js";
+import { discoverAmbientSkills } from "./support/discovery-modes.js";
 
 async function writeSkill(root, folder, name = folder, body = "Use this skill.\n") {
   const directory = path.join(root, folder);
@@ -39,7 +39,6 @@ test("host roots include Codex, Claude additions, and Copilot env without a home
   assert.ok(paths.includes("/opt/claude-project/.claude/skills"));
   assert.equal(paths.some((value) => value === home), false);
 });
-
 test("ambient discovery finds Claude plugin cache roots with manifest provenance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-plugin-"));
   const home = path.join(root, "home");
@@ -71,7 +70,7 @@ test("ambient discovery finds Claude plugin cache roots with manifest provenance
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "review",
     home,
     cwd: path.join(root, "workspace"),
@@ -100,6 +99,9 @@ test("ambient discovery finds Claude plugin cache roots with manifest provenance
     "repository:https://github.com/example/reviewer",
   ]);
 });
+
+
+
 
 test("Claude project-scoped installs activate only inside their bound project", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-project-plugin-"));
@@ -139,7 +141,7 @@ test("Claude project-scoped installs activate only inside their bound project", 
     }),
   );
 
-  const active = await discoverSkills({
+  const active = await discoverAmbientSkills({
     input: "review",
     home,
     cwd: path.join(project, "nested"),
@@ -152,7 +154,7 @@ test("Claude project-scoped installs activate only inside their bound project", 
     { name: "review", path: skill, realPath: await realpath(skill) },
   ]);
 
-  const inactive = await discoverSkills({
+  const inactive = await discoverAmbientSkills({
     input: "review",
     home,
     cwd: foreignProject,
@@ -162,6 +164,10 @@ test("Claude project-scoped installs activate only inside their bound project", 
   assert.equal(inactive.groups[0].copies[0].active, false);
   assert.deepEqual(activeSkillInventory(inactive), []);
 });
+
+
+
+
 
 test("multi-host installs select each host's own plugin manifest", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-multi-host-plugin-"));
@@ -216,7 +222,7 @@ test("multi-host installs select each host's own plugin manifest", async () => {
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: { CODEX_HOME: path.join(home, ".codex") },
@@ -248,35 +254,9 @@ test("multi-host installs select each host's own plugin manifest", async () => {
   ]);
 });
 
-test("ambient plugin discovery is opt-out and explicit roots remain authoritative", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-policy-"));
-  const home = path.join(root, "home");
-  await writeSkill(
-    path.join(home, ".claude", "plugins", "cache", "official", "reviewer", "1", "skills"),
-    "review",
-  );
 
-  const disabled = await discoverSkills({
-    home,
-    cwd: path.join(root, "workspace"),
-    env: {},
-    includePlugins: false,
-    managerRecords: [],
-  });
-  assert.equal(disabled.groups.length, 0);
-  assert.equal(disabled.searchedRoots.some(({ owner }) => owner.startsWith("plugin:")), false);
 
-  const explicit = await discoverSkills({
-    roots: [],
-    additionalRoots: [path.join(home, ".claude", "plugins")],
-    home,
-    cwd: path.join(root, "workspace"),
-    env: {},
-    managerRecords: [],
-  });
-  assert.equal(explicit.groups.length, 0);
-  assert.equal(explicit.searchedRoots.length, 0);
-});
+
 
 test("Claude sync discovery is gated and manifest directories stay bounded", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-bounded-"));
@@ -306,7 +286,7 @@ test("Claude sync discovery is gated and manifest directories stay bounded", asy
   await writeSkill(path.join(home, "unlisted"), "home-only");
 
   await assert.rejects(
-    discoverSkills({
+    discoverAmbientSkills({
       input: "synced-review",
       home,
       cwd: path.join(root, "workspace"),
@@ -316,7 +296,7 @@ test("Claude sync discovery is gated and manifest directories stay bounded", asy
     (error) => error.code === "NO_LOCAL_COPY",
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "manifest-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -328,7 +308,7 @@ test("Claude sync discovery is gated and manifest directories stay bounded", asy
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
   assert.equal(result.groups.some(({ name }) => name === "home-only"), false);
 
-  const synced = await discoverSkills({
+  const synced = await discoverAmbientSkills({
     input: "synced-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -338,12 +318,16 @@ test("Claude sync discovery is gated and manifest directories stay bounded", asy
   assert.equal(synced.groups[0].copies[0].plugin.marketplace, "synced");
 });
 
+
+
+
+
 test("Claude synced skills remain discoverable when no plugin cache exists", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-sync-only-"));
   const home = path.join(root, "home");
   await writeSkill(path.join(home, ".claude", "skills", "synced"), "sync-only");
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "sync-only",
     home,
     cwd: path.join(root, "workspace"),
@@ -352,6 +336,10 @@ test("Claude synced skills remain discoverable when no plugin cache exists", asy
   });
   assert.equal(result.groups[0].name, "sync-only");
 });
+
+
+
+
 
 test("invalid plugin siblings and escaping aliases are isolated from valid candidates", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-diagnostics-"));
@@ -372,7 +360,7 @@ test("invalid plugin siblings and escaping aliases are isolated from valid candi
   await mkdir(outside, { recursive: true });
   await symlink(outside, path.join(cache, "escaped"), "dir");
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "valid-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -384,6 +372,10 @@ test("invalid plugin siblings and escaping aliases are isolated from valid candi
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
 });
 
+
+
+
+
 test("plugin host roots require canonical containment", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-alias-"));
   const home = path.join(root, "home");
@@ -393,7 +385,7 @@ test("plugin host roots require canonical containment", async () => {
   await mkdir(codexHome, { recursive: true });
   await symlink(outsidePlugins, path.join(codexHome, "plugins"), "dir");
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: { CODEX_HOME: codexHome },
@@ -402,6 +394,10 @@ test("plugin host roots require canonical containment", async () => {
   assert.equal(result.groups.length, 0);
   assert.ok(result.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
 });
+
+
+
+
 
 test("plugin discovery accepts contained directories beginning with two dots", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-dot-prefix-"));
@@ -413,7 +409,7 @@ test("plugin discovery accepts contained directories beginning with two dots", a
     JSON.stringify({ name: "dot-prefix-plugin" }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "dot-prefix-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -427,6 +423,10 @@ test("plugin discovery accepts contained directories beginning with two dots", a
     false,
   );
 });
+
+
+
+
 
 test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plugin layouts", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-hosts-"));
@@ -503,7 +503,7 @@ test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plug
   const unlistedWorkspacePlugin = path.join(repository, ".agents", "plugins", "unlisted");
   await writeSkill(unlistedWorkspacePlugin, "unlisted-plugin-review");
 
-  const discovery = await discoverSkills({
+  const discovery = await discoverAmbientSkills({
     home,
     cwd: nested,
     env: {},
@@ -524,6 +524,10 @@ test("ambient discovery honors Codex, Gemini, Cursor, and bounded workspace plug
     "repository:https://github.com/example/gemini-plugin",
   ]);
 });
+
+
+
+
 
 test("Cursor local plugins honor documented manifests and marketplace roots", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-local-"));
@@ -625,7 +629,7 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: {},
@@ -660,6 +664,10 @@ test("Cursor local plugins honor documented manifests and marketplace roots", as
   assert.equal(byName.has("cursor-undocumented-default-review"), false);
 });
 
+
+
+
+
 test("Cursor skips marketplace entries when the declared plugin root is invalid", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-invalid-plugin-root-"));
   const home = path.join(root, "home");
@@ -682,7 +690,7 @@ test("Cursor skips marketplace entries when the declared plugin root is invalid"
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "direct-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -699,6 +707,10 @@ test("Cursor skips marketplace entries when the declared plugin root is invalid"
       && diagnosticPath === marketplacePath,
   ));
 });
+
+
+
+
 
 test("Cursor root marketplaces own every in-root alias of declared plugins", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-marketplace-owner-"));
@@ -722,7 +734,7 @@ test("Cursor root marketplaces own every in-root alias of declared plugins", asy
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "owned-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -741,6 +753,10 @@ test("Cursor root marketplaces own every in-root alias of declared plugins", asy
     "local:plugin:cursor:team-marketplace:owned-plugin",
   ]);
 });
+
+
+
+
 
 test("Cursor marketplace ownership survives declarations that emit no roots", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-empty-roots-"));
@@ -762,7 +778,7 @@ test("Cursor marketplace ownership survives declarations that emit no roots", as
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: {},
@@ -771,6 +787,10 @@ test("Cursor marketplace ownership survives declarations that emit no roots", as
 
   assert.equal(result.groups.some(({ name }) => name === "owned-review"), false);
 });
+
+
+
+
 
 test("Cursor marketplace plugin roots bound every declared entry", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-plugin-boundary-"));
@@ -800,7 +820,7 @@ test("Cursor marketplace plugin roots bound every declared entry", async () => {
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: {},
@@ -822,6 +842,10 @@ test("Cursor marketplace plugin roots bound every declared entry", async () => {
       code === "PLUGIN_ROOT_ESCAPE" && diagnosticPath === outsidePlugin,
   ));
 });
+
+
+
+
 
 test("Cursor marketplace discovery ignores foreign host manifests", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-host-marketplace-"));
@@ -856,7 +880,7 @@ test("Cursor marketplace discovery ignores foreign host manifests", async () => 
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: {},
@@ -868,6 +892,10 @@ test("Cursor marketplace discovery ignores foreign host manifests", async () => 
   assert.equal(byName.get("foreign-local-review").copies[0].plugin.marketplace, "local");
   assert.equal(byName.get("foreign-local-review").conflict, false);
 });
+
+
+
+
 
 test("Cursor manifests honor nested skill directory declarations", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-nested-skills-"));
@@ -889,7 +917,7 @@ test("Cursor manifests honor nested skill directory declarations", async () => {
     );
   }
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: {},
@@ -902,6 +930,10 @@ test("Cursor manifests honor nested skill directory declarations", async () => {
     assert.equal(byName.get(name).copies[0].plugin.name, `${name.split("-")[0]}-plugin`);
   }
 });
+
+
+
+
 
 test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-diagnostics-"));
@@ -1117,7 +1149,7 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "valid-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1196,7 +1228,7 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
       && code === "PLUGIN_ROOT_ESCAPE"
       && diagnosticPath === escapedMarketplacePath,
   ));
-  const inventory = await discoverSkills({
+  const inventory = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: {},
@@ -1230,6 +1262,10 @@ test("Cursor plugin diagnostics isolate invalid manifests, paths, and aliases", 
     false,
   );
 });
+
+
+
+
 
 test("Gemini CLI discovers configured user and bounded workspace extensions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-gemini-configured-"));
@@ -1283,11 +1319,11 @@ test("Gemini CLI discovers configured user and bounded workspace extensions", as
     env: { GEMINI_CLI_HOME: configuredHome },
     managerRecords: [],
   };
-  const global = await discoverSkills({
+  const global = await discoverAmbientSkills({
     input: "configured-gemini-review",
     ...options,
   });
-  const workspace = await discoverSkills({
+  const workspace = await discoverAmbientSkills({
     input: "workspace-gemini-review",
     ...options,
   });
@@ -1302,6 +1338,10 @@ test("Gemini CLI discovers configured user and bounded workspace extensions", as
   assert.equal(workspace.groups[0].copies[0].scope, "workspace");
   assert.equal(workspace.groups[0].copies[0].plugin.name, "workspace-extension");
 });
+
+
+
+
 
 test("Gemini extension diagnostics isolate malformed metadata and escaping skill roots", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-gemini-diagnostics-"));
@@ -1331,7 +1371,7 @@ test("Gemini extension diagnostics isolate malformed metadata and escaping skill
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "valid-gemini-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1350,6 +1390,10 @@ test("Gemini extension diagnostics isolate malformed metadata and escaping skill
       code === "PLUGIN_ROOT_ESCAPE" && diagnosticPath === path.join(escapingExtension, "../outside"),
   ));
 });
+
+
+
+
 
 test("Gemini validates metadata containment, required fields, and install provenance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-gemini-metadata-"));
@@ -1430,7 +1474,7 @@ test("Gemini validates metadata containment, required fields, and install proven
     JSON.stringify({ source: linkedOrigin, type: "link" }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: {},
@@ -1484,6 +1528,10 @@ test("Gemini validates metadata containment, required fields, and install proven
   ));
 });
 
+
+
+
+
 test("Codex personal marketplaces discover .codex-plugin custom skill directories", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-personal-marketplace-"));
   const home = path.join(root, "home");
@@ -1511,7 +1559,7 @@ test("Codex personal marketplaces discover .codex-plugin custom skill directorie
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "personal-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1532,6 +1580,10 @@ test("Codex personal marketplaces discover .codex-plugin custom skill directorie
     "repository:https://github.com/example/personal-plugin",
   ]);
 });
+
+
+
+
 
 test("Codex config.toml local marketplaces discover bounded external roots", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-config-marketplace-"));
@@ -1566,7 +1618,7 @@ test("Codex config.toml local marketplaces discover bounded external roots", asy
     `["marketplaces" . configured-marketplace] # development checkout\n"source_type" = "local"\n'source' = "${marketplaceRoot}"\n\n[marketplaces."broken-marketplace"]\nsource_type = local\nsource = "${marketplaceRoot}"\n`,
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "configured-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1590,6 +1642,10 @@ test("Codex config.toml local marketplaces discover bounded external roots", asy
       && diagnosticPath === path.join(codexHome, "config.toml"),
   ));
 });
+
+
+
+
 
 test("Codex config.toml accepts dotted marketplace assignments", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-dotted-config-"));
@@ -1615,7 +1671,7 @@ test("Codex config.toml accepts dotted marketplace assignments", async () => {
     `marketplaces.dotted-marketplace.source_type = "local"\nmarketplaces.dotted-marketplace.source = "${marketplaceRoot}"\n`,
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "dotted-config-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1631,6 +1687,10 @@ test("Codex config.toml accepts dotted marketplace assignments", async () => {
     false,
   );
 });
+
+
+
+
 
 test("Codex config.toml decodes uppercase Unicode escapes in basic strings", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-unicode-config-"));
@@ -1657,7 +1717,7 @@ test("Codex config.toml decodes uppercase Unicode escapes in basic strings", asy
     `["\\U0000006Darketplaces"."\\U00000075nicode-marketplace"]\n"source_\\U00000074ype" = "local"\n"\\U00000073ource" = "${escapedMarketplaceRoot}"\n`,
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "unicode-config-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1673,6 +1733,10 @@ test("Codex config.toml decodes uppercase Unicode escapes in basic strings", asy
     false,
   );
 });
+
+
+
+
 
 test("Codex config.toml accepts multiline marketplace source strings", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-multiline-config-"));
@@ -1715,7 +1779,7 @@ test("Codex config.toml accepts multiline marketplace source strings", async () 
     ].join("\n"),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: { CODEX_HOME: codexHome },
@@ -1736,6 +1800,10 @@ test("Codex config.toml accepts multiline marketplace source strings", async () 
     false,
   );
 });
+
+
+
+
 
 test("Codex cache versions and synced or bundled marketplace copies remain auditable", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-cache-layouts-"));
@@ -1822,11 +1890,11 @@ test("Codex cache versions and synced or bundled marketplace copies remain audit
     env: { CODEX_HOME: codexHome },
     managerRecords: [],
   };
-  const direct = await discoverSkills({ input: "direct-review", ...options });
+  const direct = await discoverAmbientSkills({ input: "direct-review", ...options });
   assert.equal(direct.groups[0].copies[0].plugin.host, "codex");
   assert.equal(direct.groups[0].copies[0].plugin.name, "direct-plugin");
 
-  const cached = await discoverSkills({ input: "versioned-review", ...options });
+  const cached = await discoverAmbientSkills({ input: "versioned-review", ...options });
   assert.equal(cached.groups[0].copies.length, 2);
   assert.deepEqual(
     cached.groups[0].copies.map(({ plugin }) => plugin.version),
@@ -1837,14 +1905,14 @@ test("Codex cache versions and synced or bundled marketplace copies remain audit
     false,
   );
 
-  const synced = await discoverSkills({ input: "synced-review", ...options });
+  const synced = await discoverAmbientSkills({ input: "synced-review", ...options });
   assert.equal(synced.groups[0].copies[0].plugin.marketplace, "synced-marketplace");
   assert.deepEqual(synced.groups[0].provenance, [
     "repository:https://github.com/example/synced-plugin",
   ]);
   assert.ok(synced.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_ESCAPE"));
 
-  const bundled = await discoverSkills({ input: "bundled-review", ...options });
+  const bundled = await discoverAmbientSkills({ input: "bundled-review", ...options });
   assert.equal(bundled.groups[0].copies[0].plugin.marketplace, "bundled-marketplace");
   assert.equal(bundled.groups[0].copies[0].active, false);
   assert.deepEqual(activeSkillInventory(bundled), []);
@@ -1852,6 +1920,10 @@ test("Codex cache versions and synced or bundled marketplace copies remain audit
     "repository:https://github.com/example/bundled-plugin",
   ]);
 });
+
+
+
+
 
 test("malformed higher-priority Codex marketplace metadata stops generic fallbacks", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-malformed-marketplace-"));
@@ -1872,7 +1944,7 @@ test("malformed higher-priority Codex marketplace metadata stops generic fallbac
   const missingEntriesPath = path.join(home, ".agents", "plugins", "manifest.json");
   await writeFile(missingEntriesPath, JSON.stringify({ name: "missing-entries" }));
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "valid-codex-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1895,6 +1967,10 @@ test("malformed higher-priority Codex marketplace metadata stops generic fallbac
   ), false);
 });
 
+
+
+
+
 test("plugin host specifications extend discovery without changing candidate policy", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-seam-"));
   const home = path.join(root, "home");
@@ -1906,7 +1982,7 @@ test("plugin host specifications extend discovery without changing candidate pol
     name: "future",
   };
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "future-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1942,6 +2018,10 @@ test("plugin host specifications extend discovery without changing candidate pol
   assert.deepEqual(result.groups[0].provenance, [identity]);
 });
 
+
+
+
+
 test("plugin cache versions preserve every copy without making version part of identity", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-versions-"));
   const home = path.join(root, "home");
@@ -1949,7 +2029,7 @@ test("plugin cache versions preserve every copy without making version part of i
   await writeSkill(path.join(cacheRoot, "1", "skills"), "review");
   await writeSkill(path.join(cacheRoot, "2", "skills"), "review");
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1969,6 +2049,10 @@ test("plugin cache versions preserve every copy without making version part of i
   assert.deepEqual(activeSkillInventory(result), []);
 });
 
+
+
+
+
 test("plugin identities escape delimiter-bearing names without collisions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-identities-"));
   const home = path.join(root, "home");
@@ -1976,7 +2060,7 @@ test("plugin identities escape delimiter-bearing names without collisions", asyn
   await writeSkill(path.join(cacheRoot, "a:b", "1", "skills"), "review");
   await writeSkill(path.join(cacheRoot, "a%3Ab", "1", "skills"), "review");
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "review",
     home,
     cwd: path.join(root, "workspace"),
@@ -1990,6 +2074,10 @@ test("plugin identities escape delimiter-bearing names without collisions", asyn
   ]);
   assert.equal(result.groups[0].conflict, true);
 });
+
+
+
+
 
 test("Claude marketplace discovery selects its host manifest and repository provenance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-marketplace-"));
@@ -2037,7 +2125,7 @@ test("Claude marketplace discovery selects its host manifest and repository prov
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
     env: {},
@@ -2058,6 +2146,10 @@ test("Claude marketplace discovery selects its host manifest and repository prov
     false,
   );
 });
+
+
+
+
 
 test("Claude marketplace catalogs stay audit-only beside an installed cache copy", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-claude-catalog-active-"));
@@ -2089,7 +2181,7 @@ test("Claude marketplace catalogs stay audit-only beside an installed cache copy
     }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "review",
     home,
     cwd: path.join(root, "workspace"),
@@ -2107,6 +2199,10 @@ test("Claude marketplace catalogs stay audit-only beside an installed cache copy
     { name: "review", path: cacheSkill, realPath: await realpath(cacheSkill) },
   ]);
 });
+
+
+
+
 
 test("host roots include bounded Git ancestors as workspace roots", async () => {
   const base = await mkdtemp(path.join(os.tmpdir(), "host-roots-"));
@@ -2132,6 +2228,10 @@ test("host roots include bounded Git ancestors as workspace roots", async () => 
   );
   assert.equal(roots.some(({ path: rootPath }) => rootPath === base), false);
 });
+
+
+
+
 
 test("configured host roots load bounded global and workspace Claude settings", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-settings-"));
@@ -2165,45 +2265,9 @@ test("configured host roots load bounded global and workspace Claude settings", 
   assert.equal(paths.some((rootPath) => rootPath === root), false);
 });
 
-test("discovery retains root-level registry diagnostics", async () => {
-  const rootDiagnostic = {
-    code: "INVALID_ROOT_PATH",
-    message: "skill root observation requires a non-empty path",
-    observationIndex: 0,
-  };
-  const result = await discoverSkills({
-    roots: [],
-    managerRecords: [],
-    rootDiagnostics: [rootDiagnostic],
-  });
-  assert.deepEqual(result.rootDiagnostics, [rootDiagnostic]);
-});
 
-test("discovery groups equivalent copies and exposes every path and owner", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "discover-"));
-  const codexRoot = path.join(root, ".codex", "skills");
-  const copilotRoot = path.join(root, ".copilot", "skills");
-  await writeSkill(codexRoot, "review");
-  await writeSkill(copilotRoot, "review");
-  await writeSkill(path.join(root, "unbounded"), "secret");
 
-  const result = await discoverSkills({
-    input: "review",
-    roots: [
-      { path: codexRoot, owner: "codex", scope: "global" },
-      { path: copilotRoot, owner: "copilot", scope: "global" },
-    ],
-    managerRecords: [],
-  });
-  assert.equal(result.groups.length, 1);
-  assert.equal(result.groups[0].copies.length, 2);
-  assert.deepEqual(
-    result.groups[0].copies.map(({ owner }) => owner).sort(),
-    ["codex", "copilot"],
-  );
-  assert.equal(result.groups.some(({ name }) => name === "secret"), false);
-  assert.deepEqual(result.choices.at(-1), { kind: "custom-path" });
-});
+
 
 test("discovery preserves plugin metadata when a standard root aliases the same physical source", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-alias-"));
@@ -2237,7 +2301,7 @@ test("discovery preserves plugin metadata when a standard root aliases the same 
   await mkdir(path.join(workspace, ".agents"), { recursive: true });
   await symlink(pluginSkills, path.join(workspace, ".agents", "skills"), "dir");
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "review",
     home,
     cwd: workspace,
@@ -2262,6 +2326,10 @@ test("discovery preserves plugin metadata when a standard root aliases the same 
       && diagnosticPath === path.join(workspace, ".agents", "skills", "escaped"),
   ));
 });
+
+
+
+
 
 test("discovery preserves plugin root-skill scan and fingerprint policy through standard aliases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-policy-alias-"));
@@ -2297,7 +2365,7 @@ test("discovery preserves plugin root-skill scan and fingerprint policy through 
   await symlink(rootPlugin, path.join(workspace, ".agents", "skills"), "dir");
   await symlink(folderSkills, path.join(workspace, ".cursor", "skills"), "dir");
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     home,
     cwd: workspace,
     env: {},
@@ -2330,6 +2398,10 @@ test("discovery preserves plugin root-skill scan and fingerprint policy through 
   assert.equal(folderRecord.pluginRoot, folderPlugin);
 });
 
+
+
+
+
 test("Cursor root-skill fallback fingerprints its full source and rejects symlinked entrypoints", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-cursor-root-fingerprint-"));
   const home = path.join(root, "home");
@@ -2357,7 +2429,7 @@ test("Cursor root-skill fallback fingerprints its full source and rejects symlin
     JSON.stringify({ name: "symlinked" }),
   );
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "root-review",
     home,
     cwd: path.join(root, "workspace"),
@@ -2374,6 +2446,61 @@ test("Cursor root-skill fallback fingerprints its full source and rejects symlin
       code === "FINGERPRINT_SYMLINK" && diagnosticPath === symlinked,
   ));
 });
+
+
+
+
+
+test("discovery keeps Git evidence ahead of plugin evidence without hiding a conflict", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "git-plugin-evidence-"));
+  const home = path.join(root, "repository");
+  const install = path.join(
+    home,
+    ".claude",
+    "plugins",
+    "cache",
+    "official",
+    "reviewer",
+    "1",
+  );
+  await writeSkill(path.join(install, "skills"), "review");
+  await mkdir(path.join(install, ".claude-plugin"), { recursive: true });
+  await writeFile(
+    path.join(install, ".claude-plugin", "plugin.json"),
+    JSON.stringify({
+      name: "reviewer",
+      repository: "https://github.com/example/plugin-reviewer",
+    }),
+  );
+  const { spawnSync } = await import("node:child_process");
+  assert.equal(spawnSync("git", ["init", "-q", home]).status, 0);
+  assert.equal(
+    spawnSync("git", ["-C", home, "remote", "add", "origin", "https://github.com/example/git-reviewer"]).status,
+    0,
+  );
+
+  const result = await discoverAmbientSkills({
+    input: "review",
+    home,
+    cwd: path.join(home, "workspace"),
+    env: {},
+    managerRecords: [],
+  });
+
+  assert.deepEqual(result.groups[0].evidence.map(({ kind }) => kind), [
+    "git",
+    "plugin",
+  ]);
+  assert.equal(result.groups[0].provenance.length, 2);
+  assert.equal(result.groups[0].conflict, true);
+  assert.ok(result.groups[0].provenance.includes(
+    "repository:https://github.com/example/plugin-reviewer",
+  ));
+  assert.ok(result.groups[0].provenance.some((value) =>
+    value.startsWith("repository:https://github.com/example/git-reviewer#"),
+  ));
+});
+
 
 test("discovery groups standard and plugin copies while keeping conflicting plugin identities selectable", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-candidates-"));
@@ -2417,7 +2544,7 @@ test("discovery groups standard and plugin copies while keeping conflicting plug
     }],
   });
 
-  const result = await discoverSkills({
+  const result = await discoverAmbientSkills({
     input: "review",
     home,
     cwd: workspace,
@@ -2455,548 +2582,4 @@ test("discovery groups standard and plugin copies while keeping conflicting plug
   });
   assert.equal(selected.copy.path, secondSkill);
   assert.equal(selected.provenance, secondIdentity);
-});
-
-test("discovery isolates an invalid sibling candidate and reports its diagnostic", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "discover-invalid-sibling-"));
-  await writeSkill(root, "review");
-  const invalid = await writeSkill(root, "invalid");
-  await symlink(path.join(invalid, "SKILL.md"), path.join(invalid, "LINK.md"));
-
-  const result = await discoverSkills({
-    input: "review",
-    roots: [{ path: root, owner: "codex", scope: "global" }],
-    managerRecords: [],
-  });
-  assert.equal(result.groups.length, 1);
-  assert.equal(result.groups[0].name, "review");
-  assert.deepEqual(result.candidateDiagnostics, [
-    {
-      path: invalid,
-      code: "FINGERPRINT_SYMLINK",
-      message: "directory fingerprint contains a symbolic link: LINK.md",
-    },
-  ]);
-});
-
-test("discovery isolates malformed embedded metadata in a sibling", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "discover-malformed-sibling-"));
-  await writeSkill(root, "review");
-  const malformed = await writeSkill(root, "malformed");
-  await writeFile(path.join(malformed, ".skill-source.json"), "{not-json\n");
-
-  const result = await discoverSkills({
-    input: "review",
-    roots: [{ path: root, owner: "codex", scope: "global" }],
-    managerRecords: [],
-  });
-  assert.equal(result.groups.length, 1);
-  assert.equal(result.groups[0].name, "review");
-  assert.equal(result.candidateDiagnostics.length, 1);
-  assert.equal(result.candidateDiagnostics[0].path, malformed);
-  assert.equal(
-    result.candidateDiagnostics[0].code,
-    "MALFORMED_SOURCE_METADATA",
-  );
-  await assert.rejects(
-    discoverSkills({
-      input: malformed,
-      roots: [{ path: root, owner: "codex", scope: "global" }],
-      managerRecords: [],
-    }),
-    (error) => error.code === "MALFORMED_SOURCE_METADATA",
-  );
-});
-
-test("an explicit invalid alias preserves its specific candidate error", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "discover-invalid-alias-"));
-  const invalid = await writeSkill(root, "invalid");
-  const alias = path.join(root, "installed-invalid");
-  await symlink(path.join(invalid, "SKILL.md"), path.join(invalid, "LINK.md"));
-  await symlink(invalid, alias);
-
-  await assert.rejects(
-    discoverSkills({
-      input: alias,
-      roots: [{ path: invalid, owner: "codex", scope: "global" }],
-      managerRecords: [],
-    }),
-    (error) => error.code === "FINGERPRINT_SYMLINK",
-  );
-});
-
-test("discovery scans an aliased physical root once and retains associated owners", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "physical-root-"));
-  const physical = path.join(root, "physical");
-  const firstAlias = path.join(root, "first-alias");
-  const secondAlias = path.join(root, "second-alias");
-  await writeSkill(physical, "review");
-  await symlink(physical, firstAlias, "dir");
-  await symlink(physical, secondAlias, "dir");
-
-  const result = await discoverSkills({
-    input: "review",
-    roots: [
-      { path: firstAlias, owner: "codex", scope: "global" },
-      { path: secondAlias, owner: "cursor", scope: "global" },
-    ],
-    managerRecords: [],
-  });
-
-  assert.equal(result.searchedRoots.length, 1);
-  assert.equal(result.groups[0].copies.length, 1);
-  assert.deepEqual(result.groups[0].copies[0].owners, ["codex", "cursor"]);
-  assert.deepEqual(result.searchedRoots[0].aliases.sort(), [firstAlias, secondAlias]);
-});
-
-test("discovery orders explicit, Git, manager, and embedded evidence", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "evidence-"));
-  const repository = path.join(root, "repo");
-  const skillsRoot = path.join(repository, "skills");
-  const skill = await writeSkill(skillsRoot, "review");
-  await writeFile(
-    path.join(skill, ".skill-source.json"),
-    JSON.stringify({
-      kind: "repository",
-      repository: "https://github.com/example/skills",
-      upstream_path: "skills/review",
-    }),
-  );
-  const { spawnSync } = await import("node:child_process");
-  assert.equal(spawnSync("git", ["init", "-q", repository]).status, 0);
-  assert.equal(
-    spawnSync("git", ["-C", repository, "remote", "add", "origin", "git@github.com:example/skills.git"]).status,
-    0,
-  );
-
-  const result = await discoverSkills({
-    input: skill,
-    roots: [{ path: skillsRoot, owner: "workspace", scope: "workspace" }],
-    managerRecords: [
-      {
-        manager: "asm",
-        name: "review",
-        path: skill,
-        source: {
-          kind: "repository",
-          repository: "https://github.com/example/skills",
-          upstreamPath: "skills/review",
-        },
-      },
-    ],
-  });
-  assert.deepEqual(
-    result.groups[0].evidence.map(({ kind }) => kind),
-    ["explicit", "git", "manager", "embedded"],
-  );
-  assert.equal(result.groups[0].conflict, false);
-});
-
-test("discovery keeps Git evidence ahead of plugin evidence without hiding a conflict", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "git-plugin-evidence-"));
-  const home = path.join(root, "repository");
-  const install = path.join(
-    home,
-    ".claude",
-    "plugins",
-    "cache",
-    "official",
-    "reviewer",
-    "1",
-  );
-  await writeSkill(path.join(install, "skills"), "review");
-  await mkdir(path.join(install, ".claude-plugin"), { recursive: true });
-  await writeFile(
-    path.join(install, ".claude-plugin", "plugin.json"),
-    JSON.stringify({
-      name: "reviewer",
-      repository: "https://github.com/example/plugin-reviewer",
-    }),
-  );
-  const { spawnSync } = await import("node:child_process");
-  assert.equal(spawnSync("git", ["init", "-q", home]).status, 0);
-  assert.equal(
-    spawnSync("git", ["-C", home, "remote", "add", "origin", "https://github.com/example/git-reviewer"]).status,
-    0,
-  );
-
-  const result = await discoverSkills({
-    input: "review",
-    home,
-    cwd: path.join(home, "workspace"),
-    env: {},
-    managerRecords: [],
-  });
-
-  assert.deepEqual(result.groups[0].evidence.map(({ kind }) => kind), [
-    "git",
-    "plugin",
-  ]);
-  assert.equal(result.groups[0].provenance.length, 2);
-  assert.equal(result.groups[0].conflict, true);
-  assert.ok(result.groups[0].provenance.includes(
-    "repository:https://github.com/example/plugin-reviewer",
-  ));
-  assert.ok(result.groups[0].provenance.some((value) =>
-    value.startsWith("repository:https://github.com/example/git-reviewer#"),
-  ));
-});
-
-test("discovery surfaces provenance conflicts instead of merging silently", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "conflict-"));
-  const skillsRoot = path.join(root, "skills");
-  const skill = await writeSkill(skillsRoot, "review");
-  const result = await discoverSkills({
-    input: "review",
-    roots: [{ path: skillsRoot, owner: "workspace", scope: "workspace" }],
-    managerRecords: [
-      {
-        manager: "asm",
-        name: "review",
-        path: skill,
-        source: { kind: "repository", repository: "https://github.com/a/one" },
-      },
-      {
-        manager: "xing",
-        name: "review",
-        path: skill,
-        source: { kind: "repository", repository: "https://github.com/b/two" },
-      },
-    ],
-  });
-  assert.equal(result.groups[0].conflict, true);
-  assert.equal(result.groups[0].provenance.length, 2);
-});
-
-test("manager owners and non-repository provenance remain visible", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "manager-provenance-"));
-  const skill = await writeSkill(root, "review");
-  const result = await discoverSkills({
-    input: "review",
-    roots: [],
-    managerRecords: [
-      {
-        manager: "xing",
-        name: "review",
-        path: skill,
-        source: { kind: "local" },
-        provenance: { kind: "registry", reference: "registry:review@1" },
-      },
-      {
-        manager: "jtianling",
-        name: "review",
-        path: skill,
-        source: { kind: "local" },
-        provenance: { kind: "archive", reference: "https://example.test/review.zip" },
-      },
-    ],
-  });
-
-  assert.equal(result.groups[0].copies.length, 1);
-  assert.equal(result.groups[0].copies[0].owner, "manager:xing");
-  assert.deepEqual(
-    result.groups[0].copies[0].owners.sort(),
-    ["manager:jtianling", "manager:xing"],
-  );
-  assert.equal(result.groups[0].provenance.length, 2);
-  assert.equal(result.groups[0].conflict, true);
-  assert.ok(result.groups[0].evidence.every(({ provenance }) => provenance));
-});
-
-test("canonical upstream entrypoints participate in provenance conflicts", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "upstream-conflict-"));
-  const skill = await writeSkill(root, "review");
-  const repository = "https://github.com/example/skills";
-  const result = await discoverSkills({
-    input: "review",
-    roots: [],
-    managerRecords: [
-      {
-        manager: "asm",
-        name: "review",
-        path: skill,
-        source: { kind: "repository", repository, upstreamPath: "skills/review" },
-      },
-      {
-        manager: "xing",
-        name: "review",
-        path: skill,
-        source: {
-          kind: "repository",
-          repository,
-          upstream_path: "skills/other/SKILL.md",
-        },
-      },
-    ],
-  });
-
-  assert.equal(result.groups[0].conflict, true);
-  assert.deepEqual(
-    result.groups[0].evidence.map(({ upstream_path }) => upstream_path).sort(),
-    ["skills/other/SKILL.md", "skills/review/SKILL.md"],
-  );
-  assert.ok(result.groups[0].provenance.every((value) => value.includes("#skills/")));
-});
-
-test("repository discovery blocks when no local copy exists", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "missing-"));
-  await assert.rejects(
-    discoverSkills({
-      input: "https://github.com/example/missing/tree/main/skills/review",
-      roots: [{ path: root, owner: "codex", scope: "global" }],
-      managerRecords: [],
-    }),
-    (error) => error.code === "NO_LOCAL_COPY",
-  );
-});
-
-test("existing relative paths win over repository slugs and repository subdirs select exactly", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "locator-"));
-  const repository = path.join(root, "repo");
-  const skillsRoot = path.join(repository, "skills");
-  const first = await writeSkill(skillsRoot, "a");
-  await writeSkill(skillsRoot, "b");
-  const { spawnSync } = await import("node:child_process");
-  assert.equal(spawnSync("git", ["init", "-q", repository]).status, 0);
-  assert.equal(
-    spawnSync("git", ["-C", repository, "remote", "add", "origin", "https://github.com/example/skills"]).status,
-    0,
-  );
-  const relative = path.relative(process.cwd(), first);
-  const byPath = await discoverSkills({
-    input: relative,
-    roots: [{ path: skillsRoot, owner: "workspace", scope: "workspace" }],
-    managerRecords: [],
-  });
-  assert.equal(byPath.groups[0].name, "a");
-  const bySubdir = await discoverSkills({
-    input: "https://github.com/example/skills/tree/main/skills/a",
-    roots: [{ path: skillsRoot, owner: "workspace", scope: "workspace" }],
-    managerRecords: [],
-  });
-  assert.deepEqual(bySubdir.groups.map(({ name }) => name), ["a"]);
-});
-
-test("an explicit skill nested below a configured root is always considered", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "nested-input-"));
-  const skillsRoot = path.join(root, "skills");
-  const nested = await writeSkill(path.join(skillsRoot, "team", "productivity"), "review");
-
-  const result = await discoverSkills({
-    input: nested,
-    roots: [{ path: skillsRoot, owner: "workspace", scope: "workspace" }],
-    managerRecords: [],
-  });
-
-  assert.equal(result.groups.length, 1);
-  assert.equal(result.groups[0].copies[0].path, nested);
-  assert.equal(result.groups[0].evidence[0].kind, "explicit");
-});
-
-test("an existing relative filesystem path wins over repository-slug parsing", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "path-or-slug-"));
-  const existingPath = path.join(root, "team", "review");
-  const library = path.join(root, "library");
-  const installed = await writeSkill(library, "review");
-  await mkdir(existingPath, { recursive: true });
-
-  await assert.rejects(
-    discoverSkills({
-      input: "team/review",
-      cwd: root,
-      roots: [{ path: library, owner: "manager:asm", scope: "global" }],
-      managerRecords: [
-        {
-          manager: "asm",
-          name: "review",
-          path: installed,
-          source: {
-            kind: "repository",
-            repository: "https://github.com/team/review",
-          },
-        },
-      ],
-    }),
-    (error) => error.code === "NO_LOCAL_COPY",
-  );
-});
-
-test("confirmation is explicit, interactive, and last in the evidence order", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "confirmation-"));
-  const skill = await writeSkill(root, "review");
-  const discovery = await discoverSkills({
-    input: skill,
-    roots: [{ path: root, owner: "custom", scope: "custom" }],
-    managerRecords: [],
-  });
-  const choice = {
-    name: discovery.groups[0].name,
-    fingerprint: discovery.groups[0].fingerprint,
-    path: discovery.groups[0].copies[0].path,
-    owner: discovery.groups[0].copies[0].owner,
-  };
-  assert.throws(
-    () => confirmDiscoverySelection({ discovery, choice, interactive: false }),
-    (error) => error.code === "DISCOVERY_CONFIRMATION_REQUIRED",
-  );
-  const selected = confirmDiscoverySelection({ discovery, choice, interactive: true });
-  assert.equal(selected.evidence.at(-1).kind, "confirmation");
-});
-
-test("confirmation can retain caller-provided audit evidence", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "confirmation-audit-"));
-  const skill = await writeSkill(root, "review");
-  const discovery = await discoverSkills({
-    input: skill,
-    roots: [{ path: root, owner: "custom", scope: "custom" }],
-    managerRecords: [],
-  });
-  const group = discovery.groups[0];
-  const audit = {
-    actor: "human",
-    reason: "confirmed this unmanaged local source",
-    at: "2026-08-04T00:00:00.000Z",
-  };
-
-  const selected = confirmDiscoverySelection({
-    discovery,
-    choice: {
-      name: group.name,
-      fingerprint: group.fingerprint,
-      path: group.copies[0].path,
-      owner: group.copies[0].owner,
-    },
-    interactive: true,
-    confirmationEvidence: audit,
-  });
-
-  assert.deepEqual(selected.evidence.at(-1).confirmationEvidence, audit);
-});
-
-test("confirmation identifies groups by name plus fingerprint", () => {
-  const shared = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-  const discovery = {
-    groups: ["first", "second"].map((name) => ({
-      name,
-      fingerprint: shared,
-      copies: [{
-        path: `/${name}`,
-        owner: "fixture",
-        evidence: [],
-        provenance: [],
-        conflict: false,
-      }],
-      evidence: [],
-      provenance: [],
-      conflict: false,
-    })),
-  };
-  const selected = confirmDiscoverySelection({
-    discovery,
-    choice: {
-      name: "second",
-      fingerprint: shared,
-      path: "/second",
-      owner: "fixture",
-    },
-    interactive: true,
-  });
-  assert.equal(selected.name, "second");
-});
-
-test("confirmation cannot pair one physical copy with another copy's provenance", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "copy-provenance-"));
-  const firstRoot = path.join(root, "first");
-  const secondRoot = path.join(root, "second");
-  const first = await writeSkill(firstRoot, "review");
-  await writeSkill(secondRoot, "review");
-  const { spawnSync } = await import("node:child_process");
-  for (const [repository, remote] of [
-    [firstRoot, "https://github.com/example/first"],
-    [secondRoot, "https://github.com/example/second"],
-  ]) {
-    assert.equal(spawnSync("git", ["init", "-q", repository]).status, 0);
-    assert.equal(
-      spawnSync("git", ["-C", repository, "remote", "add", "origin", remote]).status,
-      0,
-    );
-  }
-  const discovery = await discoverSkills({
-    input: "review",
-    roots: [
-      { path: firstRoot, owner: "first", scope: "global" },
-      { path: secondRoot, owner: "second", scope: "global" },
-    ],
-    managerRecords: [],
-  });
-  const group = discovery.groups[0];
-  const firstCopy = group.copies.find(({ path: copyPath }) => copyPath === first);
-  const otherProvenance = group.copies.find(({ owner }) => owner === "second")
-    .provenance[0];
-
-  assert.equal(group.conflict, true);
-  assert.equal(firstCopy.conflict, false);
-  assert.throws(
-    () =>
-      confirmDiscoverySelection({
-        discovery,
-        choice: {
-          name: group.name,
-          fingerprint: group.fingerprint,
-          path: firstCopy.path,
-          owner: firstCopy.owner,
-        },
-        interactive: true,
-        confirmedProvenance: otherProvenance,
-      }),
-    (error) => error.code === "PROVENANCE_COPY_MISMATCH",
-  );
-  const selected = confirmDiscoverySelection({
-    discovery,
-    choice: {
-      name: group.name,
-      fingerprint: group.fingerprint,
-      path: firstCopy.path,
-      owner: firstCopy.owner,
-    },
-    interactive: true,
-  });
-  assert.equal(selected.provenance, firstCopy.provenance[0]);
-});
-
-test("active inventory deduplicates one physical source with multiple owners", () => {
-  const inventory = activeSkillInventory({
-    groups: [
-      {
-        name: "review",
-        copies: [
-          {
-            path: "/cache/review",
-            realPath: "/cache/review",
-            owner: "plugin:codex",
-            active: false,
-          },
-          {
-            path: "/alias/review",
-            realPath: "/source/review",
-            owner: "plugin:codex",
-            active: false,
-          },
-          { path: "/source/review", realPath: "/source/review", owner: "manager:asm" },
-        ],
-      },
-    ],
-  });
-  assert.equal(inventory.length, 1);
-  assert.equal(inventory[0].realPath, "/source/review");
-});
-
-test("adjacent customization metadata is classified and malformed metadata is visible", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "discovery-customization-metadata-"));
-  const malformed = await writeSkill(root, "managed-overlay");
-  await writeFile(path.join(malformed, "customization.json"), "{not-json\n");
-  await assert.rejects(
-    discoverSkills({ input: malformed, roots: [] }),
-    (error) => error.code === "MALFORMED_CUSTOMIZATION_METADATA",
-  );
 });
