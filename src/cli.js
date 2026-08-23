@@ -269,7 +269,7 @@ async function discoveryContext(options = {}) {
   ]);
   return {
     roots: undefined,
-    additionalRoots: configured.roots,
+    additionalRoots: configured.rootObservations,
     includePlugins: parseBooleanOption(options["include-plugins"], "include-plugins") ?? true,
     managerRecords: collected.records,
     managerDiagnostics: collected.diagnostics,

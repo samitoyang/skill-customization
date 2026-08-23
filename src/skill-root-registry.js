@@ -199,6 +199,40 @@ function normalizedString(value) {
     : undefined;
 }
 
+/**
+ * Adapt one caller-facing root value into a typed registry observation.
+ *
+ * Root identity and policy are resolved by normalizeSkillRootObservations;
+ * this boundary only supplies the source kind and compatibility defaults for
+ * callers that still accept a path string.
+ *
+ * @param {unknown} item
+ * @param {"standard" | "configured" | "explicit" | "manager" | "plugin"} kind
+ * @param {{owner?: string, scope?: string, origin?: string}} [defaults]
+ * @returns {Record<string, unknown>}
+ */
+export function skillRootObservation(item, kind, defaults = {}) {
+  if (typeof item === "string") {
+    return {
+      kind,
+      path: item,
+      owner: defaults.owner ?? "custom",
+      scope: defaults.scope ?? "custom",
+      origin: defaults.origin ?? defaults.owner ?? "custom",
+    };
+  }
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return { kind, path: item };
+  }
+  return {
+    ...item,
+    kind: item.kind ?? kind,
+    owner: item.owner ?? defaults.owner ?? "custom",
+    scope: item.scope ?? defaults.scope ?? "custom",
+    origin: item.origin ?? defaults.origin ?? item.owner ?? "custom",
+  };
+}
+
 function normalizeRootObservation(observation, diagnostics, observationIndex) {
   if (!isRecord(observation)) {
     diagnostics.push(rootDiagnostic(

@@ -2259,6 +2259,10 @@ test("configured host roots load bounded global and workspace Claude settings", 
   assert.ok(paths.includes(path.join(home, "shared", ".claude", "skills")));
   assert.ok(paths.includes(path.join(root, "team", ".claude", "skills")));
   assert.ok(paths.includes(directSkills));
+  assert.ok(configured.rootObservations.every(({ kind }) => kind === "configured"));
+  assert.ok(configured.roots.every(({ owner }) =>
+    ["claude-additional", "copilot-env"].includes(owner),
+  ));
   assert.equal(configured.settingsEvidence.length, 3);
   assert.deepEqual(configured.diagnostics, []);
   assert.deepEqual(configured.rootDiagnostics, []);

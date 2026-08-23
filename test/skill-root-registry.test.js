@@ -11,6 +11,7 @@ import {
   registrySkillRoots,
   SKILL_ROOT_REGISTRY,
   SKILL_ROOT_REGISTRY_CHECKPOINT,
+  skillRootObservation,
 } from "../src/skill-root-registry.js";
 
 const CHECKPOINTED_OWNERS = [
@@ -231,6 +232,23 @@ test("registry normalizes standard and configured root observations", async () =
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
+});
+
+test("registry owns compatibility shaping for caller root values", () => {
+  const result = normalizeSkillRootObservations([
+    skillRootObservation("./skills", "explicit", {
+      owner: "cli-root",
+      scope: "custom",
+      origin: "explicit-root",
+    }),
+  ]);
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.equal(result.roots.length, 1);
+  assert.equal(result.roots[0].path, path.resolve("./skills"));
+  assert.equal(result.roots[0].owner, "cli-root");
+  assert.equal(result.roots[0].scope, "custom");
+  assert.equal(result.roots[0].origin, "explicit-root");
 });
 
 test("registry merges plugin and manager observations without promoting ownership", async () => {

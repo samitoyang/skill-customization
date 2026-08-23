@@ -33,33 +33,12 @@ import { isPathContained } from "./paths.js";
 import {
   normalizeSkillRootObservations,
   registrySkillRoots,
+  skillRootObservation,
 } from "./skill-root-registry.js";
 import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 import { publishDiscoveryPerformanceMetric } from "./performance-diagnostics.js";
 
 const execFile = promisify(execFileCallback);
-
-function rootObservation(item, kind, defaults = {}) {
-  if (typeof item === "string") {
-    return {
-      kind,
-      path: item,
-      owner: defaults.owner ?? "custom",
-      scope: defaults.scope ?? "custom",
-      origin: defaults.origin ?? defaults.owner ?? "custom",
-    };
-  }
-  if (!item || typeof item !== "object" || Array.isArray(item)) {
-    return { kind, path: item };
-  }
-  return {
-    ...item,
-    kind: item.kind ?? kind,
-    owner: item.owner ?? defaults.owner ?? "custom",
-    scope: item.scope ?? defaults.scope ?? "custom",
-    origin: item.origin ?? defaults.origin ?? item.owner ?? "custom",
-  };
-}
 
 function canonicalManagerProvenance(record) {
   const provenance = record.provenance && typeof record.provenance === "object"
@@ -98,17 +77,20 @@ function hostSkillRootObservations({
   cwd = process.cwd(),
   env = process.env,
   claudeSettings = {},
+  includeStandard = true,
 } = {}) {
   const workspaceDirectories = boundedWorkspaceDirectories({ cwd, home });
   const resolvedCwd = path.resolve(cwd);
-  const roots = registrySkillRoots({
-    home,
-    env,
-    workspaceDirectories: workspaceDirectories.map((directory) => ({
-      path: directory,
-      origin: directory === resolvedCwd ? "project" : "ancestor",
-    })),
-  });
+  const roots = includeStandard
+    ? registrySkillRoots({
+        home,
+        env,
+        workspaceDirectories: workspaceDirectories.map((directory) => ({
+          path: directory,
+          origin: directory === resolvedCwd ? "project" : "ancestor",
+        })),
+      })
+    : [];
   const additions = [
     ...(claudeSettings.additionalDirectories ?? []),
     ...(claudeSettings.permissions?.additionalDirectories ?? []),
@@ -238,14 +220,17 @@ export async function configuredHostSkillRoots({
       }
     }
   }
-  const rootRegistry = hostSkillRootRegistry({
-      home,
-      cwd,
-      env,
-      claudeSettings: { additionalDirectories: [...new Set(additionalDirectories)] },
-    });
+  const rootObservations = hostSkillRootObservations({
+    home,
+    cwd,
+    env,
+    claudeSettings: { additionalDirectories: [...new Set(additionalDirectories)] },
+    includeStandard: false,
+  });
+  const rootRegistry = normalizeSkillRootObservations(rootObservations);
   return {
     roots: rootRegistry.roots,
+    rootObservations,
     rootDiagnostics: rootRegistry.diagnostics,
     settingsEvidence,
     diagnostics,
@@ -676,14 +661,14 @@ export async function discoverSkills({
   }
   const rootObservations = [
     ...(ambientRootObservations ?? []).map((item) =>
-      rootObservation(item, "explicit")),
+      skillRootObservation(item, "explicit")),
     ...(rootsAreExplicit ? [] : additionalRoots).map((item) =>
-      rootObservation(item, "configured")),
-    ...pluginRoots.map((item) => rootObservation(item, "plugin")),
+      skillRootObservation(item, "configured")),
+    ...pluginRoots.map((item) => skillRootObservation(item, "plugin")),
     ...managerSkillRoots(managerRecords).map((item) =>
-      rootObservation(item, "manager")),
+      skillRootObservation(item, "manager")),
     ...(customPath
-      ? [rootObservation({ path: customPath }, "explicit")]
+      ? [skillRootObservation({ path: customPath }, "explicit")]
       : []),
   ];
   const filesystemInput = input
@@ -695,7 +680,7 @@ export async function discoverSkills({
   );
   if (explicitDirectory) {
     rootObservations.push(
-      rootObservation({
+      skillRootObservation({
         path: explicitDirectory,
         owner: "explicit",
         scope: "custom",
@@ -705,8 +690,8 @@ export async function discoverSkills({
   }
   const rootRegistry = normalizeSkillRootObservations(rootObservations);
   rootDiagnostics.push(...rootRegistry.diagnostics);
-  // The registry returns an immutable decision; Discovery retains its
-  // historical mutable snapshot surface for callers that annotate or sort it.
+  // Keep the historical mutable result surface, but copy only after the
+  // registry has completed all root identity and policy decisions.
   const normalizedRoots = rootRegistry.roots.map((record) => structuredClone(record));
   const scans = await Promise.all(normalizedRoots.map(scanRoot));
   const candidates = scans.flatMap(({ candidates: rootCandidates }) =>

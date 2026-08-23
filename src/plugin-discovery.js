@@ -2106,8 +2106,6 @@ export async function discoverPluginSkillRoots({
   const roots = context.roots.map((item) => ({
     ...item,
     kind: item.kind ?? "plugin",
-    path: path.resolve(item.path),
-    owners: unique(item.owners ?? [item.owner]),
   }));
   roots.sort((left, right) => left.path.localeCompare(right.path, "en"));
   return {
