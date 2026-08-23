@@ -516,6 +516,19 @@ export function assertValidDescriptor(descriptor) {
   return descriptor;
 }
 
+/**
+ * @param {DescriptorSource} source
+ * @param {CustomizationDescriptor} descriptor
+ * @returns {boolean}
+ */
+export function matchesCustomizationSource(source, descriptor) {
+  return source.kind === "customization"
+    && source.id === descriptor.id
+    && source.type === descriptor.type
+    && source.skill_name === descriptor.name
+    && source.license === descriptor.license;
+}
+
 function freezeDeep(value, seen = new Set()) {
   if (!value || typeof value !== "object" || seen.has(value)) return value;
   seen.add(value);

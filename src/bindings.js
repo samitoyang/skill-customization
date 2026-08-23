@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { assertValidDescriptor, readCheckedDescriptor } from "./descriptor.js";
+import {
+  assertValidDescriptor,
+  matchesCustomizationSource,
+  readCheckedDescriptor,
+} from "./descriptor.js";
 import { discoverSkills } from "./discovery.js";
 import { BindingError } from "./errors.js";
 import { inspectCustomizationExecution } from "./execution-graph.js";
@@ -318,12 +322,7 @@ async function inspectCustomizationSource({ descriptor, info, sourceRoot }) {
     });
   }
   const customization = checkedCustomization.descriptor;
-  if (
-    customization.id !== descriptor.source.id
-    || customization.type !== descriptor.source.type
-    || customization.name !== descriptor.source.skill_name
-    || customization.license !== descriptor.source.license
-  ) {
+  if (!matchesCustomizationSource(descriptor.source, customization)) {
     throw new BindingError("bound customization identity does not match the descriptor source", {
       code: "BINDING_CUSTOMIZATION_SOURCE_MISMATCH",
       details: {

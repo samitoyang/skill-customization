@@ -1,7 +1,10 @@
 import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { readCheckedDescriptor } from "./descriptor.js";
+import {
+  matchesCustomizationSource,
+  readCheckedDescriptor,
+} from "./descriptor.js";
 import { excludeSkillRootFromInventory } from "./discovery.js";
 import {
   fingerprintPath,
@@ -54,14 +57,6 @@ async function sourceRoot(binding) {
   const target = await realpath(lookup);
   const info = await lstat(target);
   return info.isDirectory() ? target : path.dirname(target);
-}
-
-function matchesCustomizationSource(source, descriptor) {
-  return source.kind === "customization"
-    && source.id === descriptor.id
-    && source.type === descriptor.type
-    && source.skill_name === descriptor.name
-    && source.license === descriptor.license;
 }
 
 async function checkedCustomizationSource(source, root) {
