@@ -31,10 +31,8 @@ import {
 } from "../src/fingerprint.js";
 import { generateLocalIdentity } from "../src/normalization.js";
 import { preflightCustomization } from "../src/preflight.js";
-import {
-  confirmDiscoverySelection,
-  discoverSkills,
-} from "../src/discovery.js";
+import { confirmDiscoverySelection } from "../src/discovery.js";
+import { discoverFixtureSkills } from "./support/discovery-modes.js";
 import { acquireStateLock } from "../src/state.js";
 
 function descriptor(activation = { mode: "coexist" }) {
@@ -368,147 +366,6 @@ test("plugin cache recovery rejects mismatched upstream paths", async () => {
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
-test("ambient binding preserves plugin identity for cache recovery", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "binding-ambient-plugin-continuity-"));
-  const claudeHome = path.join(root, "claude");
-  const pluginCacheRoot = path.join(
-    claudeHome,
-    "plugins",
-    "cache",
-    "fixture-marketplace",
-    "reviewer",
-  );
-  const versionOneRoot = path.join(pluginCacheRoot, "1");
-  const versionOne = path.join(versionOneRoot, "skills", "review");
-  const versionTwoRoot = path.join(pluginCacheRoot, "2");
-  const versionTwo = path.join(versionTwoRoot, "skills", "review");
-  const statePath = path.join(root, "state", "bindings.json");
-  const identity = "local:plugin:claude-code:fixture-marketplace:reviewer";
-  const repository = "https://github.com/example/reviewer";
-  const workflow = "---\nname: review\n---\nstable\n";
-  await mkdir(versionOne, { recursive: true });
-  await writeFile(path.join(versionOne, "SKILL.md"), workflow);
-  await mkdir(path.join(versionOneRoot, ".claude-plugin"), { recursive: true });
-  await writeFile(
-    path.join(versionOneRoot, ".claude-plugin", "plugin.json"),
-    JSON.stringify({ name: "reviewer", version: "1", repository }),
-  );
-  const installedPluginsPath = path.join(claudeHome, "plugins", "installed_plugins.json");
-  await writeFile(
-    installedPluginsPath,
-    JSON.stringify({
-      plugins: {
-        "reviewer@fixture-marketplace": [{
-          scope: "project",
-          projectPath: process.cwd(),
-          installPath: versionOneRoot,
-          version: "1",
-        }],
-      },
-    }),
-  );
-  const sourceDescriptor = {
-    ...descriptor(),
-    source: {
-      ...descriptor().source,
-      repository,
-      upstream_path: "skills/review/SKILL.md",
-      effective_fingerprint: await fingerprintPath(versionOne),
-    },
-  };
-
-  const ambientHomes = {
-    CLAUDE_CONFIG_DIR: claudeHome,
-    CODEX_HOME: path.join(root, "codex"),
-    CURSOR_HOME: path.join(root, "cursor"),
-    GEMINI_CLI_HOME: path.join(root, "gemini"),
-  };
-  const previousHomes = Object.fromEntries(
-    Object.keys(ambientHomes).map((name) => [name, process.env[name]]),
-  );
-  Object.assign(process.env, ambientHomes);
-  try {
-    const discovery = await discoverSkills({
-      input: versionOne,
-      managerRecords: [],
-    });
-    const group = discovery.groups[0];
-    const chosenCopy = group.copies.find((copy) => copy.pluginIdentity === identity);
-    const confirmedSelection = confirmDiscoverySelection({
-      discovery,
-      choice: {
-        name: group.name,
-        fingerprint: group.fingerprint,
-        path: chosenCopy.path,
-        owner: chosenCopy.owner,
-      },
-      interactive: true,
-      confirmedProvenance: `repository:${repository}`,
-      confirmationEvidence: {
-        actor: "human",
-        reason: "selected ambient plugin provenance",
-      },
-    });
-    const bound = await bindCustomization({
-      descriptor: sourceDescriptor,
-      sourcePath: versionOne,
-      context: "global",
-      statePath,
-      interactive: true,
-      confirm: async () => true,
-      confirmedSelection,
-    });
-    assert.equal(bound.scope, "workspace");
-    assert.equal(bound.source.pluginIdentity, identity);
-    assert.deepEqual(bound.source.pluginCache, { kind: "versioned", scope: "workspace" });
-    assert.equal(bound.source.selection.provenance, `repository:${repository}`);
-
-    const validated = await resolveBinding({
-      descriptor: sourceDescriptor,
-      context: "global",
-      statePath,
-    });
-    assert.equal(validated.source.path, path.resolve(versionOne));
-    assert.equal(validated.source.selection.provenance, `repository:${repository}`);
-
-    await rename(versionOneRoot, path.join(root, "removed"));
-    await mkdir(versionTwo, { recursive: true });
-    await writeFile(path.join(versionTwo, "SKILL.md"), workflow);
-    await mkdir(path.join(versionTwoRoot, ".claude-plugin"), { recursive: true });
-    await writeFile(
-      path.join(versionTwoRoot, ".claude-plugin", "plugin.json"),
-      JSON.stringify({ name: "reviewer", version: "2", repository }),
-    );
-    await writeFile(
-      installedPluginsPath,
-      JSON.stringify({
-        plugins: {
-          "reviewer@fixture-marketplace": [{
-            scope: "project",
-            projectPath: process.cwd(),
-            installPath: versionTwoRoot,
-            version: "2",
-          }],
-        },
-      }),
-    );
-
-    const resolved = await resolveBinding({
-      descriptor: sourceDescriptor,
-      context: "global",
-      statePath,
-    });
-    assert.equal(resolved.source.path, path.resolve(versionTwo));
-    assert.equal(resolved.source.pluginIdentity, identity);
-    assert.deepEqual(resolved.source.pluginCache, { kind: "versioned", scope: "workspace" });
-  } finally {
-    for (const [name, value] of Object.entries(previousHomes)) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
-});
-
 test("automatic plugin recovery requires a same-scope versioned cache", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-cache-policy-"));
   const directSource = path.join(root, "workspace-direct", "skills", "review");
@@ -815,12 +672,14 @@ test("symlink bindings record alias and target, then invalidate on retarget", as
     { path: workspaceRoot, scope: "workspace", origin: "project" },
     { path: aliasRoot, scope: "global", origin: "personal" },
   ];
+  const managerRecords = [];
   const binding = await bindCustomization({
     descriptor: descriptor(),
     sourcePath: alias,
     context: "/workspace",
     statePath,
     roots,
+    managerRecords,
     interactive: true,
     confirm: async () => true,
   });
@@ -828,12 +687,29 @@ test("symlink bindings record alias and target, then invalidate on retarget", as
   assert.equal(binding.source.alias, alias);
   const canonicalTargetOne = await realpath(targetOne);
   assert.equal(binding.source.target, canonicalTargetOne);
-  assert.equal((await resolveBinding({ descriptor: descriptor(), context: "/workspace", statePath })).source.target, canonicalTargetOne);
+  assert.equal(
+    (
+      await resolveBinding({
+        descriptor: descriptor(),
+        context: "/workspace",
+        statePath,
+        roots,
+        managerRecords,
+      })
+    ).source.target,
+    canonicalTargetOne,
+  );
 
   await unlink(alias);
   await symlink(targetTwo, alias);
   await assert.rejects(
-    resolveBinding({ descriptor: descriptor(), context: "/workspace", statePath }),
+    resolveBinding({
+      descriptor: descriptor(),
+      context: "/workspace",
+      statePath,
+      roots,
+      managerRecords,
+    }),
     (error) => error.code === "BINDING_RETARGETED",
   );
   assert.equal(Object.keys((await readBindingStore(statePath)).bindings).length, 0);
@@ -842,6 +718,8 @@ test("symlink bindings record alias and target, then invalidate on retarget", as
 test("replacement binding requires a separate explicit confirmation", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "replace-"));
   const source = path.join(root, "review");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  const managerRecords = [];
   await mkdir(source);
   await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
   await assert.rejects(
@@ -850,7 +728,8 @@ test("replacement binding requires a separate explicit confirmation", async () =
       sourcePath: source,
       context: "global",
       statePath: path.join(root, "bindings.json"),
-      roots: [{ path: root, scope: "global", origin: "personal" }],
+      roots,
+      managerRecords,
       interactive: true,
       confirm: async () => true,
       confirmReplace: async () => false,
@@ -864,7 +743,8 @@ test("replacement binding requires a separate explicit confirmation", async () =
       sourcePath: source,
       context: "global",
       statePath: path.join(root, "ambiguous-bindings.json"),
-      roots: [{ path: root, scope: "global", origin: "personal" }],
+      roots,
+      managerRecords,
       interactive: true,
       confirm: async () => true,
       confirmReplace: async () => true,
@@ -880,6 +760,8 @@ test("replacement binding requires a separate explicit confirmation", async () =
 test("persisted replacement validation requires an unambiguous active inventory", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "replace-validation-"));
   const source = path.join(root, "review");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  const managerRecords = [];
   await mkdir(source);
   await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
   const replacement = descriptor({
@@ -892,7 +774,8 @@ test("persisted replacement validation requires an unambiguous active inventory"
     sourcePath: source,
     context: "global",
     statePath: path.join(root, "bindings.json"),
-    roots: [{ path: root, scope: "global", origin: "personal" }],
+    roots,
+    managerRecords,
     interactive: true,
     confirm: async () => true,
     confirmReplace: async () => true,
@@ -900,13 +783,20 @@ test("persisted replacement validation requires an unambiguous active inventory"
   });
 
   await assert.rejects(
-    validateBinding({ descriptor: replacement, binding }),
+    validateBinding({
+      descriptor: replacement,
+      binding,
+      roots,
+      managerRecords,
+    }),
     (error) => error.code === "REPLACEMENT_INVENTORY_REQUIRED",
   );
   await assert.rejects(
     validateBinding({
       descriptor: replacement,
       binding,
+      roots,
+      managerRecords,
       activeSkills: [
         ...activeSkills,
         { name: "review", path: path.join(root, "other-review") },
@@ -915,7 +805,15 @@ test("persisted replacement validation requires an unambiguous active inventory"
     (error) => error.code === "AMBIGUOUS_REPLACEMENT",
   );
   assert.equal(
-    (await validateBinding({ descriptor: replacement, binding, activeSkills })).binding,
+    (
+      await validateBinding({
+        descriptor: replacement,
+        binding,
+        roots,
+        managerRecords,
+        activeSkills,
+      })
+    ).binding,
     binding,
   );
 });
@@ -1037,7 +935,7 @@ test("binding persists and revalidates an auditable provenance choice", async ()
     },
   ];
   const roots = [{ path: path.dirname(source), scope: "global", origin: "personal" }];
-  const discovery = await discoverSkills({ input: source, roots, managerRecords });
+  const discovery = await discoverFixtureSkills({ input: source, roots, managerRecords });
   const group = discovery.groups[0];
   const chosenCopy = group.copies.find(({ owner }) => owner === "manager:asm");
   const confirmedSelection = confirmDiscoverySelection({
@@ -1136,7 +1034,7 @@ test("binding accepts an unambiguous checked selection with path-only confirmati
     0,
   );
   const roots = [{ path: path.dirname(source), scope: "global", origin: "personal" }];
-  const discovery = await discoverSkills({ input: source, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: source, roots, managerRecords: [] });
   const group = discovery.groups[0];
   const copy = group.copies[0];
   const confirmedSelection = confirmDiscoverySelection({
@@ -1203,7 +1101,7 @@ test("binding accepts confirmed repository-only plugin provenance", async () => 
       repository,
     }],
   }];
-  const discovery = await discoverSkills({ input: source, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: source, roots, managerRecords: [] });
   const group = discovery.groups[0];
   const chosenCopy = group.copies.find(({ owner }) => owner === "plugin:fixture-host");
   const repositoryOnlyProvenance = `repository:${repository}`;
@@ -1246,7 +1144,7 @@ test("binding accepts confirmed repository-only plugin provenance", async () => 
       .status,
     0,
   );
-  const updatedDiscovery = await discoverSkills({
+  const updatedDiscovery = await discoverFixtureSkills({
     input: source,
     roots,
     managerRecords: [],
@@ -1324,7 +1222,7 @@ test("binding persists the confirmed plugin identity", async () => {
       }),
     },
   };
-  const discovery = await discoverSkills({ input: source, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: source, roots, managerRecords: [] });
   const group = discovery.groups[0];
   const chosenCopy = group.copies.find(({ owner }) => owner === "plugin:fixture-host");
   const confirmedSelection = confirmDiscoverySelection({
@@ -1402,7 +1300,7 @@ test("confirmed aggregated plugin evidence retains versioned-cache recovery", as
     },
   };
   const roots = rootsFor(versionOne, versionOneRoot);
-  const discovery = await discoverSkills({ input: versionOne, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: versionOne, roots, managerRecords: [] });
   const group = discovery.groups[0];
   const confirmedSelection = confirmDiscoverySelection({
     discovery,
@@ -1492,7 +1390,7 @@ test("binding preserves a provenance choice made through a customization alias",
     0,
   );
   const roots = [{ path: root, scope: "global", origin: "personal" }];
-  const discovery = await discoverSkills({ input: alias, roots, managerRecords: [] });
+  const discovery = await discoverFixtureSkills({ input: alias, roots, managerRecords: [] });
   const group = discovery.groups[0];
   assert.equal(group.conflict, true);
   const confirmedSelection = confirmDiscoverySelection({

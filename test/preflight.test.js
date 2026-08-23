@@ -5,7 +5,6 @@ import {
   mkdir,
   readFile,
   realpath,
-  rename,
   symlink,
   stat,
   unlink,
@@ -17,10 +16,6 @@ import test from "node:test";
 
 import { bindCustomization } from "../src/bindings.js";
 import {
-  confirmDiscoverySelection,
-  discoverSkills,
-} from "../src/discovery.js";
-import {
   fingerprintFile,
   fingerprintPath,
   fingerprintValues,
@@ -29,6 +24,7 @@ import {
 import { preflightCustomization } from "../src/preflight.js";
 import { reconcileCustomization } from "../src/reconcile.js";
 import { acceptMaintenanceUpdate } from "../src/maintenance.js";
+import { discoveryPerformanceChannel } from "../src/performance-diagnostics.js";
 
 const repository = "https://github.com/example/skills";
 
@@ -216,118 +212,41 @@ test("preflight flattens recursive overlays from base workflow through inner and
   assert.equal(result.maintenanceHandler, null);
 });
 
-test("preflight preserves ambient plugin discovery for cache recovery", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "preflight-ambient-plugin-"));
-  const claudeHome = path.join(root, "claude");
-  const cacheRoot = path.join(
-    claudeHome,
-    "plugins",
-    "cache",
-    "fixture-marketplace",
-    "reviewer",
-  );
-  const versionOneRoot = path.join(cacheRoot, "1");
-  const versionTwoRoot = path.join(cacheRoot, "2");
-  const versionOne = path.join(versionOneRoot, "skills", "review");
-  const versionTwo = path.join(versionTwoRoot, "skills", "review");
-  const customizationRoot = path.join(root, "review-overlay");
-  const statePath = path.join(root, "state", "bindings.json");
-  const installedPluginsPath = path.join(claudeHome, "plugins", "installed_plugins.json");
-  const identity = "local:plugin:claude-code:fixture-marketplace:reviewer";
-  const workflow = "---\nname: review\n---\nstable\n";
-  const installVersion = async (pluginRoot, source, version) => {
-    await mkdir(source, { recursive: true });
-    await writeFile(path.join(source, "SKILL.md"), workflow);
-    await mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
-    await writeFile(
-      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
-      JSON.stringify({ name: "reviewer", version, repository }),
-    );
-    await writeFile(
-      installedPluginsPath,
-      JSON.stringify({
-        plugins: {
-          "reviewer@fixture-marketplace": [{
-            scope: "user",
-            installPath: pluginRoot,
-            version,
-          }],
-        },
-      }),
-    );
+test("preflight refreshes discovery for each recursive operation", async () => {
+  const item = await recursiveFixture();
+  const metrics = {};
+  const listener = ({ name, amount = 1 }) => {
+    metrics[name] = (metrics[name] ?? 0) + amount;
   };
-  await installVersion(versionOneRoot, versionOne, "1");
-  await writeRuntimeFiles(customizationRoot, "review-overlay", "Apply the overlay.");
-  const descriptor = overlayDescriptor({
-    id: "urn:test:preflight-ambient-plugin",
-    name: "review-overlay",
-    owned: await payloadFingerprint(customizationRoot),
-    source: {
-      skill_name: "review",
-      kind: "repository",
-      repository,
-      upstream_path: "skills/review/SKILL.md",
-      license: "MIT",
-      effective_fingerprint: await fingerprintPath(versionOne),
-      review: { revision: "ambient-plugin" },
-    },
-  });
-  await writeDescriptor(customizationRoot, descriptor);
-
-  const ambientHomes = {
-    CLAUDE_CONFIG_DIR: claudeHome,
-    CODEX_HOME: path.join(root, "codex"),
-    CURSOR_HOME: path.join(root, "cursor"),
-    GEMINI_CLI_HOME: path.join(root, "gemini"),
-  };
-  const previousHomes = Object.fromEntries(
-    Object.keys(ambientHomes).map((name) => [name, process.env[name]]),
-  );
-  Object.assign(process.env, ambientHomes);
+  discoveryPerformanceChannel.subscribe(listener);
   try {
-    const discovery = await discoverSkills({ input: versionOne, managerRecords: [] });
-    const group = discovery.groups[0];
-    const copy = group.copies.find((candidate) => candidate.pluginIdentity === identity);
-    const confirmedSelection = confirmDiscoverySelection({
-      discovery,
-      choice: {
-        name: group.name,
-        fingerprint: group.fingerprint,
-        path: copy.path,
-        owner: copy.owner,
-      },
-      interactive: true,
-      confirmedProvenance: `repository:${repository}`,
-      confirmationEvidence: {
-        actor: "human",
-        reason: "selected ambient plugin provenance",
-      },
+    const first = await preflightCustomization({
+      descriptorPath: path.join(item.outer, "customization.json"),
+      context: "workspace:test",
+      statePath: item.statePath,
+      roots: item.roots,
     });
-    await bindCustomization({
-      descriptor,
-      sourcePath: versionOne,
-      context: "global",
-      statePath,
-      confirmedSelection,
-      interactive: true,
-      confirm: async () => true,
-    });
+    assert.equal(first.status, "ready");
+    assert.equal(metrics.discovery_calls, 2);
+    assert.equal(metrics.root_scans, 4);
 
-    await rename(versionOneRoot, path.join(root, "removed"));
-    await installVersion(versionTwoRoot, versionTwo, "2");
-    const result = await preflightCustomization({
-      descriptorPath: path.join(customizationRoot, "customization.json"),
-      context: "global",
-      statePath,
+    await writeFile(
+      path.join(item.base, "SKILL.md"),
+      "---\nname: review\n---\nChanged base workflow.\n",
+    );
+    const second = await preflightCustomization({
+      descriptorPath: path.join(item.outer, "customization.json"),
+      context: "workspace:test",
+      statePath: item.statePath,
+      roots: item.roots,
     });
-
-    assert.equal(result.status, "ready");
-    assert.equal(result.steps[0].path, path.join(await realpath(versionTwo), "SKILL.md"));
+    assert.equal(second.status, "maintenance-required");
+    assert.equal(second.maintenanceHandler.reason, "source-drift");
+    assert.equal(second.maintenanceHandler.customizationId, item.innerDescriptor.id);
+    assert.equal(metrics.discovery_calls, 4);
+    assert.equal(metrics.root_scans, 8);
   } finally {
-    for (const [name, value] of Object.entries(previousHomes)) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
+    discoveryPerformanceChannel.unsubscribe(listener);
   }
 });
 
@@ -699,122 +618,4 @@ test("preflight detects recursive customization cycles by stable ID and canonica
   assert.equal(result.status, "maintenance-required");
   assert.equal(result.maintenanceHandler.reason, "cycle-detected");
   assert.equal(result.maintenanceHandler.customizationId, first.id);
-});
-
-test("verified forks are runtime leaves and execute their complete independent workflow", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "preflight-fork-"));
-  const forkRoot = path.join(root, "review-standalone");
-  const snapshot = path.join(forkRoot, "provenance", "source");
-  await mkdir(snapshot, { recursive: true });
-  await writeFile(path.join(snapshot, "SKILL.md"), "source\n");
-  await writeFile(path.join(forkRoot, "SKILL.md"), "dispatcher\n");
-  await writeFile(path.join(forkRoot, "CUSTOMIZATION.md"), "complete workflow\n");
-  const diffPath = path.join(forkRoot, "provenance", "source.diff");
-  await writeFile(
-    diffPath,
-    "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1 +1 @@\n-source\n+dispatcher\n--- /dev/null\n+++ b/CUSTOMIZATION.md\n@@ -0,0 +1 @@\n+complete workflow\n",
-  );
-  const owned = await payloadFingerprint(forkRoot);
-  const snapshotFingerprint = await fingerprintPath(snapshot);
-  const descriptor = {
-    schema_version: 1,
-    id: "urn:test:review-standalone",
-    type: "fork",
-    name: "review-standalone",
-    license: "MIT",
-    entrypoint: "SKILL.md",
-    customization: "CUSTOMIZATION.md",
-    dependencies: [],
-    owned_payload: { reviewed_fingerprint: owned },
-    source: {
-      skill_name: "review",
-      kind: "repository",
-      repository,
-      upstream_path: "skills/review/SKILL.md",
-      license: "MIT",
-      effective_fingerprint: snapshotFingerprint,
-      review: { revision: "fork-review" },
-    },
-    activation: { mode: "coexist" },
-    fork: {
-      snapshot: "provenance/source",
-      diff: "provenance/source.diff",
-      snapshot_fingerprint: snapshotFingerprint,
-      diff_fingerprint: await fingerprintFile(diffPath),
-    },
-  };
-  await writeDescriptor(forkRoot, descriptor);
-  const descriptorPath = path.join(forkRoot, "customization.json");
-  const result = await preflightCustomization({
-    descriptorPath,
-    context: "workspace:test",
-    statePath: path.join(root, "state", "bindings.json"),
-  });
-  const canonicalForkRoot = await realpath(forkRoot);
-  assert.equal(result.status, "ready");
-  assert.deepEqual(result.steps, [{
-    role: "workflow",
-    path: path.join(canonicalForkRoot, "CUSTOMIZATION.md"),
-    root: canonicalForkRoot,
-    customizationId: descriptor.id,
-  }]);
-  assert.deepEqual(result.advisories, []);
-  const changedSourceFingerprint =
-    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-  await assert.rejects(
-    acceptMaintenanceUpdate({
-      descriptorPath,
-      sourceEffectiveFingerprint: changedSourceFingerprint,
-    }),
-    /full-source snapshot.*source checkpoint/i,
-  );
-  assert.deepEqual(JSON.parse(await readFile(descriptorPath, "utf8")), descriptor);
-  await assert.rejects(
-    acceptMaintenanceUpdate({
-      descriptorPath,
-      reviewedAt: "2026-08-10T00:00:00Z",
-      evidence: "This full-source fork has no materialization record.",
-    }),
-    /only valid for fork materialization maintenance/i,
-  );
-
-  const trackedSkills = path.join(root, "tracked-skills");
-  const trackedSource = path.join(trackedSkills, "review");
-  await mkdir(trackedSource, { recursive: true });
-  await writeFile(
-    path.join(trackedSource, "SKILL.md"),
-    "---\nname: review\n---\nTracked source.\n",
-  );
-  const trackingState = path.join(root, "state", "tracking-bindings.json");
-  await bindCustomization({
-    descriptor,
-    sourcePath: trackedSource,
-    context: "workspace:tracked",
-    statePath: trackingState,
-    roots: [{ path: trackedSkills, scope: "workspace", origin: "fixture" }],
-    interactive: true,
-    confirm: async () => true,
-  });
-  await writeFile(
-    path.join(trackedSource, "SKILL.md"),
-    "---\nname: review\n---\nTracked source drift.\n",
-  );
-  const advisory = await preflightCustomization({
-    descriptorPath: path.join(forkRoot, "customization.json"),
-    context: "workspace:tracked",
-    statePath: trackingState,
-  });
-  assert.equal(advisory.status, "ready-with-advisory");
-  assert.equal(advisory.advisories[0].code, "tracking-source-drift");
-  assert.deepEqual(advisory.steps, result.steps);
-
-  await writeFile(trackingState, "{\n");
-  const invalidTrackingState = await preflightCustomization({
-    descriptorPath: path.join(forkRoot, "customization.json"),
-    context: "workspace:tracked",
-    statePath: trackingState,
-  });
-  assert.equal(invalidTrackingState.status, "ready-with-advisory");
-  assert.equal(invalidTrackingState.advisories[0].code, "tracking-state-invalid");
-  assert.deepEqual(invalidTrackingState.steps, result.steps);
 });

@@ -248,6 +248,7 @@ Published descriptors keep stable identity and provenance portable. Concrete sou
 - For Node.js/npm prerequisites, lifecycle helper negotiation, canonical rendering, local-code execution approval, registry download/cache permission, package selection, and compatibility guarantees, read [Helper contract 2](docs/helper-contract-2.md). [Helper contract 1](docs/helper-contract-1.md) remains supported for existing dispatchers.
 - For publishable identity and activation fields, read [Descriptor v1](docs/descriptor-v1.md).
 - For roots, evidence order, source selection, and local state, read [Discovery and bindings](docs/discovery-and-bindings.md).
+- For deterministic discovery tests, ambient integration, artifact verification, performance scenarios, and snapshot freshness, read [Testing and performance](docs/testing-and-performance.md).
 - For overlay drift and fork-payload verification, read [Reconciliation](docs/reconciliation.md).
 - For embedding the engine in another Node.js tool, read the [Library reference](docs/library.md).
 - For the runtime decision, read [ADR 0001](docs/adr/0001-managed-recursive-runtime.md).

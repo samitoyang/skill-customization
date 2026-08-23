@@ -17,7 +17,6 @@ import {
   readBindingStore,
   resolveBinding,
 } from "../src/bindings.js";
-import { discoverSkills } from "../src/discovery.js";
 import { readDescriptor, validateDescriptor } from "../src/descriptor.js";
 import {
   fingerprintFile,
@@ -25,6 +24,7 @@ import {
   payloadFingerprint,
 } from "../src/fingerprint.js";
 import { reconcileCustomization } from "../src/reconcile.js";
+import { discoverFixtureSkills } from "./support/discovery-modes.js";
 
 const fixtureRoot = fileURLToPath(
   new URL("./fixtures/contract-v1/", import.meta.url),
@@ -246,7 +246,11 @@ test("helper contract 1: discovery and first-use binding semantics remain stable
     scope: "workspace",
     origin: "project",
   }];
-  const discovery = await discoverSkills({ input: "review", roots });
+  const discovery = await discoverFixtureSkills({
+    input: "review",
+    roots,
+    managerRecords: [],
+  });
   assert.equal(discovery.groups.length, 1);
   assert.equal(discovery.groups[0].name, "review");
   assert.equal(discovery.groups[0].copies[0].path, sourceRoot);

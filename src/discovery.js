@@ -35,8 +35,10 @@ import {
   registrySkillRoots,
 } from "./skill-root-registry.js";
 import { boundedWorkspaceDirectories } from "./workspace-roots.js";
+import { publishDiscoveryPerformanceMetric } from "./performance-diagnostics.js";
 
 const execFile = promisify(execFileCallback);
+
 function root(pathname, owner, scope, origin = owner, metadata = {}) {
   return {
     ...metadata,
@@ -406,6 +408,7 @@ async function inspectFilesystemInput(input, cwd) {
 }
 
 async function scanRoot(rootInfo) {
+  publishDiscoveryPerformanceMetric("root_scans");
   let entries;
   try {
     entries = await readdir(rootInfo.path, { withFileTypes: true });
@@ -489,6 +492,7 @@ async function scanRoot(rootInfo) {
 
 async function gitEvidence(directory) {
   try {
+    publishDiscoveryPerformanceMetric("git_probes");
     const { stdout: topLevelOutput } = await execFile("git", [
       "-C",
       directory,
@@ -763,9 +767,11 @@ export async function discoverSkills({
   customPath,
   rootDiagnostics: suppliedRootDiagnostics = [],
 } = {}) {
+  publishDiscoveryPerformanceMetric("discovery_calls");
   let managerDiagnostics = [];
   const rootDiagnostics = [...suppliedRootDiagnostics];
   if (managerRecords === undefined) {
+    publishDiscoveryPerformanceMetric("manager_collections");
     const collected = await managerCollector({ home, cwd, env, ...managerOptions });
     managerRecords = collected.records;
     managerDiagnostics = collected.diagnostics;
@@ -775,6 +781,7 @@ export async function discoverSkills({
   let pluginRoots = [];
   let pluginDiagnostics = [];
   if (!rootsAreExplicit && includePlugins !== false) {
+    publishDiscoveryPerformanceMetric("plugin_discovery_calls");
     const plugins = await pluginDiscovery({
       home,
       cwd,

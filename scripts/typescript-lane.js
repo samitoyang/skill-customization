@@ -3,6 +3,7 @@ import { access, copyFile, cp, mkdir, readFile, readdir, rm } from "node:fs/prom
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isolatedTestEnvironment } from "./test-environment.js";
 
 export const repositoryRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -171,20 +172,34 @@ async function assertSourceMaps(root, outputDirectory) {
   }
 }
 
-async function assertEmittedTestSuite(root, outputDirectory) {
+async function assertEmittedTestSuite(root, outputDirectory, { testConcurrency } = {}) {
   const tests = (await filesBelow(path.join(outputDirectory, "test")))
     .filter((file) => file.endsWith(".test.js"))
     .filter((file) => path.basename(file) !== "typescript-lane.test.js")
     .sort();
   if (tests.length === 0) throw new Error("TypeScript artifact emitted no test files");
-  const result = spawnSync(process.execPath, ["--test", ...tests], {
-    cwd: root,
-    encoding: "utf8",
-    maxBuffer: 20 * 1024 * 1024,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || "emitted test suite failed");
+  if (testConcurrency !== undefined
+    && (!Number.isInteger(testConcurrency) || testConcurrency <= 0)) {
+    throw new TypeError("emitted test concurrency must be a positive integer");
+  }
+  const isolated = await isolatedTestEnvironment();
+  try {
+    const result = spawnSync(process.execPath, [
+      "--test",
+      ...(testConcurrency === undefined ? [] : [`--test-concurrency=${testConcurrency}`]),
+      ...tests,
+    ], {
+      cwd: isolated.cwd,
+      encoding: "utf8",
+      env: isolated.env,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(result.stderr || result.stdout || "emitted test suite failed");
+    }
+  } finally {
+    await isolated.cleanup();
   }
 }
 
@@ -258,7 +273,11 @@ function assertPublishedPackageContract(packageJson) {
   assert.equal(packageJson.peerDependencies, undefined);
 }
 
-export async function verifyEmittedArtifact({ root = repositoryRoot, outputDirectory } = {}) {
+export async function verifyEmittedArtifact({
+  root = repositoryRoot,
+  outputDirectory,
+  testConcurrency,
+} = {}) {
   if (!outputDirectory) throw new TypeError("TypeScript verification requires an output directory");
   const artifact = await buildTypescript({ root, outputDirectory });
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
@@ -268,7 +287,7 @@ export async function verifyEmittedArtifact({ root = repositoryRoot, outputDirec
   await assertEmittedJavaScriptIsNodeCompatible(artifact.outputDirectory);
   await assertCliContract(root, artifact.outputDirectory);
   await assertLibraryContract(root, artifact.outputDirectory, packageJson.version);
-  await assertEmittedTestSuite(root, artifact.outputDirectory);
+  await assertEmittedTestSuite(root, artifact.outputDirectory, { testConcurrency });
   assertPublishedPackageContract(packageJson);
   return artifact;
 }

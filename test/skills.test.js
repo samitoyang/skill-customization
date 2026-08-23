@@ -414,6 +414,7 @@ test("public documentation pointers resolve", async () => {
     "docs/discovery-and-bindings.md",
     "docs/library.md",
     "docs/reconciliation.md",
+    "docs/testing-and-performance.md",
     "docs/agents/domain.md",
     "docs/agents/issue-tracker.md",
     "docs/agents/triage-labels.md",
@@ -441,6 +442,7 @@ test("the package uses a public-document allowlist and verifies its Node 22.14 f
     "docs/discovery-and-bindings.md",
     "docs/library.md",
     "docs/reconciliation.md",
+    "docs/testing-and-performance.md",
     "docs/adr/0001-managed-recursive-runtime.md",
     "docs/adr/0002-bounded-plugin-provenance-discovery.md",
   ]);
@@ -450,6 +452,15 @@ test("the package uses a public-document allowlist and verifies its Node 22.14 f
   assert.ok(packageJson.files.includes("CONTRIBUTING.md"));
   assert.ok(packageJson.files.includes("SECURITY.md"));
   assert.match(packageJson.scripts.verify, /npm run check:package/);
+  assert.equal(
+    packageJson.scripts["verify:artifact"],
+    packageJson.scripts["verify:typescript"],
+  );
+  assert.match(packageJson.scripts["test:performance"], /run-performance-suite\.js/);
+  assert.match(packageJson.scripts["test:ambient"], /--lane ambient/);
+  assert.match(packageJson.scripts["test:artifact"], /--lane artifact/);
+  assert.match(packageJson.scripts.verify, /npm run test:ambient/);
+  assert.match(packageJson.scripts.verify, /npm run test:artifact/);
   assert.equal(packageJson.scripts.prepublishOnly, "npm run verify");
   const packageAudit = await read("scripts/check-package.js");
   for (const releaseFile of [
@@ -466,6 +477,10 @@ test("the package uses a public-document allowlist and verifies its Node 22.14 f
   );
   const workflow = await read(".github/workflows/ci.yml");
   assert.match(workflow, /node:\s*\["22\.14\.0", "24", "26"\]/);
+  assert.match(
+    workflow,
+    /node-version: \$\{\{ matrix\.node \}\}\s+- run: npm ci --ignore-scripts\s+- run: npm run verify/,
+  );
   assert.match(workflow, /npm pack --dry-run/);
   assert.match(await read("scripts/verify.js"), /Node\.js 22\.14 or newer/);
 });

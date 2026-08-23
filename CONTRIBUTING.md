@@ -2,7 +2,7 @@
 
 Use Node.js 22.14 or newer and make one vertical slice at a time. Runtime code has no third-party dependencies.
 
-1. Add or update `node:test` coverage for public behavior.
+1. Add or update `node:test` coverage for public behavior. Use the fixture discovery seam by default; ambient integration, emitted-artifact verification, and performance measurement follow the separate lanes in [Testing and performance](docs/testing-and-performance.md).
 2. Keep descriptors portable and binding state local. Reuse the existing seams for normalization, discovery, manager metadata, fingerprints, bindings, reconciliation, and atomic writes.
 3. Keep every published skill independently installable: local links stay inside its skill directory, while shared runtime logic stays in the versioned `skill-customization` package.
 4. Keep `SKILL.md`, eval prompts, and handoff text concise; disclose branch-specific detail through focused references inside the same skill.
