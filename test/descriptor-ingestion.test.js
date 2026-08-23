@@ -142,6 +142,30 @@ test("Descriptor ingestion reports parse and owned-artifact diagnostics without 
   );
 });
 
+test("Descriptor ingestion checks folder identity against the canonical directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-ingestion-alias-"));
+  const canonicalRoot = path.join(root, "review-real");
+  const aliasRoot = path.join(root, "review-alias");
+  await mkdir(canonicalRoot);
+  await writeFile(path.join(canonicalRoot, "SKILL.md"), "dispatcher\n");
+  await writeFile(path.join(canonicalRoot, "CUSTOMIZATION.md"), "delta\n");
+  const value = descriptor({
+    name: "review-alias",
+    owned: await payloadFingerprint(canonicalRoot),
+    sourceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  await writeDescriptor(canonicalRoot, value);
+  await symlink(canonicalRoot, aliasRoot);
+
+  const result = await ingestDescriptor({
+    descriptorPath: path.join(aliasRoot, "customization.json"),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.diagnostics[0].stage, "folder");
+  assert.match(result.diagnostics[0].message, /does not match folder name review-real/);
+});
+
 test("a discovered customization crosses the checked Descriptor, Binding, and Preflight interfaces", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-ingestion-vertical-"));
   const sourceRoot = path.join(root, "review");

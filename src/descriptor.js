@@ -763,7 +763,19 @@ export async function ingestDescriptor({ descriptorPath, inventory = [] } = {}) 
   }
 
   const root = path.dirname(absoluteDescriptorPath);
-  const actualFolder = path.basename(root);
+  let canonicalRoot;
+  try {
+    canonicalRoot = await realpath(root);
+  } catch (error) {
+    return failed(diagnostic({
+      code: "DESCRIPTOR_READ_ERROR",
+      stage: "read",
+      message: `cannot read descriptor folder ${root}: ${error.message}`,
+      causeCode: error.code,
+      causeMessage: error.message,
+    }));
+  }
+  const actualFolder = path.basename(canonicalRoot);
   if (descriptor.name !== actualFolder) {
     return failed(diagnostic({
       code: "INVALID_DESCRIPTOR",
@@ -817,19 +829,6 @@ export async function ingestDescriptor({ descriptorPath, inventory = [] } = {}) 
     }
   } catch (error) {
     return failed(diagnosticFromError(error, "artifact"));
-  }
-
-  let canonicalRoot;
-  try {
-    canonicalRoot = await realpath(root);
-  } catch (error) {
-    return failed(diagnostic({
-      code: "DESCRIPTOR_READ_ERROR",
-      stage: "read",
-      message: `cannot read descriptor folder ${root}: ${error.message}`,
-      causeCode: error.code,
-      causeMessage: error.message,
-    }));
   }
 
   return successfulIngestion({
