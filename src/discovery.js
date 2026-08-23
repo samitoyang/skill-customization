@@ -39,164 +39,26 @@ import { publishDiscoveryPerformanceMetric } from "./performance-diagnostics.js"
 
 const execFile = promisify(execFileCallback);
 
-function root(pathname, owner, scope, origin = owner, metadata = {}) {
+function rootObservation(item, kind, defaults = {}) {
+  if (typeof item === "string") {
+    return {
+      kind,
+      path: item,
+      owner: defaults.owner ?? "custom",
+      scope: defaults.scope ?? "custom",
+      origin: defaults.origin ?? defaults.owner ?? "custom",
+    };
+  }
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return { kind, path: item };
+  }
   return {
-    ...metadata,
-    path: path.resolve(pathname),
-    owner,
-    owners: [...new Set(metadata.owners ?? [owner])],
-    scope,
-    origin,
+    ...item,
+    kind: item.kind ?? kind,
+    owner: item.owner ?? defaults.owner ?? "custom",
+    scope: item.scope ?? defaults.scope ?? "custom",
+    origin: item.origin ?? defaults.origin ?? item.owner ?? "custom",
   };
-}
-
-function mergePluginRootPolicy(existing, normalized) {
-  const pluginRecords = [existing, normalized].filter(
-    ({ origin }) => origin === "plugin",
-  );
-  if (pluginRecords.length === 0) return;
-
-  // Keep the first path/owner as the public copy, but apply plugin scan policy
-  // whenever any observation identifies the physical root as plugin-backed.
-  existing.origin = "plugin";
-  existing.host ??= pluginRecords.find(({ host }) => host)?.host;
-  existing.pluginManifest ??= pluginRecords.find(
-    ({ pluginManifest }) => pluginManifest,
-  )?.pluginManifest;
-
-  const pluginRoots = [
-    ...new Set(pluginRecords.flatMap((record) => [
-      ...(record.pluginRoots ?? []),
-      record.pluginRoot,
-    ]).filter(Boolean).map((pluginRoot) => path.resolve(pluginRoot))),
-  ];
-  if (pluginRoots.length > 0) {
-    existing.pluginRoots = pluginRoots;
-    existing.pluginRoot ??= pluginRoots[0];
-  }
-
-  const singleSkillPolicies = pluginRecords
-    .filter((record) => Object.hasOwn(record, "singleSkill"))
-    .map(({ singleSkill }) => singleSkill);
-  if (singleSkillPolicies.includes(true)) existing.singleSkill = true;
-  else if (singleSkillPolicies.length > 0) existing.singleSkill = false;
-
-  const rootSkillPolicies = pluginRecords
-    .filter((record) => Object.hasOwn(record, "includeRootSkill"))
-    .map(({ includeRootSkill }) => includeRootSkill);
-  if (rootSkillPolicies.includes(false)) existing.includeRootSkill = false;
-  else if (rootSkillPolicies.includes(true)) existing.includeRootSkill = true;
-}
-
-function uniqueRoots(roots) {
-  const byPath = new Map();
-  for (const item of roots) {
-    const normalized = typeof item === "string"
-      ? root(item, "custom", "custom")
-      : root(
-        item.path,
-        item.owner ?? "custom",
-        item.scope ?? "custom",
-        item.origin,
-        item,
-      );
-    const existing = byPath.get(normalized.path);
-    if (!existing) {
-      byPath.set(normalized.path, normalized);
-      continue;
-    }
-    existing.owners = [
-      ...new Set([...existing.owners, ...normalized.owners]),
-    ];
-    existing.aliases = [
-      ...new Set([
-        ...(existing.aliases ?? [existing.path]),
-        ...(normalized.aliases ?? [normalized.path]),
-      ]),
-    ];
-    existing.registries = [
-      ...new Set([
-        ...(existing.registries ?? [existing.registry].filter(Boolean)),
-        ...(normalized.registries ?? [normalized.registry].filter(Boolean)),
-      ]),
-    ];
-    if (existing.scope !== normalized.scope) {
-      existing.scopes = [
-        ...new Set([...(existing.scopes ?? [existing.scope]), normalized.scope]),
-      ];
-    }
-    // Audit-only cache observations stay inactive unless another root identifies
-    // the same physical source as an active installation.
-    if (normalized.active === true) {
-      existing.active = true;
-    } else if (existing.active === false && normalized.active !== false) {
-      delete existing.active;
-    }
-    existing.pluginEvidence = [
-      ...new Map([
-        ...(existing.pluginEvidence ?? []).map((value) => [JSON.stringify(value), value]),
-        ...(normalized.pluginEvidence ?? []).map((value) => [JSON.stringify(value), value]),
-      ]).values(),
-    ];
-    existing.pluginIdentities = [
-      ...new Set([
-        ...(existing.pluginIdentities ?? []).filter(Boolean),
-        existing.pluginIdentity,
-        ...(normalized.pluginIdentities ?? []).filter(Boolean),
-        normalized.pluginIdentity,
-      ]),
-    ].filter(Boolean);
-    // A standard root can be an alias for a plugin root; keep plugin context on
-    // the public copy while pluginEvidence/pluginIdentities retain every observation.
-    if (!existing.plugin && normalized.plugin) {
-      existing.plugin = structuredClone(normalized.plugin);
-    }
-    if (!existing.pluginMetadata && normalized.pluginMetadata) {
-      existing.pluginMetadata = structuredClone(normalized.pluginMetadata);
-    }
-    if (!existing.pluginIdentity && normalized.pluginIdentity) {
-      existing.pluginIdentity = normalized.pluginIdentity;
-    }
-    mergePluginRootPolicy(existing, normalized);
-  }
-  return [...byPath.values()];
-}
-
-async function uniquePhysicalRoots(roots) {
-  const byPhysicalPath = new Map();
-  for (const item of roots) {
-    const normalized = typeof item === "string"
-      ? root(item, "custom", "custom")
-      : root(
-        item.path,
-        item.owner ?? "custom",
-        item.scope ?? "custom",
-        item.origin,
-        item,
-      );
-    const physicalPath = normalized.physicalPath
-      ?? await realpath(normalized.path).catch(() => normalized.path);
-    const existing = byPhysicalPath.get(physicalPath);
-    if (!existing) {
-      byPhysicalPath.set(physicalPath, { ...normalized, physicalPath });
-      continue;
-    }
-    const [merged] = uniqueRoots([
-      existing,
-      {
-        ...normalized,
-        // Retain the standard-facing alias while uniqueRoots promotes any
-        // plugin containment and scan policy attached to the physical source.
-        path: existing.path,
-        aliases: [
-          ...(existing.aliases ?? [existing.path]),
-          ...(normalized.aliases ?? [normalized.path]),
-        ],
-      },
-    ]);
-    byPhysicalPath.set(physicalPath, { ...merged, physicalPath });
-  }
-  return [...byPhysicalPath.values()];
 }
 
 function canonicalManagerProvenance(record) {
@@ -226,12 +88,12 @@ function canonicalManagerProvenance(record) {
 }
 
 /**
- * Collect host standard and configured root observations and normalize them
- * through the Skill root registry.
+ * Build host standard and configured root observations for the request-scoped
+ * registry pass owned by Discovery.
  *
- * @returns {{readonly roots: readonly object[], readonly diagnostics: readonly object[]}}
+ * @returns {object[]}
  */
-export function hostSkillRootRegistry({
+function hostSkillRootObservations({
   home = os.homedir(),
   cwd = process.cwd(),
   env = process.env,
@@ -275,7 +137,17 @@ export function hostSkillRootRegistry({
       origin: "host-added",
     });
   }
-  return normalizeSkillRootObservations(roots);
+  return roots;
+}
+
+/**
+ * Collect host standard and configured root observations and normalize them
+ * through the Skill root registry.
+ *
+ * @returns {{readonly roots: readonly object[], readonly diagnostics: readonly object[]}}
+ */
+export function hostSkillRootRegistry(options = {}) {
+  return normalizeSkillRootObservations(hostSkillRootObservations(options));
 }
 
 /**
@@ -599,6 +471,7 @@ async function candidateFromDirectory(directory, rootInfo) {
     path: path.resolve(directory),
     realPath: realDirectory,
     entrypoint,
+    rootAliases: [...(rootInfo.aliases ?? [rootInfo.path])],
     owner: rootInfo.owner,
     owners: rootInfo.owners ?? [rootInfo.owner],
     scope: rootInfo.scope,
@@ -631,7 +504,12 @@ async function candidateFromDirectory(directory, rootInfo) {
 }
 
 function managerEvidenceFor(candidate, records) {
-  const candidatePaths = new Set([candidate.path, candidate.realPath, candidate.entrypoint]);
+  const candidatePaths = new Set([
+    candidate.path,
+    candidate.realPath,
+    candidate.entrypoint,
+    ...(candidate.rootAliases ?? []),
+  ]);
   const managerOwners = (candidate.owners ?? [candidate.owner]).filter((owner) =>
     owner.startsWith("manager:"),
   );
@@ -792,18 +670,21 @@ export async function discoverSkills({
     pluginDiagnostics = plugins.diagnostics ?? [];
   }
   // Manager records and customPath are explicit evidence sources; roots controls ambient host/plugin roots.
-  let ambientRoots = roots;
+  let ambientRootObservations = roots;
   if (!rootsAreExplicit) {
-    const hostRegistry = hostSkillRootRegistry({ home, cwd, env });
-    ambientRoots = hostRegistry.roots;
-    rootDiagnostics.push(...hostRegistry.diagnostics);
+    ambientRootObservations = hostSkillRootObservations({ home, cwd, env });
   }
-  const declaredRoots = [
-    ...ambientRoots,
-    ...(rootsAreExplicit ? [] : additionalRoots),
-    ...pluginRoots,
-    ...managerSkillRoots(managerRecords),
-    ...(customPath ? [{ path: customPath, owner: "custom", scope: "custom" }] : []),
+  const rootObservations = [
+    ...(ambientRootObservations ?? []).map((item) =>
+      rootObservation(item, "explicit")),
+    ...(rootsAreExplicit ? [] : additionalRoots).map((item) =>
+      rootObservation(item, "configured")),
+    ...pluginRoots.map((item) => rootObservation(item, "plugin")),
+    ...managerSkillRoots(managerRecords).map((item) =>
+      rootObservation(item, "manager")),
+    ...(customPath
+      ? [rootObservation({ path: customPath }, "explicit")]
+      : []),
   ];
   const filesystemInput = input
     ? await inspectFilesystemInput(input, cwd)
@@ -813,9 +694,20 @@ export async function discoverSkills({
     input && !filesystemInput.exists && isRepositoryLocator(input),
   );
   if (explicitDirectory) {
-    declaredRoots.push(root(explicitDirectory, "explicit", "custom", "custom-path"));
+    rootObservations.push(
+      rootObservation({
+        path: explicitDirectory,
+        owner: "explicit",
+        scope: "custom",
+        origin: "custom-path",
+      }, "explicit"),
+    );
   }
-  const normalizedRoots = await uniquePhysicalRoots(declaredRoots);
+  const rootRegistry = normalizeSkillRootObservations(rootObservations);
+  rootDiagnostics.push(...rootRegistry.diagnostics);
+  // The registry returns an immutable decision; Discovery retains its
+  // historical mutable snapshot surface for callers that annotate or sort it.
+  const normalizedRoots = rootRegistry.roots.map((record) => structuredClone(record));
   const scans = await Promise.all(normalizedRoots.map(scanRoot));
   const candidates = scans.flatMap(({ candidates: rootCandidates }) =>
     rootCandidates

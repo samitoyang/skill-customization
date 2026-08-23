@@ -86,6 +86,7 @@ export function managerSkillRoots(records) {
   return records
     .filter(({ path: managerPath }) => managerPath)
     .map((record) => ({
+      kind: "manager",
       path:
         path.basename(record.path).toLowerCase() === "skill.md"
           ? path.dirname(record.path)

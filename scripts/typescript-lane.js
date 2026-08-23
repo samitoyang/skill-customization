@@ -258,6 +258,69 @@ async function assertLibraryContract(root, outputDirectory, packageVersion) {
     emitted.renderDispatcher("semantic-overlay", metadata),
     source.renderDispatcher("semantic-overlay", metadata),
   );
+  const [rootRegistryDeclaration, indexDeclaration] = await Promise.all([
+    readFile(
+      path.join(outputDirectory, "src", "skill-root-registry.d.ts"),
+      "utf8",
+    ),
+    readFile(path.join(outputDirectory, "src", "index.d.ts"), "utf8"),
+  ]);
+  assert.match(indexDeclaration, /export \* from "\.\/skill-root-registry\.js";/);
+  assert.match(
+    rootRegistryDeclaration,
+    /export type PluginProvenanceObservation = import\("\.\/provenance\.js"\)\.PluginProvenanceObservation;/,
+  );
+  const scanRecord = rootRegistryDeclaration.match(
+    /export type SkillRootScanRecord = \{([\s\S]*?)\n\};/,
+  );
+  assert.ok(scanRecord, "emitted SkillRootScanRecord declaration is missing");
+  const laterObservation = rootRegistryDeclaration.match(
+    /export type LaterSkillRootObservation = \{([\s\S]*?)\n\};/,
+  );
+  assert.ok(
+    laterObservation,
+    "emitted LaterSkillRootObservation declaration is missing",
+  );
+  const standardObservation = rootRegistryDeclaration.match(
+    /export type StandardSkillRootObservation = \{([\s\S]*?)\n\};/,
+  );
+  const configuredObservation = rootRegistryDeclaration.match(
+    /export type ConfiguredSkillRootObservation = \{([\s\S]*?)\n\};/,
+  );
+  assert.ok(
+    standardObservation && configuredObservation,
+    "emitted standard root observation declarations are missing",
+  );
+  const pluginFieldTypes = new Map([
+    ["host", "string"],
+    ["plugin", "PluginRootMetadata"],
+    ["pluginEvidence", "readonly PluginProvenanceObservation\\[\\]"],
+    ["pluginIdentities", "readonly string\\[\\]"],
+    ["pluginIdentity", "string"],
+    ["pluginManifest", "string"],
+    ["pluginMetadata", "PluginRootMetadata"],
+    ["pluginRoot", "string"],
+    ["pluginRoots", "readonly string\\[\\]"],
+  ]);
+  for (const [field, type] of pluginFieldTypes) {
+    const declaration = new RegExp(`\\b${field}\\?: ${type};`);
+    assert.match(scanRecord[1], declaration);
+    assert.match(laterObservation[1], declaration);
+  }
+  assert.match(
+    laterObservation[1],
+    /aliases\?: readonly string\[\];/,
+  );
+  assert.match(
+    laterObservation[1],
+    /owners\?: readonly string\[\];/,
+  );
+  for (const declaration of [standardObservation[1], configuredObservation[1]]) {
+    assert.match(declaration, /aliases\?: readonly string\[\];/);
+    assert.match(declaration, /owners\?: readonly string\[\];/);
+  }
+  assert.match(scanRecord[1], /aliases: readonly string\[\];/);
+  assert.match(scanRecord[1], /owners: readonly string\[\];/);
 }
 
 function assertPublishedPackageContract(packageJson) {

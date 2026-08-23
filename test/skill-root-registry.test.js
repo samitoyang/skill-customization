@@ -233,6 +233,205 @@ test("registry normalizes standard and configured root observations", async () =
   }
 });
 
+test("registry merges plugin and manager observations without promoting ownership", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "skill-root-registry-plugin-"));
+  try {
+    const physical = path.join(fixture, "plugin", "skills");
+    const standardAlias = path.join(fixture, "workspace", ".agents", "skills");
+    const managerAlias = path.join(fixture, "manager", "skills");
+    await mkdir(physical, { recursive: true });
+    await mkdir(path.dirname(standardAlias), { recursive: true });
+    await mkdir(path.dirname(managerAlias), { recursive: true });
+    await symlink(physical, standardAlias, "dir");
+    await symlink(physical, managerAlias, "dir");
+
+    const evidence = {
+      kind: "plugin",
+      host: "fixture",
+      plugin: "reviewer",
+      marketplace: "official",
+      identity: "local:plugin:fixture:official:reviewer",
+    };
+    const result = normalizeSkillRootObservations([
+      {
+        kind: "standard",
+        path: standardAlias,
+        owner: "agents",
+        scope: "workspace",
+        origin: "project",
+      },
+      {
+        kind: "plugin",
+        path: physical,
+        owner: "plugin:fixture",
+        owners: ["plugin:fixture"],
+        scope: "global",
+        origin: "plugin",
+        active: false,
+        singleSkill: true,
+        includeRootSkill: false,
+        plugin: { host: "fixture", marketplace: "official", name: "reviewer" },
+        pluginMetadata: { name: "reviewer", version: "1.0.0" },
+        pluginIdentity: evidence.identity,
+        pluginEvidence: [evidence],
+        pluginRoot: path.join(fixture, "plugin"),
+      },
+      {
+        kind: "manager",
+        path: managerAlias,
+        owner: "manager:asm",
+        scope: "global",
+        origin: "manager",
+      },
+    ]);
+
+    assert.deepEqual(result.diagnostics, []);
+    assert.equal(result.roots.length, 1);
+    const [root] = result.roots;
+    assert.equal(root.path, standardAlias);
+    assert.equal(root.physicalPath, await realpath(physical));
+    assert.deepEqual(root.aliases, [standardAlias, physical, managerAlias]);
+    assert.equal(root.owner, "agents");
+    assert.deepEqual(root.owners, ["agents", "plugin:fixture", "manager:asm"]);
+    assert.equal(root.origin, "plugin");
+    assert.equal(root.active, true);
+    assert.equal(root.singleSkill, true);
+    assert.equal(root.includeRootSkill, false);
+    assert.equal(root.pluginIdentity, evidence.identity);
+    assert.deepEqual(root.pluginIdentities, [evidence.identity]);
+    assert.deepEqual(root.pluginEvidence, [evidence]);
+    assert.deepEqual(root.pluginRoots, [path.join(fixture, "plugin")]);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("registry keeps distinct plugin physical copies and audit copies visible", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "skill-root-registry-cache-"));
+  try {
+    const identity = "local:plugin:fixture:official:reviewer";
+    const first = path.join(fixture, "cache", "1", "skills");
+    const second = path.join(fixture, "cache", "2", "skills");
+    await mkdir(first, { recursive: true });
+    await mkdir(second, { recursive: true });
+
+    const observation = (root, active) => ({
+      kind: "plugin",
+      path: root,
+      owner: "plugin:fixture",
+      scope: "global",
+      origin: "plugin",
+      ...(active === undefined ? {} : { active }),
+      pluginIdentity: identity,
+      pluginEvidence: [{ kind: "plugin", identity }],
+    });
+    const result = normalizeSkillRootObservations([
+      observation(first, false),
+      observation(second, false),
+    ]);
+
+    assert.equal(result.roots.length, 2);
+    assert.deepEqual(result.roots.map(({ active }) => active), [false, false]);
+    assert.deepEqual(
+      result.roots.map(({ pluginIdentity }) => pluginIdentity),
+      [identity, identity],
+    );
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("registry clears audit state when an installed plugin observation wins", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "skill-root-registry-active-"));
+  try {
+    const root = path.join(fixture, "plugin", "skills");
+    await mkdir(root, { recursive: true });
+    const observation = (active) => ({
+      kind: "plugin",
+      path: root,
+      owner: "plugin:fixture",
+      scope: "global",
+      origin: "plugin",
+      active,
+      pluginIdentity: "local:plugin:fixture:official:reviewer",
+    });
+
+    const result = normalizeSkillRootObservations([
+      observation(false),
+      observation(true),
+    ]);
+
+    assert.equal(result.roots.length, 1);
+    assert.equal(result.roots[0].active, undefined);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("registry keeps active state for conflicting plugin identities on one physical root", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "skill-root-registry-conflict-"));
+  try {
+    const root = path.join(fixture, "plugin", "skills");
+    await mkdir(root, { recursive: true });
+    const observation = (pluginIdentity, active, scope) => ({
+      kind: "plugin",
+      path: root,
+      owner: "plugin:fixture",
+      scope,
+      origin: "plugin",
+      active,
+      pluginIdentity,
+    });
+
+    const result = normalizeSkillRootObservations([
+      observation("local:plugin:fixture:official:catalog", false, "workspace"),
+      observation("local:plugin:fixture:official:installed", true, "global"),
+    ]);
+
+    assert.equal(result.roots.length, 1);
+    assert.equal(result.roots[0].active, true);
+    assert.equal(result.roots[0].scope, "workspace");
+    assert.deepEqual(result.roots[0].pluginIdentities, [
+      "local:plugin:fixture:official:catalog",
+      "local:plugin:fixture:official:installed",
+    ]);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test("registry keeps active state for plugin aliases on one physical root", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "skill-root-registry-alias-"));
+  try {
+    const root = path.join(fixture, "plugin", "skills");
+    const alias = path.join(fixture, "alias", "skills");
+    await mkdir(root, { recursive: true });
+    await mkdir(path.dirname(alias), { recursive: true });
+    await symlink(root, alias, "dir");
+    const pluginIdentity = "local:plugin:fixture:official:reviewer";
+    const observation = (pathName, active, scope) => ({
+      kind: "plugin",
+      path: pathName,
+      owner: "plugin:fixture",
+      scope,
+      origin: "plugin",
+      active,
+      pluginIdentity,
+    });
+
+    const result = normalizeSkillRootObservations([
+      observation(root, false, "workspace"),
+      observation(alias, true, "global"),
+    ]);
+
+    assert.equal(result.roots.length, 1);
+    assert.equal(result.roots[0].active, true);
+    assert.equal(result.roots[0].scope, "workspace");
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test("host roots feed standard and configured observations through the registry", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "host-skill-roots-"));
   try {

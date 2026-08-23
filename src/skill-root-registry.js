@@ -8,6 +8,9 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
   file: "src/agents.ts",
 });
 
+/** @typedef {import("./provenance.js").PluginProvenanceObservation} PluginProvenanceObservation */
+/** @typedef {Record<string, unknown>} PluginRootMetadata */
+
 /**
  * @typedef {object} StandardSkillRootObservation
  * @property {"standard"} kind
@@ -15,6 +18,8 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {string} owner
  * @property {"workspace" | "global"} scope
  * @property {string} origin
+ * @property {readonly string[]} [aliases]
+ * @property {readonly string[]} [owners]
  * @property {string} [registry]
  * @property {boolean} [active]
  * @property {boolean} [singleSkill]
@@ -28,6 +33,8 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {string} owner
  * @property {"workspace" | "global" | "custom"} scope
  * @property {string} origin
+ * @property {readonly string[]} [aliases]
+ * @property {readonly string[]} [owners]
  * @property {boolean} [active]
  * @property {boolean} [singleSkill]
  * @property {boolean} [includeRootSkill]
@@ -38,11 +45,22 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {"explicit" | "manager" | "plugin"} kind
  * @property {string} path
  * @property {string} owner
+ * @property {readonly string[]} [aliases]
+ * @property {readonly string[]} [owners]
  * @property {string} scope
  * @property {string} origin
  * @property {boolean} [active]
  * @property {boolean} [singleSkill]
  * @property {boolean} [includeRootSkill]
+ * @property {string} [host]
+ * @property {PluginRootMetadata} [plugin]
+ * @property {PluginRootMetadata} [pluginMetadata]
+ * @property {string} [pluginManifest]
+ * @property {string} [pluginRoot]
+ * @property {readonly string[]} [pluginRoots]
+ * @property {string} [pluginIdentity]
+ * @property {readonly string[]} [pluginIdentities]
+ * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
  */
 
 /**
@@ -64,6 +82,15 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {readonly string[]} [registries]
  * @property {boolean} [singleSkill]
  * @property {boolean} [includeRootSkill]
+ * @property {string} [host]
+ * @property {PluginRootMetadata} [plugin]
+ * @property {PluginRootMetadata} [pluginMetadata]
+ * @property {string} [pluginManifest]
+ * @property {string} [pluginRoot]
+ * @property {readonly string[]} [pluginRoots]
+ * @property {string} [pluginIdentity]
+ * @property {readonly string[]} [pluginIdentities]
+ * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
  */
 
 /**
@@ -310,7 +337,76 @@ function mergeBooleanPolicy(existing, incoming, field, preferredValue) {
   }
 }
 
+function mergeFirstDefined(existing, incoming, field) {
+  if (existing[field] === undefined && incoming[field] !== undefined) {
+    existing[field] = structuredClone(incoming[field]);
+  }
+}
+
+function mergeStructuredArray(existing, incoming, field) {
+  const values = [];
+  const seen = new Set();
+  for (const value of [
+    ...(Array.isArray(existing[field]) ? existing[field] : []),
+    ...(Array.isArray(incoming[field]) ? incoming[field] : []),
+  ]) {
+    const key = JSON.stringify(value);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    values.push(structuredClone(value));
+  }
+  if (values.length > 0) existing[field] = values;
+}
+
+function mergePluginMetadata(existing, incoming) {
+  for (const field of [
+    "host",
+    "plugin",
+    "pluginMetadata",
+    "pluginManifest",
+  ]) {
+    mergeFirstDefined(existing, incoming, field);
+  }
+
+  const pluginRoots = unique([
+    ...(existing.pluginRoots ?? []),
+    existing.pluginRoot,
+    ...(incoming.pluginRoots ?? []),
+    incoming.pluginRoot,
+  ].filter(Boolean).map((pluginRoot) => path.resolve(pluginRoot)));
+  if (pluginRoots.length > 0) {
+    existing.pluginRoots = pluginRoots;
+    existing.pluginRoot ??= pluginRoots[0];
+  }
+
+  mergeStructuredArray(existing, incoming, "pluginEvidence");
+  const pluginIdentities = unique([
+    ...(existing.pluginIdentities ?? []),
+    existing.pluginIdentity,
+    ...(incoming.pluginIdentities ?? []),
+    incoming.pluginIdentity,
+  ].filter(Boolean));
+  if (pluginIdentities.length > 0) existing.pluginIdentities = pluginIdentities;
+  mergeFirstDefined(existing, incoming, "pluginIdentity");
+}
+
 function mergeRootRecord(existing, incoming) {
+  const existingPluginIdentities = unique([
+    ...(existing.pluginIdentities ?? []),
+    existing.pluginIdentity,
+  ].filter(Boolean));
+  const incomingPluginIdentities = unique([
+    ...(incoming.pluginIdentities ?? []),
+    incoming.pluginIdentity,
+  ].filter(Boolean));
+  const samePluginIdentity = existingPluginIdentities.length <= 1
+    && incomingPluginIdentities.length <= 1
+    && (existingPluginIdentities[0] ?? undefined)
+      === (incomingPluginIdentities[0] ?? undefined);
+  const samePluginObservation = existing.origin === "plugin"
+    && incoming.origin === "plugin"
+    && existing.path === incoming.path
+    && samePluginIdentity;
   existing.aliases = unique([
     ...(existing.aliases ?? [existing.path]),
     ...(incoming.aliases ?? [incoming.path]),
@@ -330,7 +426,19 @@ function mergeRootRecord(existing, incoming) {
       ...(incoming.scopes ?? [incoming.scope]),
     ]);
   }
-  if (incoming.active === true) {
+  if (samePluginObservation && incoming.active !== false) {
+    const auditOnly = existing.active === false;
+    if (auditOnly || incoming.scope === "global") existing.scope = incoming.scope;
+  }
+  // A plugin observation promotes the physical source to plugin scan policy,
+  // even when a standard root was the first observation for the same copy.
+  if (incoming.origin === "plugin") existing.origin = "plugin";
+  mergePluginMetadata(existing, incoming);
+  // Plugin adapters omit active for installed copies. Preserve that default
+  // when an installed observation supersedes an audit-only cache observation.
+  if (samePluginObservation && incoming.active !== false) {
+    delete existing.active;
+  } else if (incoming.active === true) {
     existing.active = true;
   } else if (existing.active === false && incoming.active !== false) {
     delete existing.active;
@@ -340,9 +448,10 @@ function mergeRootRecord(existing, incoming) {
 }
 
 /**
- * Normalize standard and configured root observations into scan records.
- * Canonical identity and all root-level aggregation happen here so Discovery
- * does not need to reconstruct aliases, owners, or scan policy for these roots.
+ * Normalize all skill-root observations into scan records.
+ * Canonical identity and all root-level aggregation happen here so host
+ * adapters and Discovery do not reconstruct aliases, owners, plugin metadata,
+ * or scan policy for individual root sources.
  *
  * @param {readonly SkillRootObservation[]} observations
  * @returns {{readonly roots: readonly SkillRootScanRecord[], readonly diagnostics: readonly SkillRootDiagnostic[]}}

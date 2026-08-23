@@ -795,6 +795,7 @@ async function addPluginInstall({
     ...declaredDirectories,
   ];
   const pluginRootInfo = (skillRoot, extra = {}) => ({
+    kind: "plugin",
     path: skillRoot,
     owner: `${PLUGIN_OWNER_PREFIX}${host}`,
     owners: [`${PLUGIN_OWNER_PREFIX}${host}`],
@@ -858,6 +859,7 @@ async function addSyncedRoot({ root: syncedRoot, context }) {
   if (!safeRoot) return;
   const evidence = pluginEvidence({ metadata, source: {} }).evidence;
   context.roots.push({
+    kind: "plugin",
     path: safeRoot,
     owner: "plugin:claude-code",
     owners: ["plugin:claude-code"],
@@ -2099,35 +2101,14 @@ export async function discoverPluginSkillRoots({
       );
     }
   }
-  const roots = [];
-  const byPath = new Map();
-  for (const item of context.roots) {
-    const key = `${path.resolve(item.path)}\0${item.pluginIdentity ?? ""}`;
-    const existing = byPath.get(key);
-    if (!existing) {
-      const normalized = {
-        ...item,
-        path: path.resolve(item.path),
-        owners: unique(item.owners ?? [item.owner]),
-        pluginEvidence: unique(
-          (item.pluginEvidence ?? []).map((value) => JSON.stringify(value)),
-        ).map((value) => JSON.parse(value)),
-      };
-      byPath.set(key, normalized);
-      roots.push(normalized);
-      continue;
-    }
-    existing.owners = unique([...existing.owners, ...(item.owners ?? [])]);
-    existing.pluginEvidence = unique([
-      ...existing.pluginEvidence.map((value) => JSON.stringify(value)),
-      ...(item.pluginEvidence ?? []).map((value) => JSON.stringify(value)),
-    ]).map((value) => JSON.parse(value));
-    if (item.active !== false) {
-      const auditOnly = existing.active === false;
-      delete existing.active;
-      if (auditOnly || item.scope === "global") existing.scope = item.scope;
-    }
-  }
+  // Host adapters emit observations. Physical-root identity, policy merging,
+  // and duplicate evidence handling belong to the Skill root registry.
+  const roots = context.roots.map((item) => ({
+    ...item,
+    kind: item.kind ?? "plugin",
+    path: path.resolve(item.path),
+    owners: unique(item.owners ?? [item.owner]),
+  }));
   roots.sort((left, right) => left.path.localeCompare(right.path, "en"));
   return {
     roots,

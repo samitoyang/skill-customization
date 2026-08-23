@@ -54,6 +54,95 @@ test("fixture discovery keeps plugin roots disabled and explicit roots authorita
   assert.equal(explicit.searchedRoots.length, 0);
 });
 
+test("discovery normalizes standard, plugin, and manager roots through one registry", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-root-registry-sources-"));
+  const home = path.join(root, "home");
+  const workspace = path.join(root, "workspace");
+  const pluginInstall = path.join(root, "plugin");
+  const pluginSkills = path.join(pluginInstall, "skills");
+  const standardAlias = path.join(workspace, ".agents", "skills");
+  const managerAlias = path.join(root, "manager", "skills");
+  await writeSkill(pluginSkills, "review");
+  await mkdir(path.dirname(standardAlias), { recursive: true });
+  await symlink(pluginSkills, standardAlias, "dir");
+  await mkdir(path.dirname(managerAlias), { recursive: true });
+  await symlink(pluginSkills, managerAlias, "dir");
+
+  const pluginIdentity = "local:plugin:fixture:official:reviewer";
+  const result = await discoverFixtureSkills({
+    roots: [
+      {
+        kind: "standard",
+        path: standardAlias,
+        owner: "agents",
+        scope: "workspace",
+        origin: "project",
+      },
+      {
+        kind: "plugin",
+        path: pluginSkills,
+        owner: "plugin:fixture",
+        scope: "global",
+        origin: "plugin",
+        active: false,
+        plugin: { host: "fixture", marketplace: "official", name: "reviewer" },
+        pluginIdentity,
+        pluginEvidence: [{
+          kind: "plugin",
+          host: "fixture",
+          plugin: "reviewer",
+          marketplace: "official",
+          identity: pluginIdentity,
+          provenance: {
+            kind: "plugin",
+            host: "fixture",
+            plugin: "reviewer",
+            marketplace: "official",
+          },
+        }],
+        pluginRoot: pluginInstall,
+      },
+    ],
+    home,
+    cwd: workspace,
+    env: {},
+    managerRecords: [{
+      manager: "asm",
+      name: "review",
+      path: managerAlias,
+      scope: "workspace",
+      source: { kind: "local" },
+    }],
+  });
+
+  const physical = await realpath(pluginSkills);
+  const matchingRoots = result.searchedRoots.filter(
+    ({ physicalPath }) => physicalPath === physical,
+  );
+  assert.equal(matchingRoots.length, 1);
+  const [rootRecord] = matchingRoots;
+  assert.equal(rootRecord.path, standardAlias);
+  assert.equal(rootRecord.owner, "agents");
+  assert.deepEqual(
+    rootRecord.owners.filter((owner) =>
+      ["agents", "plugin:fixture", "manager:asm"].includes(owner),
+    ).sort(),
+    ["agents", "manager:asm", "plugin:fixture"],
+  );
+  assert.equal(rootRecord.origin, "plugin");
+  assert.equal(rootRecord.pluginIdentity, pluginIdentity);
+  assert.equal(rootRecord.active, true);
+
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].copies.length, 1);
+  assert.deepEqual(result.groups[0].copies[0].owners, rootRecord.owners);
+  assert.deepEqual(result.groups[0].provenance, [pluginIdentity]);
+  assert.equal(
+    result.groups[0].evidence.some(({ kind }) => kind === "manager"),
+    true,
+  );
+});
+
 
 
 
