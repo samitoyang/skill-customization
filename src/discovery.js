@@ -490,31 +490,74 @@ async function scanRoot(rootInfo) {
   };
 }
 
-async function gitEvidence(directory) {
-  try {
-    const { stdout: topLevelOutput } = await execFile("git", [
-      "-C",
-      directory,
-      "rev-parse",
-      "--show-toplevel",
-    ]);
-    const topLevel = await realpath(topLevelOutput.trim()).catch(() =>
-      path.resolve(topLevelOutput.trim()),
-    );
-    const canonicalDirectory = await realpath(directory).catch(() =>
-      path.resolve(directory),
-    );
-    const { stdout: remoteOutput } = await execFile("git", [
-      "-C",
-      directory,
-      "config",
-      "--get",
-      "remote.origin.url",
-    ]);
-    const repository = normalizeRepositoryUrl(remoteOutput.trim());
+function cacheGitRepositoryRoot(cache, paths, repositoryRoot) {
+  for (const directory of paths) cache.set(directory, repositoryRoot);
+}
+
+async function findGitRepositoryRoot(directory, cache) {
+  const canonicalDirectory = await realpath(directory).catch(() =>
+    path.resolve(directory),
+  );
+  const traversed = [];
+  let current = canonicalDirectory;
+  while (true) {
+    if (cache.has(current)) {
+      const repositoryRoot = cache.get(current);
+      cacheGitRepositoryRoot(cache, traversed, repositoryRoot);
+      return { canonicalDirectory, repositoryRoot };
+    }
+    traversed.push(current);
+    try {
+      await lstat(path.join(current, ".git"));
+      cacheGitRepositoryRoot(cache, traversed, current);
+      return { canonicalDirectory, repositoryRoot: current };
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        cacheGitRepositoryRoot(cache, traversed, undefined);
+        return { canonicalDirectory, repositoryRoot: undefined };
+      }
+      current = parent;
+    }
+  }
+}
+
+/**
+ * Probe Git provenance once per repository during one discovery pass.
+ *
+ * The filesystem marker check avoids launching Git for ordinary installed
+ * skills. A repository-root cache then lets sibling skills share one remote
+ * lookup while their upstream entrypoints are derived locally.
+ */
+function createGitEvidenceProbe() {
+  const repositoryRootCache = new Map();
+  const repositoryPromises = new Map();
+
+  return async function gitEvidence(directory) {
+    const { canonicalDirectory, repositoryRoot } =
+      await findGitRepositoryRoot(directory, repositoryRootCache);
+    if (!repositoryRoot) return undefined;
+
+    let repositoryPromise = repositoryPromises.get(repositoryRoot);
+    if (!repositoryPromise) {
+      publishDiscoveryPerformanceMetric("git_probes");
+      repositoryPromise = execFile("git", [
+        "-C",
+        canonicalDirectory,
+        "config",
+        "--get",
+        "remote.origin.url",
+      ])
+        .then(({ stdout }) => normalizeRepositoryUrl(stdout.trim()))
+        .catch(() => undefined);
+      repositoryPromises.set(repositoryRoot, repositoryPromise);
+    }
+    const repository = await repositoryPromise;
+    if (!repository) return undefined;
+
     const upstreamPath = normalizeUpstreamEntrypoint(
       path
-        .relative(topLevel, path.join(canonicalDirectory, "SKILL.md"))
+        .relative(repositoryRoot, path.join(canonicalDirectory, "SKILL.md"))
         .split(path.sep)
         .join("/"),
     );
@@ -524,9 +567,7 @@ async function gitEvidence(directory) {
       upstream_path: upstreamPath,
       upstreamPath,
     };
-  } catch {
-    return undefined;
-  }
+  };
 }
 
 async function embeddedEvidence(directory) {
@@ -831,6 +872,7 @@ export async function discoverSkills({
     if (!deduped.has(key)) deduped.set(key, candidate);
   }
   const enrichmentCandidates = [...deduped.values()];
+  const gitEvidence = createGitEvidenceProbe();
   const enrichmentResults = await Promise.allSettled(
     enrichmentCandidates.map(async (candidate) => {
       if (
@@ -842,8 +884,7 @@ export async function discoverSkills({
           path: path.resolve(explicitDirectory),
         });
       }
-      publishDiscoveryPerformanceMetric("git_probes");
-      const git = await gitEvidence(candidate.path);
+      const git = await gitEvidence(candidate.realPath ?? candidate.path);
       if (git) candidate.evidence.push(git);
       candidate.evidence.push(...managerEvidenceFor(candidate, managerRecords));
       const embedded = await embeddedEvidence(candidate.path);

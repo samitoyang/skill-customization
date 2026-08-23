@@ -41,7 +41,7 @@ await runPerformanceScenario({
       discovery_calls: iterations,
       plugin_discovery_calls: iterations,
       manager_collections: 0,
-      git_probes: iterations,
+      git_probes: 0,
       plugin_directory_reads: 3 * iterations,
     },
   },
