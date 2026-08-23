@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { assertValidDescriptor, readDescriptor } from "./descriptor.js";
+import { assertValidDescriptor, readCheckedDescriptor } from "./descriptor.js";
 import { discoverSkills } from "./discovery.js";
 import { BindingError } from "./errors.js";
 import { inspectCustomizationExecution } from "./execution-graph.js";
@@ -307,14 +307,17 @@ async function inspectCustomizationSource({ descriptor, info, sourceRoot }) {
       code: "BINDING_SOURCE_INVALID",
     });
   }
-  let customization;
+  let checkedCustomization;
   try {
-    customization = await readDescriptor(path.join(sourceRoot, "customization.json"));
+    checkedCustomization = await readCheckedDescriptor(
+      path.join(sourceRoot, "customization.json"),
+    );
   } catch (error) {
     throw new BindingError(`bound customization metadata is invalid: ${error.message}`, {
       code: "BINDING_CUSTOMIZATION_METADATA_INVALID",
     });
   }
+  const customization = checkedCustomization.descriptor;
   if (
     customization.id !== descriptor.source.id
     || customization.type !== descriptor.source.type

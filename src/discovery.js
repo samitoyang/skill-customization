@@ -10,7 +10,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-import { validateDescriptor } from "./descriptor.js";
+import { ingestDescriptor } from "./descriptor.js";
 import { DiscoveryError } from "./errors.js";
 import { fingerprintPath } from "./fingerprint.js";
 import {
@@ -417,33 +417,27 @@ async function embeddedEvidence(directory) {
 
 async function adjacentCustomization(directory) {
   const descriptorPath = path.join(directory, "customization.json");
-  let contents;
-  try {
-    contents = await readFile(descriptorPath, "utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return undefined;
-    throw new DiscoveryError(`cannot read adjacent customization metadata ${descriptorPath}: ${error.message}`, {
-      code: "MALFORMED_CUSTOMIZATION_METADATA",
-    });
+  const result = await ingestDescriptor({ descriptorPath });
+  if (result.ok) return result.checked.descriptor;
+
+  const first = result.diagnostics[0];
+  if (first?.stage === "read" && first.causeCode === "ENOENT") return undefined;
+  if (first?.stage === "parse") {
+    throw new DiscoveryError(
+      `malformed customization metadata ${descriptorPath}: ${first.causeMessage ?? first.message}`,
+      { code: "MALFORMED_CUSTOMIZATION_METADATA", details: first.details },
+    );
   }
-  let descriptor;
-  try {
-    descriptor = JSON.parse(contents);
-  } catch (error) {
-    throw new DiscoveryError(`malformed customization metadata ${descriptorPath}: ${error.message}`, {
-      code: "MALFORMED_CUSTOMIZATION_METADATA",
-    });
+  if (first?.stage === "read") {
+    throw new DiscoveryError(
+      `cannot read adjacent customization metadata ${descriptorPath}: ${first.causeMessage ?? first.message}`,
+      { code: "MALFORMED_CUSTOMIZATION_METADATA", details: first.details },
+    );
   }
-  const errors = validateDescriptor(descriptor);
-  if (errors.length > 0 || descriptor.name !== path.basename(directory)) {
-    throw new DiscoveryError(`invalid customization metadata ${descriptorPath}`, {
-      code: "MALFORMED_CUSTOMIZATION_METADATA",
-      details: errors.length > 0
-        ? errors
-        : [{ path: "/name", message: "must match its directory name" }],
-    });
-  }
-  return descriptor;
+  throw new DiscoveryError(`invalid customization metadata ${descriptorPath}`, {
+    code: "MALFORMED_CUSTOMIZATION_METADATA",
+    details: first?.details ?? result.diagnostics,
+  });
 }
 
 async function candidateFromDirectory(directory, rootInfo) {

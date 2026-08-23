@@ -1,7 +1,7 @@
 import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { readDescriptor } from "./descriptor.js";
+import { readCheckedDescriptor } from "./descriptor.js";
 import { excludeSkillRootFromInventory } from "./discovery.js";
 import {
   fingerprintPath,
@@ -123,7 +123,8 @@ async function forkTrackingAdvisory(descriptor, {
     let current;
     if (descriptor.source.kind === "customization") {
       const nestedDescriptorPath = path.join(root, "customization.json");
-      const nestedDescriptor = await readDescriptor(nestedDescriptorPath);
+      const nestedCheckedDescriptor = await readCheckedDescriptor(nestedDescriptorPath);
+      const nestedDescriptor = nestedCheckedDescriptor.descriptor;
       if (!matchesCustomizationSource(descriptor.source, nestedDescriptor)) {
         return {
           code: "tracking-binding-invalid",
@@ -141,6 +142,7 @@ async function forkTrackingAdvisory(descriptor, {
         activeIds,
         activePaths,
         bindings,
+        checkedDescriptor: nestedCheckedDescriptor,
       });
       if (tracked.status === "maintenance-required") {
         return {
@@ -184,9 +186,11 @@ async function visit({
   activeIds,
   activePaths,
   bindings,
+  checkedDescriptor,
 }) {
-  const descriptor = await readDescriptor(descriptorPath);
-  const root = await realpath(path.dirname(path.resolve(descriptorPath)));
+  const checked = checkedDescriptor ?? await readCheckedDescriptor(descriptorPath);
+  const descriptor = checked.descriptor;
+  const root = checked.location.canonicalRoot;
   if (depth > MAX_CUSTOMIZATION_DEPTH) {
     return maintenance(
       descriptor,
@@ -287,7 +291,8 @@ async function visit({
   let sourceResult;
   if (descriptor.source.kind === "customization") {
     const nestedDescriptorPath = path.join(boundRoot, "customization.json");
-    const nestedDescriptor = await readDescriptor(nestedDescriptorPath);
+    const nestedCheckedDescriptor = await readCheckedDescriptor(nestedDescriptorPath);
+    const nestedDescriptor = nestedCheckedDescriptor.descriptor;
     if (!matchesCustomizationSource(descriptor.source, nestedDescriptor)) {
       return maintenance(
         descriptor,
@@ -307,6 +312,7 @@ async function visit({
       activeIds: nextIds,
       activePaths: nextPaths,
       bindings,
+      checkedDescriptor: nestedCheckedDescriptor,
     });
     if (sourceResult.status === "maintenance-required") return sourceResult;
     if (

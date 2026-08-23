@@ -1,10 +1,153 @@
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { DescriptorError } from "./errors.js";
 import { normalizeRepositoryUrl } from "./normalization.js";
 import { isOwnedPayloadExcludedPath } from "./owned-payload.js";
 import { isMachineAbsolutePath, resolveOwnedPath } from "./paths.js";
+
+/**
+ * @typedef {object} DescriptorValidationError
+ * @property {string} path
+ * @property {string} message
+ */
+
+/**
+ * @typedef {object} DescriptorInventoryRecord
+ * @property {string} id
+ * @property {string} name
+ */
+
+/**
+ * @typedef {object} DescriptorRepositorySource
+ * @property {string} skill_name
+ * @property {"repository"} kind
+ * @property {string} repository
+ * @property {string} upstream_path
+ * @property {string} license
+ * @property {string} effective_fingerprint
+ * @property {{revision: string}} review
+ */
+
+/**
+ * @typedef {object} DescriptorLocalSource
+ * @property {string} skill_name
+ * @property {"local"} kind
+ * @property {string} identity
+ * @property {string} license
+ * @property {string} effective_fingerprint
+ */
+
+/**
+ * @typedef {object} DescriptorCustomizationSource
+ * @property {string} skill_name
+ * @property {"customization"} kind
+ * @property {string} id
+ * @property {"semantic-overlay" | "fork"} type
+ * @property {string} license
+ * @property {string} effective_fingerprint
+ */
+
+/**
+ * @typedef {DescriptorRepositorySource | DescriptorLocalSource | DescriptorCustomizationSource} DescriptorSource
+ */
+
+/**
+ * @typedef {object} DescriptorActivation
+ * @property {"coexist" | "replace"} mode
+ * @property {"customization-first"} [precedence]
+ */
+
+/**
+ * @typedef {object} DescriptorForkMaterialization
+ * @property {string} source_effective_fingerprint
+ * @property {string} snapshot_fingerprint
+ * @property {string} reviewed_at
+ * @property {string} evidence
+ */
+
+/**
+ * @typedef {object} DescriptorFork
+ * @property {string} snapshot
+ * @property {string} diff
+ * @property {string} snapshot_fingerprint
+ * @property {string} diff_fingerprint
+ * @property {DescriptorForkMaterialization} [materialization]
+ */
+
+/**
+ * @typedef {object} CustomizationDescriptor
+ * @property {string} [$schema]
+ * @property {1} schema_version
+ * @property {string} id
+ * @property {"semantic-overlay" | "fork"} type
+ * @property {string} name
+ * @property {string} license
+ * @property {string} entrypoint
+ * @property {string} customization
+ * @property {readonly string[]} dependencies
+ * @property {{reviewed_fingerprint: string}} owned_payload
+ * @property {DescriptorSource} source
+ * @property {DescriptorActivation} activation
+ * @property {DescriptorFork} [fork]
+ */
+
+/**
+ * @typedef {object} DescriptorInput
+ * @property {string} descriptorPath
+ * @property {readonly DescriptorInventoryRecord[]} [inventory]
+ */
+
+/**
+ * @typedef {object} DescriptorLocation
+ * @property {string} descriptorPath
+ * @property {string} root
+ * @property {string} canonicalRoot
+ */
+
+/**
+ * @typedef {object} DescriptorArtifact
+ * @property {"descriptor" | "entrypoint" | "customization" | "snapshot" | "diff"} kind
+ * @property {"file" | "directory"} type
+ * @property {string} relative
+ * @property {string} path
+ * @property {string} canonicalPath
+ */
+
+/**
+ * @typedef {object} CheckedDescriptor
+ * @property {Readonly<CustomizationDescriptor>} descriptor
+ * @property {Readonly<DescriptorLocation>} location
+ * @property {readonly DescriptorArtifact[]} artifacts
+ */
+
+/**
+ * @typedef {object} DescriptorDiagnostic
+ * @property {string} code
+ * @property {"input" | "read" | "parse" | "validation" | "folder" | "inventory" | "artifact"} stage
+ * @property {string} message
+ * @property {string} [causeCode]
+ * @property {string} [causeMessage]
+ * @property {readonly DescriptorValidationError[] | Record<string, unknown> | string} [details]
+ */
+
+/**
+ * @typedef {object} DescriptorIngestionSuccess
+ * @property {true} ok
+ * @property {CheckedDescriptor} checked
+ * @property {readonly []} diagnostics
+ */
+
+/**
+ * @typedef {object} DescriptorIngestionFailure
+ * @property {false} ok
+ * @property {null} checked
+ * @property {readonly DescriptorDiagnostic[]} diagnostics
+ */
+
+/**
+ * @typedef {DescriptorIngestionSuccess | DescriptorIngestionFailure} DescriptorIngestion
+ */
 
 const TOP_LEVEL = new Set([
   "$schema",
@@ -111,6 +254,10 @@ function checkPortableNonEmptyString(errors, value, pointer, label) {
   }
 }
 
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
 export function isPortableRelativePath(value) {
   if (typeof value !== "string" || value.length === 0) return false;
   if (
@@ -289,6 +436,10 @@ function validateFork(descriptor, errors) {
   }
 }
 
+/**
+ * @param {unknown} descriptor
+ * @returns {DescriptorValidationError[]}
+ */
 export function validateDescriptor(descriptor) {
   const errors = [];
   if (!checkObject(errors, descriptor, "", TOP_LEVEL)) return errors;
@@ -347,6 +498,10 @@ export function validateDescriptor(descriptor) {
   return errors;
 }
 
+/**
+ * @param {unknown} descriptor
+ * @returns {CustomizationDescriptor}
+ */
 export function assertValidDescriptor(descriptor) {
   const errors = validateDescriptor(descriptor);
   if (errors.length > 0) {
@@ -360,6 +515,13 @@ export function assertValidDescriptor(descriptor) {
   return descriptor;
 }
 
+function freezeDeep(value, seen = new Set()) {
+  if (!value || typeof value !== "object" || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) freezeDeep(child, seen);
+  return Object.freeze(value);
+}
+
 function assertInventoryAvailable(descriptor, inventory) {
   for (const item of inventory ?? []) {
     if (item.id === descriptor.id && item.name !== descriptor.name) {
@@ -371,58 +533,340 @@ function assertInventoryAvailable(descriptor, inventory) {
   }
 }
 
-export async function readDescriptor(descriptorPath, { inventory = [] } = {}) {
+function diagnostic({
+  code,
+  stage,
+  message,
+  causeCode,
+  causeMessage,
+  details,
+}) {
+  return {
+    code,
+    stage,
+    message,
+    ...(causeCode ? { causeCode } : {}),
+    ...(causeMessage ? { causeMessage } : {}),
+    ...(details !== undefined ? { details } : {}),
+  };
+}
+
+/**
+ * @param {DescriptorDiagnostic} value
+ * @returns {DescriptorIngestionFailure}
+ */
+function failed(value) {
+  return /** @type {DescriptorIngestionFailure} */ (freezeDeep({
+    ok: false,
+    checked: null,
+    diagnostics: [value],
+  }));
+}
+
+/**
+ * @param {CheckedDescriptor} value
+ * @returns {DescriptorIngestionSuccess}
+ */
+function checked(value) {
+  return /** @type {DescriptorIngestionSuccess} */ (freezeDeep({
+    ok: true,
+    checked: value,
+    diagnostics: [],
+  }));
+}
+
+async function descriptorFileArtifact(descriptorPath, displayPath = descriptorPath) {
+  let info;
+  try {
+    info = await lstat(descriptorPath);
+  } catch (error) {
+    return {
+      error: diagnostic({
+        code: "DESCRIPTOR_READ_ERROR",
+        stage: "read",
+        message: `cannot read descriptor ${displayPath}: ${error.message}`,
+        causeCode: error.code,
+        causeMessage: error.message,
+      }),
+    };
+  }
+  if (info.isSymbolicLink() || !info.isFile()) {
+    return {
+      error: diagnostic({
+        code: "DESCRIPTOR_ARTIFACT_INVALID",
+        stage: "artifact",
+        message: `descriptor path has invalid artifact type: ${displayPath} must be a regular file`,
+        details: [{
+          path: descriptorPath,
+          message: "descriptor must be a regular file and may not be a symbolic link",
+        }],
+      }),
+    };
+  }
+  let canonicalPath;
+  try {
+    canonicalPath = await realpath(descriptorPath);
+  } catch (error) {
+    return {
+      error: diagnostic({
+        code: "DESCRIPTOR_READ_ERROR",
+        stage: "read",
+        message: `cannot read descriptor ${displayPath}: ${error.message}`,
+        causeCode: error.code,
+        causeMessage: error.message,
+      }),
+    };
+  }
+  return {
+    artifact: {
+      kind: "descriptor",
+      type: "file",
+      relative: path.basename(descriptorPath),
+      path: descriptorPath,
+      canonicalPath,
+    },
+  };
+}
+
+async function inspectArtifact({
+  root,
+  kind,
+  relative,
+  expectedType,
+  rejectExcludedRoots = false,
+}) {
+  let owned;
+  try {
+    owned = await resolveOwnedPath(root, relative, {
+      rejectExcludedRoots,
+      rejectSymlinks: true,
+    });
+  } catch (error) {
+    throw new DescriptorError(
+      `descriptor path is not owned: ${relative}: ${error.message}`,
+      [{ path: `/${kind}`, message: error.message }],
+    );
+  }
+  let info;
+  try {
+    info = await lstat(owned);
+  } catch (error) {
+    throw new DescriptorError(
+      `descriptor path is not readable: ${relative}: ${error.message}`,
+      [{ path: `/${kind}`, message: error.message }],
+    );
+  }
+  const validType = expectedType === "directory"
+    ? info.isDirectory()
+    : info.isFile();
+  if (!validType) {
+    throw new DescriptorError(
+      `descriptor path has invalid artifact type: ${relative} must be ${
+        expectedType === "directory" ? "a snapshot directory" : "a regular file"
+      }`,
+      [{
+        path: `/${kind}`,
+        message: `must be ${expectedType === "directory" ? "a snapshot directory" : "a regular file"}`,
+      }],
+    );
+  }
+  return {
+    kind,
+    type: expectedType,
+    relative,
+    path: path.join(root, relative),
+    canonicalPath: owned,
+  };
+}
+
+function diagnosticFromError(error, stage = "validation") {
+  return diagnostic({
+    code: error.code ?? "INVALID_DESCRIPTOR",
+    stage,
+    message: error.message,
+    ...(error.details !== undefined ? { details: error.details } : {}),
+  });
+}
+
+/**
+ * Parse and deeply check one Customization Descriptor and its owned runtime
+ * artifacts. This is the single filesystem ingestion seam used by Discovery,
+ * Binding, and Preflight. It does not discover sources or compute fingerprints.
+ *
+ * The result is detached and deeply immutable. Expected read, validation, and
+ * artifact failures are returned as diagnostics so callers can preserve their
+ * own error vocabulary without implementing a second reader.
+ *
+ * @param {DescriptorInput} input
+ * @returns {Promise<DescriptorIngestion>}
+ */
+export async function ingestDescriptor({ descriptorPath, inventory = [] } = {}) {
+  if (typeof descriptorPath !== "string" || !descriptorPath.trim()) {
+    return failed(diagnostic({
+      code: "INVALID_DESCRIPTOR_INPUT",
+      stage: "input",
+      message: "descriptorPath must be a non-empty path",
+    }));
+  }
+  if (!Array.isArray(inventory)) {
+    return failed(diagnostic({
+      code: "INVALID_DESCRIPTOR_INPUT",
+      stage: "input",
+      message: "inventory must be an array",
+    }));
+  }
+
+  const absoluteDescriptorPath = path.resolve(descriptorPath);
+  const descriptorFile = await descriptorFileArtifact(absoluteDescriptorPath, descriptorPath);
+  if (descriptorFile.error) return failed(descriptorFile.error);
+
+  let contents;
+  try {
+    contents = await readFile(absoluteDescriptorPath, "utf8");
+  } catch (error) {
+    return failed(diagnostic({
+      code: "DESCRIPTOR_READ_ERROR",
+      stage: "read",
+      message: `cannot read descriptor ${descriptorPath}: ${error.message}`,
+      causeCode: error.code,
+      causeMessage: error.message,
+    }));
+  }
+
   let descriptor;
   try {
-    descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor = JSON.parse(contents);
   } catch (error) {
-    throw new DescriptorError(`cannot read descriptor ${descriptorPath}: ${error.message}`);
+    return failed(diagnostic({
+      code: "DESCRIPTOR_READ_ERROR",
+      stage: "parse",
+      message: `cannot read descriptor ${descriptorPath}: ${error.message}`,
+      causeCode: "JSON_PARSE_ERROR",
+      causeMessage: error.message,
+    }));
   }
-  assertValidDescriptor(descriptor);
-  const actualFolder = path.basename(path.dirname(path.resolve(descriptorPath)));
+
+  const validationErrors = validateDescriptor(descriptor);
+  if (validationErrors.length > 0) {
+    return failed(diagnostic({
+      code: "INVALID_DESCRIPTOR",
+      stage: "validation",
+      message: `invalid customization descriptor: ${validationErrors
+        .map(({ path: pointer, message }) => `${pointer || "/"} ${message}`)
+        .join("; ")}`,
+      details: validationErrors,
+    }));
+  }
+
+  const root = path.dirname(absoluteDescriptorPath);
+  const actualFolder = path.basename(root);
   if (descriptor.name !== actualFolder) {
-    throw new DescriptorError(`descriptor name ${descriptor.name} does not match folder name ${actualFolder}`);
+    return failed(diagnostic({
+      code: "INVALID_DESCRIPTOR",
+      stage: "folder",
+      message: `descriptor name ${descriptor.name} does not match folder name ${actualFolder}`,
+      details: [{
+        path: "/name",
+        message: "must match its directory name",
+      }],
+    }));
   }
-  assertInventoryAvailable(descriptor, inventory);
-  const root = path.dirname(path.resolve(descriptorPath));
+
+  try {
+    assertInventoryAvailable(descriptor, inventory);
+  } catch (error) {
+    return failed(diagnosticFromError(error, "inventory"));
+  }
+
   const referenced = [
     {
+      kind: "entrypoint",
       relative: descriptor.entrypoint,
       rejectExcludedRoots: true,
-      rejectSymlinks: true,
       expectedType: "file",
     },
     {
+      kind: "customization",
       relative: descriptor.customization,
       rejectExcludedRoots: true,
-      rejectSymlinks: true,
       expectedType: "file",
     },
     ...(descriptor.type === "fork"
       ? [
-          { relative: descriptor.fork.snapshot, rejectSymlinks: true, expectedType: "directory" },
-          { relative: descriptor.fork.diff, rejectSymlinks: true, expectedType: "file" },
+          {
+            kind: "snapshot",
+            relative: descriptor.fork.snapshot,
+            expectedType: "directory",
+          },
+          {
+            kind: "diff",
+            relative: descriptor.fork.diff,
+            expectedType: "file",
+          },
         ]
       : []),
   ];
-  for (const { relative, rejectExcludedRoots, rejectSymlinks, expectedType } of referenced) {
-    const owned = await resolveOwnedPath(root, relative, {
-      rejectExcludedRoots,
-      rejectSymlinks,
-    }).catch((error) => {
-      throw new DescriptorError(`descriptor path is not owned: ${relative}: ${error.message}`);
-    });
-    const info = await lstat(owned);
-    const validType = expectedType === "directory"
-      ? info.isDirectory()
-      : info.isFile();
-    if (!validType) {
-      throw new DescriptorError(
-        `descriptor path has invalid artifact type: ${relative} must be ${
-          expectedType === "directory" ? "a snapshot directory" : "a regular file"
-        }`,
-      );
+  const artifacts = [descriptorFile.artifact];
+  try {
+    for (const reference of referenced) {
+      artifacts.push(await inspectArtifact({ root, ...reference }));
     }
+  } catch (error) {
+    return failed(diagnosticFromError(error, "artifact"));
   }
-  return descriptor;
+
+  let canonicalRoot;
+  try {
+    canonicalRoot = await realpath(root);
+  } catch (error) {
+    return failed(diagnostic({
+      code: "DESCRIPTOR_READ_ERROR",
+      stage: "read",
+      message: `cannot read descriptor folder ${root}: ${error.message}`,
+      causeCode: error.code,
+      causeMessage: error.message,
+    }));
+  }
+
+  return checked({
+    descriptor: freezeDeep(structuredClone(descriptor)),
+    location: {
+      descriptorPath: absoluteDescriptorPath,
+      root,
+      canonicalRoot,
+    },
+    artifacts,
+  });
+}
+
+function descriptorErrorFromIngestion(result) {
+  const first = result.diagnostics[0] ?? diagnostic({
+    code: "INVALID_DESCRIPTOR",
+    stage: "validation",
+    message: "invalid customization descriptor",
+  });
+  return new DescriptorError(first.message, first.details);
+}
+
+/**
+ * @param {string} descriptorPath
+ * @param {{inventory?: readonly DescriptorInventoryRecord[]}} [options]
+ * @returns {Promise<CheckedDescriptor>}
+ */
+export async function readCheckedDescriptor(descriptorPath, { inventory = [] } = {}) {
+  const result = await ingestDescriptor({ descriptorPath, inventory });
+  if (!result.ok) throw descriptorErrorFromIngestion(result);
+  return result.checked;
+}
+
+/**
+ * Compatibility adapter returning the checked portable descriptor record.
+ * Filesystem parsing and artifact inspection remain owned by ingestDescriptor.
+ *
+ * @param {string} descriptorPath
+ * @param {{inventory?: readonly DescriptorInventoryRecord[]}} [options]
+ * @returns {Promise<Readonly<CustomizationDescriptor>>}
+ */
+export async function readDescriptor(descriptorPath, options = {}) {
+  return (await readCheckedDescriptor(descriptorPath, options)).descriptor;
 }
