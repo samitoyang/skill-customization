@@ -338,6 +338,11 @@ async function inspectCustomizationSource({ descriptor, info, sourceRoot }) {
     });
   }
   return {
+    entrypoint: path.join(
+      checkedCustomization.location.canonicalRoot,
+      customization.entrypoint,
+    ),
+    declaredName: customization.name,
     customization: {
       id: customization.id,
       type: customization.type,
@@ -432,16 +437,28 @@ async function inspectBindingSource({
       code: "BINDING_SOURCE_INVALID",
     });
   }
-  const entrypoint = info.isDirectory() ? path.join(resolved, "SKILL.md") : resolved;
-  if (!info.isDirectory() && path.basename(entrypoint) !== "SKILL.md") {
+  if (
+    descriptor.source.kind !== "customization"
+    && !info.isDirectory()
+    && path.basename(resolved) !== "SKILL.md"
+  ) {
     throw new BindingError("a file binding source must be named SKILL.md", {
       code: "BINDING_SOURCE_INVALID",
     });
   }
   const sourceRoot = await realpath(
-    info.isDirectory() ? resolved : path.dirname(entrypoint),
+    info.isDirectory() ? resolved : path.dirname(resolved),
   );
-  const declaredName = await readSkillName(entrypoint).catch(() => undefined);
+  let sourceMetadata;
+  const entrypoint = descriptor.source.kind === "customization"
+    ? (sourceMetadata = await inspectCustomizationSource({
+        descriptor,
+        info,
+        sourceRoot,
+      })).entrypoint
+    : (info.isDirectory() ? path.join(resolved, "SKILL.md") : resolved);
+  const declaredName = sourceMetadata?.declaredName
+    ?? await readSkillName(entrypoint).catch(() => undefined);
   if (declaredName !== descriptor.source.skill_name) {
     throw new BindingError(
       `binding source declares ${declaredName ?? "no name"}; expected ${descriptor.source.skill_name}`,
@@ -508,7 +525,7 @@ async function inspectBindingSource({
   const bindingPluginCache = uniqueBindingPluginCaches.length === 1
     ? uniqueBindingPluginCaches[0]
     : undefined;
-  const sourceMetadata = await sourcePolicy.inspect({
+  sourceMetadata ??= await sourcePolicy.inspect({
     descriptor,
     group,
     info,
