@@ -79,7 +79,9 @@ export const DESCRIPTOR_SCHEMA_GAPS = freezeDeep({
 });
 
 export const DESCRIPTOR_PARITY_CORPUS = freezeDeep([
-  caseOf("repository-overlay-coexist", repositoryDescriptor(), { runtime: true, schema: true }),
+  caseOf("repository-overlay-coexist", repositoryDescriptor({
+    $schema: "https://skill-customization.dev/schema/customization-v1.json",
+  }), { runtime: true, schema: true }),
   caseOf("local-replace", repositoryDescriptor({
     name: "review",
     source: localSource,
@@ -96,37 +98,38 @@ export const DESCRIPTOR_PARITY_CORPUS = freezeDeep([
     source: customizationSource("semantic-overlay"),
     fork: fork(true),
   }), { runtime: true, schema: true }),
-  caseOf("rejects-unknown-portable-field", repositoryDescriptor({ bindings: [] }), { runtime: false, schema: false }),
-  caseOf("rejects-duplicate-dependency", repositoryDescriptor({ dependencies: ["lint-review", "lint-review"] }), { runtime: false, schema: false }),
-  caseOf("rejects-machine-local-license", repositoryDescriptor({ license: "/Users/alice/license" }), { runtime: false, schema: false }),
-  caseOf("rejects-excluded-runtime-selector", repositoryDescriptor({ entrypoint: "provenance/run.md" }), { runtime: false, schema: false }),
+  caseOf("rejects-machine-local-schema", repositoryDescriptor({ $schema: "/Users/alice/customization.schema.json" }), { runtime: false, schema: false, diagnostic: "/$schema" }),
+  caseOf("rejects-unknown-portable-field", repositoryDescriptor({ bindings: [] }), { runtime: false, schema: false, diagnostic: "/bindings" }),
+  caseOf("rejects-duplicate-dependency", repositoryDescriptor({ dependencies: ["lint-review", "lint-review"] }), { runtime: false, schema: false, diagnostic: "/dependencies/1" }),
+  caseOf("rejects-machine-local-license", repositoryDescriptor({ license: "/Users/alice/license" }), { runtime: false, schema: false, diagnostic: "/license" }),
+  caseOf("rejects-excluded-runtime-selector", repositoryDescriptor({ entrypoint: "provenance/run.md" }), { runtime: false, schema: false, diagnostic: "/entrypoint" }),
   caseOf("rejects-invalid-repository-source", repositoryDescriptor({
     source: { ...repositoryDescriptor().source, repository: "https://token@github.com/example/skills" },
-  }), { runtime: false, schema: false }),
-  caseOf("rejects-invalid-local-source", repositoryDescriptor({ source: { ...localSource, identity: "local:opaque" } }), { runtime: false, schema: false }),
+  }), { runtime: false, schema: false, diagnostic: "/source/repository" }),
+  caseOf("rejects-invalid-local-source", repositoryDescriptor({ source: { ...localSource, identity: "local:opaque" } }), { runtime: false, schema: false, diagnostic: "/source/identity" }),
   caseOf("rejects-invalid-customization-source", repositoryDescriptor({
     source: { ...customizationSource("semantic-overlay"), id: "file:///Users/alice/source" },
-  }), { runtime: false, schema: false }),
-  caseOf("rejects-overlay-fork-fields", repositoryDescriptor({ fork: fork(false) }), { runtime: false, schema: false }),
+  }), { runtime: false, schema: false, diagnostic: "/source/id" }),
+  caseOf("rejects-overlay-fork-fields", repositoryDescriptor({ fork: fork(false) }), { runtime: false, schema: false, diagnostic: "/fork" }),
   caseOf("rejects-unmaterialized-overlay-fork", repositoryDescriptor({
     type: "fork", source: customizationSource("semantic-overlay"), fork: fork(false),
-  }), { runtime: false, schema: false }),
-  caseOf("runtime-only-coexist-name", repositoryDescriptor({ name: "review" }), { runtime: false, schema: true }, "coexistName"),
+  }), { runtime: false, schema: false, diagnostic: "/fork/materialization" }),
+  caseOf("runtime-only-coexist-name", repositoryDescriptor({ name: "review" }), { runtime: false, schema: true, diagnostic: "/name" }, "coexistName"),
   caseOf("runtime-only-replace-name", repositoryDescriptor({
     activation: { mode: "replace", precedence: "customization-first" },
-  }), { runtime: false, schema: true }, "replaceName"),
+  }), { runtime: false, schema: true, diagnostic: "/name" }, "replaceName"),
   caseOf("runtime-only-coexist-precedence", repositoryDescriptor({
     activation: { mode: "coexist", precedence: "customization-first" },
-  }), { runtime: false, schema: true }, "activationPrecedence"),
+  }), { runtime: false, schema: true, diagnostic: "/activation/precedence" }, "activationPrecedence"),
   caseOf("runtime-only-repository-normalization", repositoryDescriptor({
     source: { ...repositoryDescriptor().source, repository: "https://github.com/example/skills/" },
-  }), { runtime: false, schema: true }, "repositoryCanonicalization"),
+  }), { runtime: false, schema: true, diagnostic: "/source/repository" }, "repositoryCanonicalization"),
   caseOf("runtime-only-materialization-source-equality", repositoryDescriptor({
     type: "fork", source: customizationSource("semantic-overlay"),
     fork: { ...fork(true), materialization: { ...fork(true).materialization, source_effective_fingerprint: fingerprint("1") } },
-  }), { runtime: false, schema: true }, "materializationSource"),
+  }), { runtime: false, schema: true, diagnostic: "/fork/materialization/source_effective_fingerprint" }, "materializationSource"),
   caseOf("runtime-only-materialization-snapshot-equality", repositoryDescriptor({
     type: "fork", source: customizationSource("semantic-overlay"),
     fork: { ...fork(true), materialization: { ...fork(true).materialization, snapshot_fingerprint: fingerprint("2") } },
-  }), { runtime: false, schema: true }, "materializationSnapshot"),
+  }), { runtime: false, schema: true, diagnostic: "/fork/materialization/snapshot_fingerprint" }, "materializationSnapshot"),
 ]);

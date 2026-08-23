@@ -16,10 +16,17 @@ test("portable Descriptor corpus records schema parity and explicit runtime-only
   const observedGaps = new Set();
 
   for (const entry of DESCRIPTOR_PARITY_CORPUS) {
-    const runtime = validateDescriptor(entry.descriptor).length === 0;
+    const diagnostics = validateDescriptor(entry.descriptor);
+    const runtime = diagnostics.length === 0;
     const schemaResult = matchesJsonSchema(schema, schema, entry.descriptor);
     assert.equal(runtime, entry.expected.runtime, `${entry.name}: runtime result drifted`);
     assert.equal(schemaResult, entry.expected.schema, `${entry.name}: schema result drifted`);
+    if (entry.expected.diagnostic) {
+      assert.ok(
+        diagnostics.some(({ path }) => path === entry.expected.diagnostic),
+        `${entry.name}: expected runtime diagnostic ${entry.expected.diagnostic}`,
+      );
+    }
     if (entry.gap) observedGaps.add(entry.gap);
     else assert.equal(runtime, schemaResult, `${entry.name}: unexpected schema mismatch`);
   }
