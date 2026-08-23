@@ -20,6 +20,8 @@ These test seams do not change the production interface: `discoverSkills` retain
 
 `npm run verify` remains the required complete correctness check and runs behavior, ambient integration, and emitted-artifact lanes before the package audit. The performance suite is an additional check, not a replacement for correctness. CI runs both jobs. Concurrent `node:test` durations and whole-suite wall-clock time are diagnostic only; they are not performance evidence or regression gates.
 
+The behavior suite includes one immutable [Descriptor parity corpus](../test/support/descriptor-parity-corpus.js). Its cases exercise both `validateDescriptor` and the exported `customization.schema.json`; named runtime-only rules are documented as expressibility gaps, while every other result must agree. Because emitted-artifact verification runs the emitted test suite and package checking delegates to it, the same host-independent corpus verifies source behavior and the packaged artifact exactly once per package check.
+
 ## Performance scenarios
 
 Performance scenarios live under `test/performance/` and end in `.performance.js`. Run exactly one through `scripts/run-performance.js`; the runner rejects ordinary test files, multiple scenarios, and paths outside that directory. `npm run test:performance` invokes the four checked-in scenarios through that runner, so every scenario gets its own process and environment. A scenario owns its fixture size, iteration count, setup, structured report, and budget. It must use deterministic fixture discovery unless its stated subject is ambient integration. Thresholds and exact work budgets belong beside the scenario they govern, not in the concurrent correctness suite.
