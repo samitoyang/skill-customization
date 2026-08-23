@@ -421,6 +421,28 @@ test("an invalid declared entrypoint remains a Discovery diagnostic", async () =
   );
 });
 
+test("Discovery recognizes a checked descriptor with a non-SKILL entrypoint", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-ingestion-entrypoint-name-"));
+  const customizationRoot = path.join(root, "review-overlay");
+  await mkdir(customizationRoot);
+  await writeFile(path.join(customizationRoot, "dispatcher.md"), "dispatcher\n");
+  await writeFile(path.join(customizationRoot, "CUSTOMIZATION.md"), "delta\n");
+  const value = descriptor({
+    owned: await payloadFingerprint(customizationRoot),
+    sourceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  value.entrypoint = "dispatcher.md";
+  await writeDescriptor(customizationRoot, value);
+
+  const discovery = await discoverFixtureSkills({
+    input: "review-overlay",
+    roots: [{ path: root, scope: "workspace", origin: "fixture" }],
+    managerRecords: [],
+  });
+
+  assert.equal(discovery.groups[0].copies[0].classification, "customization");
+});
+
 test("unsafe discovered customization metadata remains a Discovery diagnostic", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "descriptor-ingestion-discovery-error-"));
   const customizationRoot = path.join(root, "review-overlay");

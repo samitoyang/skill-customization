@@ -244,6 +244,14 @@ async function exists(target) {
   );
 }
 
+async function hasDiscoverableSkill(directory) {
+  const [skillEntrypoint, descriptor] = await Promise.all([
+    exists(path.join(directory, "SKILL.md")),
+    exists(path.join(directory, "customization.json")),
+  ]);
+  return skillEntrypoint || descriptor;
+}
+
 async function inspectFilesystemInput(input, cwd) {
   const resolved = path.resolve(cwd, input);
   let info;
@@ -254,7 +262,7 @@ async function inspectFilesystemInput(input, cwd) {
   }
   if (
     (info.isDirectory() || info.isSymbolicLink()) &&
-    (await exists(path.join(resolved, "SKILL.md")))
+    (await hasDiscoverableSkill(resolved))
   ) {
     return { exists: true, skillDirectory: resolved };
   }
@@ -319,14 +327,14 @@ async function scanRoot(rootInfo) {
   };
   if (
     (rootInfo.singleSkill || rootInfo.includeRootSkill !== false)
-    && await exists(path.join(rootInfo.path, "SKILL.md"))
+    && await hasDiscoverableSkill(rootInfo.path)
   ) directories.push(rootInfo.path);
   if (!rootInfo.singleSkill) {
     for (const entry of entries) {
       if (entry.isDirectory() || entry.isSymbolicLink()) {
         const directory = path.join(rootInfo.path, entry.name);
         if (
-          await exists(path.join(directory, "SKILL.md"))
+          await hasDiscoverableSkill(directory)
           && await isContainedPluginDirectory(directory)
         ) directories.push(directory);
       }
