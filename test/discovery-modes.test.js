@@ -43,7 +43,7 @@ test("fixture discovery cannot invoke ambient plugin or manager inventory", asyn
   );
 });
 
-test("Git provenance is collected for repository candidates and skipped for non-repository candidates", async () => {
+test("Git provenance is collected for repository candidates and remains fail-soft elsewhere", async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "git-provenance-probe-"));
   const repositoryRoot = path.join(temporary, "repository");
   const repositorySkills = path.join(repositoryRoot, "skills");
@@ -77,7 +77,7 @@ test("Git provenance is collected for repository candidates and skipped for non-
     discoveryPerformanceChannel.unsubscribe(listener);
   }
 
-  assert.equal(metrics.git_probes, 2);
+  assert.equal(metrics.git_probes, 3);
   const groups = new Map(result.groups.map((group) => [group.name, group]));
   assert.deepEqual(groups.get("review").provenance, [
     `repository:${repository}#skills/review/SKILL.md`,

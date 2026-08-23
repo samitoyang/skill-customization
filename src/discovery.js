@@ -492,13 +492,13 @@ async function scanRoot(rootInfo) {
 
 async function gitEvidence(directory) {
   try {
+    publishDiscoveryPerformanceMetric("git_probes");
     const { stdout: topLevelOutput } = await execFile("git", [
       "-C",
       directory,
       "rev-parse",
       "--show-toplevel",
     ]);
-    publishDiscoveryPerformanceMetric("git_probes");
     const topLevel = await realpath(topLevelOutput.trim()).catch(() =>
       path.resolve(topLevelOutput.trim()),
     );

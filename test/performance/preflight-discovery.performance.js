@@ -58,7 +58,7 @@ await runPerformanceScenario({
     exactWork: {
       discovery_calls: 2 * iterations,
       root_scans: 4 * iterations,
-      git_probes: 0,
+      git_probes: 8 * iterations,
       manager_collections: 0,
       plugin_discovery_calls: 0,
     },
