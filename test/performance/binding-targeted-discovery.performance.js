@@ -2,8 +2,9 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { bindCustomization, resolveBinding } from "../../src/bindings.js";
+import { createDiscoverySnapshot } from "../../src/discovery.js";
 import { fingerprintFile, fingerprintPath, payloadFingerprint } from "../../src/fingerprint.js";
-import { createBindingRuntime } from "../../src/internal/binding-runtime.js";
 import { generateLocalIdentity } from "../../src/normalization.js";
 import { discoverFixtureSkills } from "../support/discovery-modes.js";
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
@@ -101,14 +102,12 @@ await runPerformanceScenario({
   },
   measure: async (state, { phase }) => {
     const { metrics } = await captureDiscoveryWork(async () => {
-      const operation = createBindingRuntime({
+      const discoverySnapshot = createDiscoverySnapshot({
         discovery: state.discovery,
-        context: {
-          roots: state.roots,
-          managerRecords: [],
-        },
+        roots: state.roots,
+        managerRecords: [],
       });
-      await operation.bindCustomization({
+      await bindCustomization({
         descriptor: state.descriptor,
         sourcePath: state.source,
         context: "workspace:performance",
@@ -117,12 +116,20 @@ await runPerformanceScenario({
         requestedScope: "workspace",
         interactive: true,
         confirm: async () => true,
+        discovery: state.discovery,
+        discoverySnapshot,
+        roots: state.roots,
+        managerRecords: [],
       });
-      await operation.resolveBinding({
+      await resolveBinding({
         descriptor: state.descriptor,
         context: "workspace:performance",
         statePath: state.statePath,
         customizationRoot: state.customizationRoot,
+        discovery: state.discovery,
+        discoverySnapshot,
+        roots: state.roots,
+        managerRecords: [],
       });
     });
     if (metrics.discovery_calls !== 1 || metrics.root_scans !== 2) {

@@ -1,4 +1,5 @@
 import { createBindingOperation } from "../bindings.js";
+import { createCustomizationRecoveryAdapter } from "./customization-recovery-adapter.js";
 
 /**
  * Construct the opaque request-scoped Binding runtime used by CLI and
@@ -18,6 +19,13 @@ export function createBindingRuntime({
     managerRecords: context.managerRecords ?? [],
     discoveryOptions: context.discoveryOptions ?? {},
     ...(context.discover ? { discover: context.discover } : {}),
+    ...(typeof context.refreshDiscovery === "function"
+      ? { refreshDiscovery: context.refreshDiscovery }
+      : {}),
   });
-  return createBindingOperation({ runtime, selectSource });
+  return createCustomizationRecoveryAdapter({
+    runtime,
+    selectSource,
+    createOperation: createBindingOperation,
+  });
 }

@@ -32,7 +32,6 @@ import {
 import { generateLocalIdentity } from "../src/normalization.js";
 import { preflightCustomization } from "../src/preflight.js";
 import { confirmDiscoverySelection } from "../src/discovery.js";
-import { createBindingRuntime } from "../src/internal/binding-runtime.js";
 import { discoverFixtureSkills } from "./support/discovery-modes.js";
 import { acquireStateLock } from "../src/state.js";
 
@@ -270,18 +269,38 @@ test("plugin cache recovery preserves concurrent binding changes and deletions",
     updatedAt: "2026-08-20T00:00:00.000Z",
   };
   const release = await acquireStateLock(statePath);
+  let signalTargetedDiscovery;
+  let releaseTargetedDiscovery;
+  const targetedDiscoveryReady = new Promise((resolve) => {
+    signalTargetedDiscovery = resolve;
+  });
+  const targetedDiscoveryGate = new Promise((resolve) => {
+    releaseTargetedDiscovery = resolve;
+  });
+  let discoveryPaused = false;
+  const gatedDiscover = async (options) => {
+    const result = await discoverFixtureSkills(options);
+    if (!discoveryPaused && options.input !== undefined) {
+      discoveryPaused = true;
+      signalTargetedDiscovery();
+      await targetedDiscoveryGate;
+    }
+    return result;
+  };
   const pendingRecovery = resolveBinding({
     descriptor: sourceDescriptor,
     context: "global",
     statePath,
     roots: [rootRecord(versionThree, "3")],
+    discover: gatedDiscover,
   });
   try {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await targetedDiscoveryReady;
     store.bindings[key] = concurrentBinding;
     await writeFile(statePath, `${JSON.stringify(store, null, 2)}\n`);
   } finally {
     await release();
+    releaseTargetedDiscovery();
   }
 
   const afterRace = await pendingRecovery;
@@ -293,19 +312,39 @@ test("plugin cache recovery preserves concurrent binding changes and deletions",
   await mkdir(versionFour, { recursive: true });
   await writeFile(path.join(versionFour, "SKILL.md"), "---\nname: review\n---\nstable\n");
   const releaseDeletion = await acquireStateLock(statePath);
+  let signalDeletionDiscovery;
+  let releaseDeletionDiscovery;
+  const deletionDiscoveryReady = new Promise((resolve) => {
+    signalDeletionDiscovery = resolve;
+  });
+  const deletionDiscoveryGate = new Promise((resolve) => {
+    releaseDeletionDiscovery = resolve;
+  });
+  let deletionDiscoveryPaused = false;
+  const gatedDeletionDiscover = async (options) => {
+    const result = await discoverFixtureSkills(options);
+    if (!deletionDiscoveryPaused && options.input !== undefined) {
+      deletionDiscoveryPaused = true;
+      signalDeletionDiscovery();
+      await deletionDiscoveryGate;
+    }
+    return result;
+  };
   const pendingDeletion = resolveBinding({
     descriptor: sourceDescriptor,
     context: "global",
     statePath,
     roots: [rootRecord(versionFour, "4")],
+    discover: gatedDeletionDiscover,
   });
   try {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await deletionDiscoveryReady;
     const deletedStore = await readBindingStore(statePath);
     delete deletedStore.bindings[key];
     await writeFile(statePath, `${JSON.stringify(deletedStore, null, 2)}\n`);
   } finally {
     await releaseDeletion();
+    releaseDeletionDiscovery();
   }
 
   await assert.rejects(
@@ -459,21 +498,117 @@ test("plugin cache recovery targets outside a seeded same-name inventory", async
   await rename(installOne, path.join(root, "removed"));
   await mkdir(sourceTwo, { recursive: true });
   await writeFile(path.join(sourceTwo, "SKILL.md"), workflow);
-  const operation = createBindingRuntime({
-    discovery: seeded,
-    context: {
-      roots: [initialRoot, replacementRoot],
-      managerRecords: [],
-    },
-  });
-  const recovered = await operation.resolveBinding({
+  const recovered = await resolveBinding({
     descriptor: sourceDescriptor,
     context: "global",
     statePath,
+    discovery: seeded,
+    roots: [initialRoot, replacementRoot],
+    managerRecords: [],
   });
 
   assert.equal(recovered.source.path, path.resolve(sourceTwo));
   assert.equal(recovered.source.pluginIdentity, identity);
+});
+
+test("plugin cache recovery returns a bounded failure when fresh validation rejects a candidate", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-cache-bounded-recovery-"));
+  const installOne = path.join(root, "plugin", "1");
+  const sourceOne = path.join(installOne, "skills", "review");
+  const installTwo = path.join(root, "plugin", "2");
+  const sourceTwo = path.join(installTwo, "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const identity = "local:plugin:fixture-host:fixture-marketplace:reviewer";
+  const repository = "https://github.com/example/skills";
+  const plugin = {
+    host: "fixture-host",
+    marketplace: "fixture-marketplace",
+    name: "reviewer",
+  };
+  const rootRecord = (directory, version) => ({
+    path: path.dirname(directory),
+    owner: "plugin:fixture-host",
+    scope: "global",
+    origin: "plugin",
+    plugin: { ...plugin, version },
+    pluginIdentity: identity,
+    pluginRoot: path.dirname(path.dirname(directory)),
+    pluginEvidence: [{
+      kind: "plugin",
+      ...plugin,
+      version,
+      repository,
+      identity,
+      cache: { kind: "versioned", scope: "global" },
+    }],
+  });
+  const stableWorkflow = "---\nname: review\n---\nstable\n";
+  const changedWorkflow = "---\nname: review\n---\nchanged\n";
+
+  await mkdir(sourceOne, { recursive: true });
+  await writeFile(path.join(sourceOne, "SKILL.md"), stableWorkflow);
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      ...descriptor().source,
+      repository,
+      effective_fingerprint: await fingerprintPath(sourceOne),
+    },
+  };
+  await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: sourceOne,
+    context: "global",
+    statePath,
+    roots: [rootRecord(sourceOne, "1")],
+    interactive: true,
+    confirm: async () => true,
+  });
+  await rename(installOne, path.join(root, "removed"));
+  await mkdir(sourceTwo, { recursive: true });
+  await writeFile(path.join(sourceTwo, "SKILL.md"), stableWorkflow);
+
+  let targetedCalls = 0;
+  let signalSecondTarget;
+  let releaseSecondTarget;
+  const secondTargetReady = new Promise((resolve) => {
+    signalSecondTarget = resolve;
+  });
+  const secondTargetGate = new Promise((resolve) => {
+    releaseSecondTarget = resolve;
+  });
+  const gatedDiscover = async (options) => {
+    const result = await discoverFixtureSkills(options);
+    if (options.input !== undefined) {
+      targetedCalls += 1;
+      if (targetedCalls === 2) {
+        await writeFile(path.join(sourceTwo, "SKILL.md"), changedWorkflow);
+        signalSecondTarget();
+        await secondTargetGate;
+      }
+    }
+    return result;
+  };
+
+  const pending = resolveBinding({
+    descriptor: sourceDescriptor,
+    context: "global",
+    statePath,
+    roots: [rootRecord(sourceTwo, "2")],
+    discover: gatedDiscover,
+  });
+  try {
+    await secondTargetReady;
+  } finally {
+    releaseSecondTarget();
+  }
+
+  await assert.rejects(
+    pending,
+    (error) => error.code === "BINDING_TARGET_MISSING",
+  );
+  assert.equal(targetedCalls, 2);
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
 test("plugin cache recovery keeps seeded and targeted eligible copies ambiguous", async () => {
@@ -546,18 +681,14 @@ test("plugin cache recovery keeps seeded and targeted eligible copies ambiguous"
   await rename(installOne, path.join(root, "removed"));
   await mkdir(sourceTwo, { recursive: true });
   await writeFile(path.join(sourceTwo, "SKILL.md"), workflow);
-  const operation = createBindingRuntime({
-    discovery: seeded,
-    context: {
-      roots: [...initialRoots, replacementRoot],
-      managerRecords: [],
-    },
-  });
   await assert.rejects(
-    operation.resolveBinding({
+    resolveBinding({
       descriptor: sourceDescriptor,
       context: "global",
       statePath,
+      discovery: seeded,
+      roots: [...initialRoots, replacementRoot],
+      managerRecords: [],
     }),
     (error) => error.code === "BINDING_TARGET_MISSING",
   );
@@ -1022,6 +1153,42 @@ test("persisted replacement validation owns the current active inventory", async
     }),
     (error) => error.code === "AMBIGUOUS_REPLACEMENT",
   );
+});
+
+test("replacement binding rechecks active inventory before atomic persistence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "replace-final-inventory-"));
+  const source = path.join(root, "review");
+  const otherSource = path.join(root, "other-review");
+  const statePath = path.join(root, "bindings.json");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  const replacement = descriptor({
+    mode: "replace",
+    precedence: "customization-first",
+  });
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+
+  await assert.rejects(
+    bindCustomization({
+      descriptor: replacement,
+      sourcePath: source,
+      context: "global",
+      statePath,
+      roots,
+      interactive: true,
+      confirm: async () => true,
+      confirmReplace: async () => {
+        await mkdir(otherSource, { recursive: true });
+        await writeFile(
+          path.join(otherSource, "SKILL.md"),
+          "---\nname: review\n---\nother\n",
+        );
+        return true;
+      },
+    }),
+    (error) => error.code === "AMBIGUOUS_REPLACEMENT",
+  );
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
 test("binding rejects the wrong declared source name and conflicting repository evidence", async () => {
