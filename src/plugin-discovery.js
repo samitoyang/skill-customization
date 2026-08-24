@@ -20,7 +20,6 @@ import { createGeminiCliAdapter } from "./plugin-host-adapters/gemini-cli.js";
 import {
   immutablePluginHostRecord,
   isPluginHostResult,
-  pluginHostResult,
 } from "./plugin-host-adapters/interface.js";
 import {
   GENERIC_MANIFEST_FILES,
@@ -1375,7 +1374,14 @@ export async function discoverPluginSkillRoots({
   const roots = [];
   const diagnostics = [];
   for (const specification of hostSpecifications) {
-    if (!specification || typeof specification.discover !== "function") continue;
+    if (!specification || typeof specification.discover !== "function") {
+      diagnostics.push(invalidPluginHostResultDiagnostic(
+        "unknown",
+        context.cwd,
+        "plugin host specification requires a discover function",
+      ));
+      continue;
+    }
     if (!isNonEmptyString(specification.host)) {
       diagnostics.push(invalidPluginHostResultDiagnostic(
         "unknown",
@@ -1392,10 +1398,7 @@ export async function discoverPluginSkillRoots({
       diagnostics: [],
     };
     try {
-      const discovered = await specification.discover(hostContext);
-      const result = specification.returnsResult === true
-        ? discovered
-        : pluginHostResult(hostContext);
+      const result = await specification.discover(hostContext);
       appendPluginHostResult({
         result,
         host,

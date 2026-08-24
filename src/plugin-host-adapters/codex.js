@@ -488,7 +488,6 @@ export function createCodexAdapter({
 
   return Object.freeze({
     host: "codex",
-    returnsResult: true,
     discover: async (context) => {
       await discoverCodex(context);
       return pluginHostResult(context);

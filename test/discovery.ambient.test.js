@@ -2069,7 +2069,6 @@ test("plugin host specifications extend discovery without changing candidate pol
     pluginOptions: {
       hostSpecifications: [{
         host: "future-host",
-        returnsResult: true,
         discover: async () => ({
           roots: [{
             kind: "plugin",
@@ -2120,7 +2119,6 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
     pluginOptions: {
       hostSpecifications: [{
         host: "future-host",
-        returnsResult: true,
         discover: async () => ({
           roots: [
             { owner: "plugin:future-host" },
@@ -2222,85 +2220,8 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
 });
 
 
-test("plugin host adapters preserve legacy context-sink observations", async () => {
+test("plugin host adapter results are required at the discovery seam", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-missing-result-"));
-  const home = path.join(root, "home");
-  const skill = await writeSkill(path.join(root, "future-plugin", "skills"), "future-review");
-  const result = await discoverAmbientSkills({
-    home,
-    cwd: path.join(root, "workspace"),
-    env: {},
-    managerRecords: [],
-    pluginOptions: {
-      hostSpecifications: [{
-        host: "future-host",
-        discover: async (context) => {
-          context.roots.push({
-            kind: "plugin",
-            path: path.dirname(skill),
-            owner: "plugin:future-host",
-            scope: "global",
-            origin: "plugin",
-            host: "future-host",
-          });
-          context.diagnostics.push({
-            kind: "plugin",
-            host: "future-host",
-            path: path.dirname(skill),
-            code: "FUTURE_DIAGNOSTIC",
-            message: "legacy context sink diagnostic",
-          });
-        },
-      }],
-    },
-  });
-
-  assert.equal(result.groups[0].copies[0].path, skill);
-  assert.equal(result.pluginDiagnostics.some(
-    ({ code, host }) =>
-      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
-  ), false);
-  assert.ok(result.pluginDiagnostics.some(
-    ({ code, host }) => code === "FUTURE_DIAGNOSTIC" && host === "future-host",
-  ));
-});
-
-test("legacy plugin host adapters ignore incidental returned values", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-incidental-result-"));
-  const home = path.join(root, "home");
-  const skill = await writeSkill(path.join(root, "future-plugin", "skills"), "future-review");
-  const result = await discoverAmbientSkills({
-    home,
-    cwd: path.join(root, "workspace"),
-    env: {},
-    managerRecords: [],
-    pluginOptions: {
-      hostSpecifications: [{
-        host: "future-host",
-        discover: async (context) => {
-          context.roots.push({
-            kind: "plugin",
-            path: path.dirname(skill),
-            owner: "plugin:future-host",
-            scope: "global",
-            origin: "plugin",
-            host: "future-host",
-          });
-          return 1;
-        },
-      }],
-    },
-  });
-
-  assert.equal(result.groups[0].copies[0].path, skill);
-  assert.equal(result.pluginDiagnostics.some(
-    ({ code, host }) =>
-      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
-  ), false);
-});
-
-test("plugin host adapters accept an empty legacy context sink and validate returned results", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-empty-result-"));
   const result = await discoverAmbientSkills({
     home: path.join(root, "home"),
     cwd: path.join(root, "workspace"),
@@ -2312,20 +2233,27 @@ test("plugin host adapters accept an empty legacy context sink and validate retu
         discover: async () => undefined,
       }, {
         host: "returned-result-host",
-        returnsResult: true,
-        discover: async () => undefined,
+        discover: async () => ({ roots: [], diagnostics: [] }),
+      }, {
+        host: "missing-discover-host",
       }],
     },
   });
 
   assert.deepEqual(result.groups, []);
-  assert.equal(result.pluginDiagnostics.some(
-    ({ code, host }) =>
-      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
-  ), false);
   assert.ok(result.pluginDiagnostics.some(
     ({ code, host }) =>
+      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
+  ));
+  assert.equal(result.pluginDiagnostics.some(
+    ({ code, host }) =>
       code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "returned-result-host",
+  ), false);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, host, message }) =>
+      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT"
+      && host === "unknown"
+      && message.includes("discover function"),
   ));
 });
 

@@ -186,7 +186,6 @@ export function createGeminiCliAdapter({
 
   return Object.freeze({
     host: "gemini-cli",
-    returnsResult: true,
     discover: async (context) => {
       await discoverGemini(context);
       return pluginHostResult(context);

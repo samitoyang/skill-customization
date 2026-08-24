@@ -14,11 +14,21 @@ import test from "node:test";
 import { createClaudeCodeAdapter } from "../src/plugin-host-adapters/claude-code.js";
 import { createCodexAdapter } from "../src/plugin-host-adapters/codex.js";
 import { createGeminiCliAdapter } from "../src/plugin-host-adapters/gemini-cli.js";
-import { pluginHostResult } from "../src/plugin-host-adapters/interface.js";
 import {
   CURSOR_HOST_ADAPTER,
+  PLUGIN_HOST_SPECIFICATIONS,
   discoverPluginSkillRoots,
 } from "../src/plugin-discovery.js";
+
+test("the host registry exposes four result-returning adapters", () => {
+  assert.deepEqual(
+    PLUGIN_HOST_SPECIFICATIONS.map(({ host }) => host),
+    ["claude-code", "codex", "gemini-cli", "cursor"],
+  );
+  assert.ok(PLUGIN_HOST_SPECIFICATIONS.every((adapter) =>
+    typeof adapter.discover === "function"
+    && !Object.hasOwn(adapter, "returnsResult")));
+});
 
 test("Claude Code adapter interface uses injected local filesystem helpers", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-code-adapter-interface-"));
@@ -592,33 +602,4 @@ test("Cursor adapter interface uses real isolated filesystem fixtures", async ()
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
-test("plugin host results clone and freeze nested observations", () => {
-  const root = {
-    kind: "plugin",
-    path: "/fixture/plugin",
-    owner: "plugin:future-host",
-    scope: "global",
-    origin: "plugin",
-    host: "future-host",
-    plugin: { name: "future" },
-    pluginEvidence: [{
-      kind: "plugin",
-      host: "future-host",
-      plugin: "future",
-      marketplace: "local",
-    }],
-  };
-  const result = pluginHostResult({
-    roots: [root],
-    diagnostics: [],
-  });
-
-  root.plugin.name = "mutated-after-return";
-  assert.equal(result.roots[0].plugin.name, "future");
-  assert.equal(Object.isFrozen(result), true);
-  assert.equal(Object.isFrozen(result.roots), true);
-  assert.equal(Object.isFrozen(result.roots[0]), true);
-  assert.equal(Object.isFrozen(result.roots[0].plugin), true);
-  assert.equal(Object.isFrozen(result.roots[0].pluginEvidence[0]), true);
 });

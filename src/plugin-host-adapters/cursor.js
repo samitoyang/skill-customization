@@ -311,7 +311,6 @@ export function createCursorAdapter({
 
   return Object.freeze({
     host: "cursor",
-    returnsResult: true,
     discover: async (context) => {
       await discoverCursor(context);
       return pluginHostResult(context);
