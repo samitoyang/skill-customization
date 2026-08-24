@@ -258,11 +258,52 @@ export function createCodexAdapter({
   addPluginInstall,
   diagnostic,
   discoverMarketplaceManifests,
-  discoverVersionedPluginCache,
   pluginDirectories,
   readFile,
   safeDirectory,
 }) {
+  async function discoverCodexVersionedPluginCache({
+    cacheRoot,
+    boundary,
+    context,
+    scope,
+  }) {
+    const cacheMetadata = { host: "codex", source: "cache" };
+    for (const marketplace of await pluginDirectories(cacheRoot, context, cacheMetadata)) {
+      for (const plugin of await pluginDirectories(
+        marketplace.path,
+        context,
+        { ...cacheMetadata, marketplace: marketplace.entry.name },
+      )) {
+        for (const version of await pluginDirectories(
+          plugin.path,
+          context,
+          {
+            ...cacheMetadata,
+            marketplace: marketplace.entry.name,
+            name: plugin.entry.name,
+          },
+        )) {
+          await addPluginInstall({
+            installRoot: version.path,
+            boundary,
+            host: "codex",
+            marketplace: marketplace.entry.name,
+            name: plugin.entry.name,
+            version: version.entry.name,
+            scope,
+            source: {},
+            cache: { kind: "versioned", scope },
+            active: false,
+            context,
+            manifestPolicy: CODEX_MANIFEST_POLICY,
+            localPluginIdentity: codexPluginIdentity,
+          });
+        }
+      }
+    }
+  }
+
   async function codexMarketplaceDeclarations(codexHome, context) {
     const file = path.join(codexHome, "config.toml");
     let contents;
@@ -342,6 +383,7 @@ export function createCodexAdapter({
           name: plugin.entry.name,
           scope: "global",
           source: {},
+          active: true,
           context,
           manifestPolicy: CODEX_MANIFEST_POLICY,
           localPluginIdentity: codexPluginIdentity,
@@ -355,14 +397,11 @@ export function createCodexAdapter({
         { host: "codex", source: "cache" },
       );
       if (safeCacheRoot) {
-        await discoverVersionedPluginCache({
+        await discoverCodexVersionedPluginCache({
           cacheRoot: safeCacheRoot,
           boundary: safeCacheRoot,
           context,
-          host: "codex",
           scope: "global",
-          manifestPolicy: CODEX_MANIFEST_POLICY,
-          localPluginIdentity: codexPluginIdentity,
         });
       }
     }

@@ -1424,6 +1424,14 @@ function appendPluginHostResult({
       || typeof root !== "object"
       || typeof root.path !== "string"
       || !root.path
+      || root.kind !== "plugin"
+      || typeof root.owner !== "string"
+      || !root.owner
+      || typeof root.scope !== "string"
+      || !root.scope
+      || typeof root.origin !== "string"
+      || !root.origin
+      || root.host !== host
     ) {
       diagnostics.push(invalidPluginHostResultDiagnostic(
         host,
@@ -1438,9 +1446,14 @@ function appendPluginHostResult({
     if (
       !entry
       || typeof entry !== "object"
+      || entry.kind !== "plugin"
+      || entry.host !== host
       || typeof entry.path !== "string"
+      || !entry.path
       || typeof entry.code !== "string"
+      || !entry.code
       || typeof entry.message !== "string"
+      || !entry.message
     ) {
       diagnostics.push(invalidPluginHostResultDiagnostic(
         host,
@@ -1473,7 +1486,6 @@ export const CODEX_HOST_ADAPTER = createCodexAdapter({
   addPluginInstall,
   diagnostic,
   discoverMarketplaceManifests,
-  discoverVersionedPluginCache,
   pluginDirectories,
   readFile,
   safeDirectory,
@@ -1537,10 +1549,7 @@ export async function discoverPluginSkillRoots({
   }
   // Host adapters emit observations. Physical-root identity, policy merging,
   // and duplicate evidence handling belong to the Skill root registry.
-  const normalizedRoots = roots.map((item) => ({
-    ...item,
-    kind: item.kind ?? "plugin",
-  }));
+  const normalizedRoots = roots.map((item) => ({ ...item, kind: "plugin" }));
   normalizedRoots.sort((left, right) => left.path.localeCompare(right.path, "en"));
   return {
     roots: normalizedRoots,

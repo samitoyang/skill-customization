@@ -89,11 +89,14 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
     const cwd = path.join(root, "workspace");
     const codexHome = path.join(home, ".codex");
     const pluginsRoot = path.join(codexHome, "plugins");
+    const cacheRoot = path.join(pluginsRoot, "cache");
+    const cacheMarketplaceRoot = path.join(cacheRoot, "official");
+    const cachePluginRoot = path.join(cacheMarketplaceRoot, "reviewer");
+    const cacheVersionRoot = path.join(cachePluginRoot, "1.0.0");
     const bundledMarketplacesRoot = path.join(codexHome, ".tmp", "bundled-marketplaces");
     const configuredRoot = path.join(codexHome, "configured");
     await mkdir(cwd, { recursive: true });
 
-    const cacheCalls = [];
     const marketplaceCalls = [];
     const installCalls = [];
     const readCalls = [];
@@ -102,13 +105,21 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
       addPluginInstall: async (options) => installCalls.push(options),
       diagnostic: (value) => value,
       discoverMarketplaceManifests: async (options) => marketplaceCalls.push(options),
-      discoverVersionedPluginCache: async (options) => cacheCalls.push(options),
       pluginDirectories: async (target) => {
         if (target === pluginsRoot) {
           return [{
             entry: { name: "direct" },
             path: path.join(pluginsRoot, "direct"),
           }];
+        }
+        if (target === cacheRoot) {
+          return [{ entry: { name: "official" }, path: cacheMarketplaceRoot }];
+        }
+        if (target === cacheMarketplaceRoot) {
+          return [{ entry: { name: "reviewer" }, path: cachePluginRoot }];
+        }
+        if (target === cachePluginRoot) {
+          return [{ entry: { name: "1.0.0" }, path: cacheVersionRoot }];
         }
         if (target === bundledMarketplacesRoot) {
           return [{
@@ -142,19 +153,7 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
       file: path.join(codexHome, "config.toml"),
       encoding: "utf8",
     }]);
-    assert.equal(cacheCalls.length, 1);
-    assert.equal(cacheCalls[0].host, "codex");
-    assert.equal(cacheCalls[0].scope, "global");
-    assert.equal(cacheCalls[0].manifestPolicy.files[0], ".codex-plugin/plugin.json");
-    assert.equal(
-      cacheCalls[0].localPluginIdentity({
-        host: "codex",
-        marketplace: "official",
-        name: "reviewer",
-      }),
-      "local:plugin:codex:official:reviewer",
-    );
-    assert.equal(installCalls.length, 1);
+    assert.equal(installCalls.length, 2);
     assert.deepEqual(installCalls[0], {
       installRoot: path.join(pluginsRoot, "direct"),
       boundary: pluginsRoot,
@@ -163,11 +162,29 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
       name: "direct",
       scope: "global",
       source: {},
+      active: true,
       context,
       manifestPolicy: {
         files: [".codex-plugin/plugin.json", "plugin.json", "manifest.json", "package.json"],
       },
       localPluginIdentity: installCalls[0].localPluginIdentity,
+    });
+    assert.deepEqual(installCalls[1], {
+      installRoot: cacheVersionRoot,
+      boundary: cacheRoot,
+      host: "codex",
+      marketplace: "official",
+      name: "reviewer",
+      version: "1.0.0",
+      scope: "global",
+      source: {},
+      cache: { kind: "versioned", scope: "global" },
+      active: false,
+      context,
+      manifestPolicy: {
+        files: [".codex-plugin/plugin.json", "plugin.json", "manifest.json", "package.json"],
+      },
+      localPluginIdentity: installCalls[1].localPluginIdentity,
     });
     assert.equal(
       installCalls[0].localPluginIdentity({

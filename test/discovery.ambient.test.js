@@ -2071,6 +2071,7 @@ test("plugin host specifications extend discovery without changing candidate pol
         host: "future-host",
         discover: async () => ({
           roots: [{
+            kind: "plugin",
             path: path.dirname(skill),
             owner: "plugin:future-host",
             owners: ["plugin:future-host"],
@@ -2110,18 +2111,42 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
       hostSpecifications: [{
         host: "future-host",
         discover: async () => ({
-          roots: [{ owner: "plugin:future-host" }],
-          diagnostics: [],
+          roots: [
+            { owner: "plugin:future-host" },
+            {
+              kind: "standard",
+              path: path.join(root, "misclassified"),
+              owner: "plugin:future-host",
+              scope: "global",
+              origin: "plugin",
+              host: "future-host",
+            },
+            {
+              kind: "plugin",
+              path: path.join(root, "wrong-host"),
+              owner: "plugin:future-host",
+              scope: "global",
+              origin: "plugin",
+              host: "other-host",
+            },
+          ],
+          diagnostics: [{
+            kind: "plugin",
+            host: "other-host",
+            path: path.join(root, "diagnostic"),
+            code: "FUTURE_DIAGNOSTIC",
+            message: "wrong host",
+          }],
         }),
       }],
     },
   });
 
   assert.deepEqual(result.groups, []);
-  assert.ok(result.pluginDiagnostics.some(
+  assert.ok(result.pluginDiagnostics.filter(
     ({ code, host }) =>
       code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
-  ));
+  ).length >= 4);
 });
 
 
