@@ -97,6 +97,8 @@
  * @property {string} [marketplaceName]
  * @property {boolean} [active]
  * @property {Record<string, unknown>} [manifestPolicy]
+ * @property {PluginHostMarketplacePolicy} [marketplacePolicy]
+ * @property {(options: {location: {installRoot: string, boundary: string}, entry: Record<string, unknown>, file: string, context: PluginHostDiscoveryContext}) => (boolean | Promise<boolean>)} [onDeclaredPlugin]
  * @property {readonly string[]} [manifestFiles]
  * @property {readonly string[]} [marketplaceRootDirectories]
  * @property {(metadata: Record<string, unknown>) => string} [localPluginIdentity]
@@ -115,6 +117,30 @@
  */
 
 /** @typedef {Record<string, unknown>} PluginHostMetadata */
+
+/**
+ * @typedef {object} PluginHostMarketplacePolicyContext
+ * @property {Record<string, unknown>} manifest
+ * @property {string} file
+ * @property {string} safeBase
+ * @property {string} sourceBase
+ * @property {PluginHostDiscoveryContext} context
+ * @property {string} host
+ * @property {string} marketplace
+ */
+
+/**
+ * @typedef {object} PluginHostMarketplacePolicyResult
+ * @property {boolean} valid
+ * @property {readonly Record<string, unknown>[]} entries
+ * @property {string} [pluginRoot]
+ */
+
+/**
+ * @typedef {object} PluginHostMarketplacePolicy
+ * @property {(context: PluginHostMarketplacePolicyContext) => (PluginHostMarketplacePolicyResult | Promise<PluginHostMarketplacePolicyResult>)} validate
+ * @property {(entry: {entry: Record<string, unknown>, file: string, context: PluginHostDiscoveryContext, marketplace: string}) => (boolean | Promise<boolean>)} [validateEntry]
+ */
 
 /**
  * @typedef {object} PluginHostManifestValidationResult
@@ -162,6 +188,15 @@
  * @property {(root: string, context: PluginHostDiscoveryContext, metadata: PluginHostMetadata, filter?: (entry: {name: string}) => boolean) => Promise<readonly PluginHostDirectoryEntry[]>} pluginDirectories
  * @property {(file: string, context: PluginHostDiscoveryContext, options?: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>} readJsonObject
  * @property {(target: string, boundary: string, context: PluginHostDiscoveryContext, metadata: PluginHostMetadata, options?: {declared?: boolean}) => Promise<string | undefined>} safeDirectory
+ */
+
+/**
+ * @typedef {PluginHostAdapterToolkit & {
+ *   canonicalContained: (candidate: string, boundary: string) => Promise<boolean>,
+ *   lstat: (target: string) => Promise<{isFile: () => boolean, isDirectory?: () => boolean, isSymbolicLink?: () => boolean}>,
+ *   pluginIdentity: (metadata: PluginHostMetadata) => string,
+ *   realpath: (target: string) => Promise<string>,
+ * }} CursorAdapterToolkit
  */
 
 /**

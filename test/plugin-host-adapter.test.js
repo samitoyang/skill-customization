@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { createClaudeCodeAdapter } from "../src/plugin-host-adapters/claude-code.js";
 import { createCodexAdapter } from "../src/plugin-host-adapters/codex.js";
+import { createCursorAdapter } from "../src/plugin-host-adapters/cursor.js";
 import { createGeminiCliAdapter } from "../src/plugin-host-adapters/gemini-cli.js";
 import { pluginHostResult } from "../src/plugin-host-adapters/interface.js";
 
@@ -404,6 +405,146 @@ test("Gemini CLI adapter interface owns locations, validation, and activation po
       result.diagnostics.some(({ message }) =>
         message.includes("invalid Gemini extension installation metadata")),
       true,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Cursor adapter interface owns bounded locations, marketplace policy, and fallback", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-adapter-interface-"));
+  try {
+    const home = path.join(root, "home");
+    const cwd = path.join(root, "workspace");
+    const cursorHome = path.join(home, ".cursor");
+    const globalRoot = path.join(cursorHome, "plugins", "local");
+    const workspaceRoot = path.join(cwd, ".cursor", "plugins", "local");
+    const globalPlugin = path.join(globalRoot, "global-plugin");
+    const workspacePlugin = path.join(workspaceRoot, "workspace-plugin");
+    const marketplaceFile = path.join(globalRoot, ".cursor-plugin", "marketplace.json");
+    await mkdir(cwd, { recursive: true });
+
+    const directoryCalls = [];
+    const installCalls = [];
+    const marketplaceCalls = [];
+    const lstatCalls = [];
+    const adapter = createCursorAdapter({
+      addPluginInstall: async (options) => installCalls.push(options),
+      canonicalContained: async () => true,
+      diagnostic: (value) => value,
+      discoverMarketplaceManifests: async (options) => {
+        marketplaceCalls.push(options);
+        return false;
+      },
+      lstat: async (file) => {
+        lstatCalls.push(file);
+        if (file === marketplaceFile) return { isFile: () => true };
+        const error = new Error("missing");
+        error.code = "ENOENT";
+        throw error;
+      },
+      pluginDirectories: async (target) => {
+        directoryCalls.push(target);
+        if (target === globalRoot) {
+          return [{ entry: { name: "global-plugin" }, path: globalPlugin }];
+        }
+        if (target === workspaceRoot) {
+          return [{ entry: { name: "workspace-plugin" }, path: workspacePlugin }];
+        }
+        return [];
+      },
+      pluginIdentity: ({ host, marketplace, name }) =>
+        `local:plugin:${host}:${marketplace}:${name}`,
+      realpath: async (target) => target,
+      safeDirectory: async (target) => target,
+    });
+    const context = {
+      home,
+      cwd,
+      env: { CURSOR_HOME: cursorHome },
+      workspaceDirectories: [cwd],
+      roots: [],
+      diagnostics: [],
+    };
+
+    const result = await adapter.discover(context);
+
+    assert.equal(context.host, "cursor");
+    assert.equal(result.roots.length, context.roots.length);
+    assert.equal(result.diagnostics.length, context.diagnostics.length);
+    assert.deepEqual(directoryCalls, [globalRoot, workspaceRoot]);
+    assert.deepEqual(lstatCalls, [
+      path.join(globalPlugin, ".cursor-plugin", "marketplace.json"),
+      path.join(workspacePlugin, ".cursor-plugin", "marketplace.json"),
+    ]);
+    assert.deepEqual(
+      marketplaceCalls.map(({ base, boundary, scope, marketplaceName, active }) => ({
+        base,
+        boundary,
+        scope,
+        marketplaceName,
+        active,
+      })),
+      [
+        {
+          base: globalRoot,
+          boundary: cursorHome,
+          scope: "global",
+          marketplaceName: "local",
+          active: true,
+        },
+        {
+          base: workspaceRoot,
+          boundary: cwd,
+          scope: "workspace",
+          marketplaceName: "local",
+          active: true,
+        },
+      ],
+    );
+    assert.equal(marketplaceCalls[0].manifestFiles[0], ".cursor-plugin/marketplace.json");
+    assert.deepEqual(marketplaceCalls[0].marketplaceRootDirectories, [".cursor-plugin"]);
+    assert.deepEqual(marketplaceCalls[0].manifestPolicy, {
+      files: [".cursor-plugin/plugin.json", "plugin.json"],
+      description: "Cursor plugin metadata",
+      requiredFields: ["name"],
+      skipInvalidExtension: true,
+      manifestOverridesDeclaration: true,
+      declaredSkillDirectoriesReplaceDefault: true,
+      includeRootSkillFallback: true,
+      includeDefaultSkillRoot: false,
+      manifestNamePattern: marketplaceCalls[0].manifestPolicy.manifestNamePattern,
+    });
+    assert.equal(typeof marketplaceCalls[0].marketplacePolicy.validate, "function");
+    const marketplaceValidation = await marketplaceCalls[0].marketplacePolicy.validate({
+      manifest: {
+        name: "team",
+        owner: { name: "fixture" },
+        metadata: { pluginRoot: "plugins" },
+        plugins: [{ name: "reviewer", source: "reviewer" }],
+      },
+      file: marketplaceFile,
+      safeBase: globalRoot,
+      sourceBase: globalRoot,
+      context,
+      host: "cursor",
+      marketplace: "team",
+    });
+    assert.equal(marketplaceValidation.valid, true);
+    assert.equal(marketplaceValidation.pluginRoot, "plugins");
+    assert.deepEqual(marketplaceValidation.entries, [
+      { name: "reviewer", source: "reviewer" },
+    ]);
+    assert.equal(installCalls.length, 2);
+    assert.ok(installCalls.every(({ host }) => host === "cursor"));
+    assert.ok(installCalls.every(({ active }) => active === true));
+    assert.equal(
+      installCalls[0].localPluginIdentity({
+        host: "cursor",
+        marketplace: "local",
+        name: "global-plugin",
+      }),
+      "local:plugin:cursor:local:global-plugin",
     );
   } finally {
     await rm(root, { recursive: true, force: true });

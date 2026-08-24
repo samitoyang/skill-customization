@@ -15,6 +15,7 @@ import {
 import { isPathContained } from "./paths.js";
 import { createClaudeCodeAdapter } from "./plugin-host-adapters/claude-code.js";
 import { createCodexAdapter } from "./plugin-host-adapters/codex.js";
+import { createCursorAdapter } from "./plugin-host-adapters/cursor.js";
 import { createGeminiCliAdapter } from "./plugin-host-adapters/gemini-cli.js";
 import {
   immutablePluginHostRecord,
@@ -32,24 +33,6 @@ import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 
 const PLUGIN_OWNER_PREFIX = "plugin:";
 
-const CURSOR_MANIFEST_POLICY = Object.freeze({
-  files: [".cursor-plugin/plugin.json", "plugin.json"],
-  description: "Cursor plugin metadata",
-  requiredFields: ["name"],
-  skipInvalidExtension: true,
-  manifestOverridesDeclaration: true,
-  declaredSkillDirectoriesReplaceDefault: true,
-  includeRootSkillFallback: true,
-  includeDefaultSkillRoot: false,
-  manifestNamePattern: /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
-});
-const HOST_MARKETPLACE_MANIFEST_FILES = Object.freeze({
-  cursor: [
-    ".cursor-plugin/marketplace.json",
-    ...GENERIC_MARKETPLACE_MANIFEST_FILES,
-  ],
-});
-const CURSOR_MARKETPLACE_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const DECLARED_SKILL_DIRECTORY_FIELDS = [
   "skills",
   "skillDirectories",
@@ -793,70 +776,6 @@ async function pluginDirectories(root, context, metadata, filter = () => true) {
   return result;
 }
 
-async function cursorMarketplaceManifestStatus(root) {
-  const file = path.join(root, ".cursor-plugin", "marketplace.json");
-  try {
-    await lstat(file);
-    return {
-      present: true,
-      contained: await canonicalContained(file, root),
-    };
-  } catch {
-    return { present: false, contained: false };
-  }
-}
-
-async function discoverCursorLocalPluginRoots({
-  root,
-  boundary = root,
-  scope,
-  context,
-  ownedRoots = new Set(),
-}) {
-  const safeRoot = await safeDirectory(
-    root,
-    boundary,
-    context,
-    { host: "cursor", source: "extension" },
-  );
-  if (!safeRoot) return;
-  for (const extension of await pluginDirectories(
-    safeRoot,
-    context,
-    { host: "cursor", source: "extension" },
-  )) {
-    const canonicalExtension = await realpath(extension.path).catch(() => undefined);
-    if (canonicalExtension && ownedRoots.has(canonicalExtension)) continue;
-    const marketplaceManifest = await cursorMarketplaceManifestStatus(extension.path);
-    if (marketplaceManifest.present) {
-      // A direct child can itself be a documented multi-plugin repository.
-      const discoveredMarketplace = await discoverMarketplaceManifests({
-        base: extension.path,
-        boundary: safeRoot,
-        context,
-        host: "cursor",
-        scope,
-        marketplaceName: "local",
-        manifestPolicy: CURSOR_MANIFEST_POLICY,
-        marketplaceRootDirectories: [".cursor-plugin"],
-        ownedRoots,
-      });
-      if (marketplaceManifest.contained && discoveredMarketplace) continue;
-    }
-    await addPluginInstall({
-      installRoot: extension.path,
-      boundary: safeRoot,
-      host: "cursor",
-      marketplace: "local",
-      name: extension.entry.name,
-      scope,
-      source: {},
-      context,
-      manifestPolicy: CURSOR_MANIFEST_POLICY,
-    });
-  }
-}
-
 async function discoverVersionedPluginCache({
   cacheRoot,
   boundary,
@@ -913,55 +832,6 @@ function marketplaceEntries(value) {
   );
 }
 
-async function discoverCursor(context) {
-  const { home, env } = context;
-  const ownedRoots = new Set();
-  const cursorHome = path.resolve(
-    stringValue(env.CURSOR_HOME) ?? path.join(home, ".cursor"),
-  );
-  const globalRoot = path.join(cursorHome, "plugins", "local");
-  // A valid marketplace owns its declared installs; direct discovery is the fallback.
-  await discoverMarketplaceManifests({
-    base: globalRoot,
-    boundary: cursorHome,
-    context,
-    host: "cursor",
-    scope: "global",
-    marketplaceName: "local",
-    manifestPolicy: CURSOR_MANIFEST_POLICY,
-    marketplaceRootDirectories: [".cursor-plugin"],
-    ownedRoots,
-  });
-  await discoverCursorLocalPluginRoots({
-    root: globalRoot,
-    boundary: cursorHome,
-    scope: "global",
-    context,
-    ownedRoots,
-  });
-  for (const workspace of context.workspaceDirectories) {
-    const workspaceRoot = path.join(workspace, ".cursor", "plugins", "local");
-    await discoverMarketplaceManifests({
-      base: workspaceRoot,
-      boundary: workspace,
-      context,
-      host: "cursor",
-      scope: "workspace",
-      marketplaceName: "local",
-      manifestPolicy: CURSOR_MANIFEST_POLICY,
-      marketplaceRootDirectories: [".cursor-plugin"],
-      ownedRoots,
-    });
-    await discoverCursorLocalPluginRoots({
-      root: workspaceRoot,
-      boundary: workspace,
-      scope: "workspace",
-      context,
-      ownedRoots,
-    });
-  }
-}
-
 function marketplaceSourceBase(file, safeBase, marketplaceRootDirectories = []) {
   const marketplaceDirectory = path.dirname(file);
   if (
@@ -1013,6 +883,42 @@ function marketplacePluginLocation(
   };
 }
 
+function genericMarketplacePolicy({ manifest, file, host, marketplace, context }) {
+  const entriesField = ["plugins", "extensions", "entries"].find((field) =>
+    Object.hasOwn(manifest, field),
+  );
+  if (!entriesField) {
+    context.diagnostics.push(
+      diagnostic({
+        host,
+        path: file,
+        code: "PLUGIN_MARKETPLACE_MISSING_ENTRIES",
+        message: `marketplace metadata has no plugin entries: ${file}`,
+        metadata: { host, marketplace },
+      }),
+    );
+    return { valid: false, entries: [] };
+  }
+  const configuredEntries = manifest[entriesField];
+  if (
+    configuredEntries !== undefined
+    && !Array.isArray(configuredEntries)
+    && (!configuredEntries || typeof configuredEntries !== "object")
+  ) {
+    context.diagnostics.push(
+      diagnostic({
+        host,
+        path: file,
+        code: "PLUGIN_MARKETPLACE_INVALID_ENTRIES",
+        message: `marketplace plugin entries must be an array or object: ${file}`,
+        metadata: { host, marketplace },
+      }),
+    );
+    return { valid: false, entries: [] };
+  }
+  return { valid: true, entries: marketplaceEntries(manifest) };
+}
+
 async function discoverMarketplaceManifests({
   base,
   boundary,
@@ -1024,8 +930,9 @@ async function discoverMarketplaceManifests({
   active,
   manifestFiles,
   marketplaceRootDirectories = [],
+  marketplacePolicy,
   localPluginIdentity,
-  ownedRoots,
+  onDeclaredPlugin,
 }) {
   const safeBase = await safeDirectory(
     base,
@@ -1039,9 +946,7 @@ async function discoverMarketplaceManifests({
     context,
     { host, source: "marketplace" },
     {
-      files: manifestFiles
-        ?? HOST_MARKETPLACE_MANIFEST_FILES[host]
-        ?? GENERIC_MARKETPLACE_MANIFEST_FILES,
+      files: manifestFiles ?? GENERIC_MARKETPLACE_MANIFEST_FILES,
       description: "marketplace metadata",
     },
   );
@@ -1049,128 +954,33 @@ async function discoverMarketplaceManifests({
   let declaredPlugin = false;
   const { path: file, value: manifest } = manifestResult;
   const marketplace = stringValue(manifest.name) ?? marketplaceName ?? path.basename(safeBase);
-  let validCursorMarketplace = true;
-  if (
-    host === "cursor"
-    && (
-      typeof manifest.name !== "string"
-      || !CURSOR_MARKETPLACE_NAME_PATTERN.test(manifest.name)
-    )
-  ) {
-    validCursorMarketplace = false;
-    context.diagnostics.push(
-      diagnostic({
-        host,
-        path: file,
-        code: "PLUGIN_MARKETPLACE_INVALID_NAME",
-        message: `Cursor marketplace name is invalid: ${file}`,
-        metadata: { host, marketplace },
-      }),
-    );
-  }
-  const owner = manifest.owner;
-  if (
-    host === "cursor"
-    && (
-      !owner
-      || typeof owner !== "object"
-      || Array.isArray(owner)
-      || typeof owner.name !== "string"
-      || !owner.name.trim()
-    )
-  ) {
-    validCursorMarketplace = false;
-    context.diagnostics.push(
-      diagnostic({
-        host,
-        path: file,
-        code: "PLUGIN_MARKETPLACE_INVALID_OWNER",
-        message: `Cursor marketplace owner is invalid: ${file}`,
-        metadata: { host, marketplace },
-      }),
-    );
-  }
-  const pluginRoot = host === "cursor" ? manifest.metadata?.pluginRoot : undefined;
-  if (
-    host === "cursor"
-    && Object.hasOwn(manifest.metadata ?? {}, "pluginRoot")
-    && !stringValue(pluginRoot)
-  ) {
-    validCursorMarketplace = false;
-    context.diagnostics.push(
-      diagnostic({
-        host,
-        path: file,
-        code: "PLUGIN_MARKETPLACE_INVALID_ROOT",
-        message: `marketplace pluginRoot must be a non-empty string: ${file}`,
-        metadata: { host, marketplace },
-      }),
-    );
-  }
   const sourceBase = marketplaceSourceBase(file, safeBase, marketplaceRootDirectories);
+  const policy = marketplacePolicy ?? {
+    validate: genericMarketplacePolicy,
+  };
+  const marketplaceResult = await policy.validate({
+    manifest,
+    file,
+    safeBase,
+    sourceBase,
+    context,
+    host,
+    marketplace,
+  });
+  if (!marketplaceResult) return false;
   let declaredPluginRoot;
-  if (host === "cursor" && stringValue(pluginRoot)) {
+  if (marketplaceResult.pluginRoot) {
     declaredPluginRoot = await safeDirectory(
-      path.resolve(sourceBase, stringValue(pluginRoot)),
+      path.resolve(sourceBase, marketplaceResult.pluginRoot),
       sourceBase,
       context,
       { host, marketplace, source: "marketplace" },
       { declared: true },
     );
-    if (!declaredPluginRoot) validCursorMarketplace = false;
+    if (!declaredPluginRoot) return false;
   }
-  const entriesField = host === "cursor"
-    ? (Object.hasOwn(manifest, "plugins") ? "plugins" : undefined)
-    : ["plugins", "extensions", "entries"].find((field) =>
-      Object.hasOwn(manifest, field),
-    );
-  if (!entriesField) {
-    context.diagnostics.push(
-      diagnostic({
-        host,
-        path: file,
-        code: "PLUGIN_MARKETPLACE_MISSING_ENTRIES",
-        message: `marketplace metadata has no plugin entries: ${file}`,
-        metadata: { host, marketplace },
-      }),
-    );
-    return false;
-  }
-  const configuredEntries = manifest[entriesField];
-  if (
-    (host === "cursor" && !Array.isArray(configuredEntries))
-    || (
-      host !== "cursor"
-      && configuredEntries !== undefined
-      && !Array.isArray(configuredEntries)
-      && (!configuredEntries || typeof configuredEntries !== "object")
-    )
-  ) {
-    context.diagnostics.push(
-      diagnostic({
-        host,
-        path: file,
-        code: "PLUGIN_MARKETPLACE_INVALID_ENTRIES",
-        message: `marketplace plugin entries must be an array or object: ${file}`,
-        metadata: { host, marketplace },
-      }),
-    );
-    return false;
-  }
-  if (host === "cursor" && configuredEntries.length > 500) {
-    context.diagnostics.push(
-      diagnostic({
-        host,
-        path: file,
-        code: "PLUGIN_MARKETPLACE_TOO_MANY_ENTRIES",
-        message: `Cursor marketplace has more than 500 plugins: ${file}`,
-        metadata: { host, marketplace },
-      }),
-    );
-    return false;
-  }
-  if (host === "cursor" && !validCursorMarketplace) return false;
-  for (const entry of marketplaceEntries(manifest)) {
+  if (!marketplaceResult.valid) return false;
+  for (const entry of marketplaceResult.entries) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       context.diagnostics.push(
         diagnostic({
@@ -1184,23 +994,9 @@ async function discoverMarketplaceManifests({
       continue;
     }
     if (
-      host === "cursor"
-      && (
-        typeof entry.name !== "string"
-        || !CURSOR_MARKETPLACE_NAME_PATTERN.test(entry.name)
-      )
-    ) {
-      context.diagnostics.push(
-        diagnostic({
-          host,
-          path: file,
-          code: "PLUGIN_DECLARATION_INVALID_NAME",
-          message: `Cursor marketplace plugin name is invalid: ${file}`,
-          metadata: { host, marketplace, name: entry.name },
-        }),
-      );
-      continue;
-    }
+      policy.validateEntry
+      && !(await policy.validateEntry({ entry, file, context, marketplace }))
+    ) continue;
     const source = entry.source;
     const sourcePath = typeof source === "string"
       ? source
@@ -1238,13 +1034,12 @@ async function discoverMarketplaceManifests({
       context.home,
     );
     declaredPlugin = true;
-    if (
-      host === "cursor"
-      && await canonicalContained(location.installRoot, location.boundary)
-    ) {
-      const canonicalRoot = await realpath(location.installRoot).catch(() => undefined);
-      if (canonicalRoot) ownedRoots?.add(canonicalRoot);
-    }
+    await onDeclaredPlugin?.({
+      location,
+      entry,
+      file,
+      context,
+    });
     await addPluginInstall({
       ...location,
       host,
@@ -1274,18 +1069,6 @@ function normalizeWorkspaceDirectories({ cwd, home, workspaceDirectories }) {
       .filter(Boolean)
       .map((directory) => path.resolve(directory)),
   );
-}
-
-// Host adapters own documented locations; callers and candidate grouping stay host-agnostic.
-function createPluginHostSpecification(host, discover) {
-  return Object.freeze({
-    host,
-    returnsResult: true,
-    discover: async (context) => {
-      await discover(context);
-      return pluginHostResult(context);
-    },
-  });
 }
 
 const PLUGIN_HOST_ROOT_FIELDS = new Set([
@@ -1553,11 +1336,23 @@ export const GEMINI_CLI_HOST_ADAPTER = createGeminiCliAdapter({
   safeDirectory,
 });
 
+export const CURSOR_HOST_ADAPTER = createCursorAdapter({
+  addPluginInstall,
+  canonicalContained,
+  diagnostic,
+  discoverMarketplaceManifests,
+  lstat,
+  pluginDirectories,
+  pluginIdentity,
+  realpath,
+  safeDirectory,
+});
+
 export const PLUGIN_HOST_SPECIFICATIONS = Object.freeze([
   CLAUDE_CODE_HOST_ADAPTER,
   CODEX_HOST_ADAPTER,
   GEMINI_CLI_HOST_ADAPTER,
-  createPluginHostSpecification("cursor", discoverCursor),
+  CURSOR_HOST_ADAPTER,
 ]);
 
 export async function discoverPluginSkillRoots({
