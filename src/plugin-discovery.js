@@ -16,6 +16,7 @@ import { isPathContained } from "./paths.js";
 import { createClaudeCodeAdapter } from "./plugin-host-adapters/claude-code.js";
 import { createCodexAdapter } from "./plugin-host-adapters/codex.js";
 import {
+  immutablePluginHostRecord,
   isPluginHostResult,
   pluginHostResult,
 } from "./plugin-host-adapters/interface.js";
@@ -1394,6 +1395,151 @@ function createPluginHostSpecification(host, discover) {
   });
 }
 
+const PLUGIN_HOST_ROOT_FIELDS = new Set([
+  "kind",
+  "path",
+  "owner",
+  "scope",
+  "origin",
+  "aliases",
+  "owners",
+  "host",
+  "plugin",
+  "pluginMetadata",
+  "pluginManifest",
+  "pluginRoot",
+  "pluginRoots",
+  "pluginIdentity",
+  "pluginIdentities",
+  "pluginEvidence",
+  "active",
+  "singleSkill",
+  "includeRootSkill",
+]);
+
+const PLUGIN_HOST_DIAGNOSTIC_FIELDS = new Set([
+  "kind",
+  "host",
+  "path",
+  "code",
+  "message",
+  "plugin",
+]);
+
+const PLUGIN_EVIDENCE_FIELDS = new Set([
+  "kind",
+  "host",
+  "plugin",
+  "marketplace",
+  "version",
+  "identity",
+  "repository",
+  "upstream_path",
+  "upstreamPath",
+  "cache",
+  "installation",
+  "provenance",
+  "synced",
+]);
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isStringArray(value) {
+  return Array.isArray(value) && value.every(isNonEmptyString);
+}
+
+function isOptionalBoolean(value) {
+  return value === undefined || typeof value === "boolean";
+}
+
+function isOptionalString(value) {
+  return value === undefined || isNonEmptyString(value);
+}
+
+function isOptionalRecord(value) {
+  return value === undefined || isRecord(value);
+}
+
+function isOptionalStringArray(value) {
+  return value === undefined || isStringArray(value);
+}
+
+function isPluginEvidence(value, host) {
+  if (
+    !isRecord(value)
+    || [...Object.keys(value)].some((field) => !PLUGIN_EVIDENCE_FIELDS.has(field))
+    || value.kind !== "plugin"
+    || value.host !== host
+    || !isNonEmptyString(value.plugin)
+    || !isNonEmptyString(value.marketplace)
+    || !isOptionalString(value.version)
+    || !isOptionalString(value.identity)
+    || !isOptionalString(value.repository)
+    || !isOptionalString(value.upstream_path)
+    || !isOptionalString(value.upstreamPath)
+    || !isOptionalRecord(value.installation)
+    || !isOptionalRecord(value.provenance)
+    || (value.synced !== undefined && typeof value.synced !== "boolean")
+  ) return false;
+  if (value.cache === undefined) return true;
+  return isRecord(value.cache)
+    && Object.keys(value.cache).every((field) => ["kind", "scope"].includes(field))
+    && value.cache.kind === "versioned"
+    && ["global", "workspace"].includes(value.cache.scope);
+}
+
+function isValidPluginHostRoot(root, host) {
+  try {
+    return isRecord(root)
+      && Object.keys(root).every((field) => PLUGIN_HOST_ROOT_FIELDS.has(field))
+      && root.kind === "plugin"
+      && isNonEmptyString(root.path)
+      && isNonEmptyString(root.owner)
+      && root.owner.startsWith("plugin:")
+      && isNonEmptyString(root.scope)
+      && root.origin === "plugin"
+      && root.host === host
+      && isOptionalStringArray(root.aliases)
+      && isOptionalStringArray(root.owners)
+      && isOptionalRecord(root.plugin)
+      && isOptionalRecord(root.pluginMetadata)
+      && isOptionalString(root.pluginManifest)
+      && isOptionalString(root.pluginRoot)
+      && isOptionalStringArray(root.pluginRoots)
+      && isOptionalString(root.pluginIdentity)
+      && isOptionalStringArray(root.pluginIdentities)
+      && (root.pluginEvidence === undefined
+        || Array.isArray(root.pluginEvidence)
+          && root.pluginEvidence.every((value) => isPluginEvidence(value, host)))
+      && isOptionalBoolean(root.active)
+      && isOptionalBoolean(root.singleSkill)
+      && isOptionalBoolean(root.includeRootSkill);
+  } catch {
+    return false;
+  }
+}
+
+function isValidPluginHostDiagnostic(entry, host) {
+  try {
+    return isRecord(entry)
+      && Object.keys(entry).every((field) => PLUGIN_HOST_DIAGNOSTIC_FIELDS.has(field))
+      && entry.kind === "plugin"
+      && entry.host === host
+      && isNonEmptyString(entry.path)
+      && isNonEmptyString(entry.code)
+      && isNonEmptyString(entry.message)
+      && isOptionalRecord(entry.plugin);
+  } catch {
+    return false;
+  }
+}
+
 function invalidPluginHostResultDiagnostic(host, targetPath, message) {
   return diagnostic({
     host,
@@ -1419,20 +1565,7 @@ function appendPluginHostResult({
     return;
   }
   for (const root of result.roots) {
-    if (
-      !root
-      || typeof root !== "object"
-      || typeof root.path !== "string"
-      || !root.path
-      || root.kind !== "plugin"
-      || typeof root.owner !== "string"
-      || !root.owner
-      || typeof root.scope !== "string"
-      || !root.scope
-      || typeof root.origin !== "string"
-      || !root.origin
-      || root.host !== host
-    ) {
+    if (!isValidPluginHostRoot(root, host)) {
       diagnostics.push(invalidPluginHostResultDiagnostic(
         host,
         targetPath,
@@ -1440,21 +1573,18 @@ function appendPluginHostResult({
       ));
       continue;
     }
-    roots.push(root);
+    try {
+      roots.push(immutablePluginHostRecord(root));
+    } catch {
+      diagnostics.push(invalidPluginHostResultDiagnostic(
+        host,
+        targetPath,
+        `plugin discovery returned an uncloneable root for ${host}`,
+      ));
+    }
   }
   for (const entry of result.diagnostics) {
-    if (
-      !entry
-      || typeof entry !== "object"
-      || entry.kind !== "plugin"
-      || entry.host !== host
-      || typeof entry.path !== "string"
-      || !entry.path
-      || typeof entry.code !== "string"
-      || !entry.code
-      || typeof entry.message !== "string"
-      || !entry.message
-    ) {
+    if (!isValidPluginHostDiagnostic(entry, host)) {
       diagnostics.push(invalidPluginHostResultDiagnostic(
         host,
         targetPath,
@@ -1462,7 +1592,15 @@ function appendPluginHostResult({
       ));
       continue;
     }
-    diagnostics.push(entry);
+    try {
+      diagnostics.push(immutablePluginHostRecord(entry));
+    } catch {
+      diagnostics.push(invalidPluginHostResultDiagnostic(
+        host,
+        targetPath,
+        `plugin discovery returned an uncloneable diagnostic for ${host}`,
+      ));
+    }
   }
 }
 
@@ -1549,7 +1687,7 @@ export async function discoverPluginSkillRoots({
   }
   // Host adapters emit observations. Physical-root identity, policy merging,
   // and duplicate evidence handling belong to the Skill root registry.
-  const normalizedRoots = roots.map((item) => ({ ...item, kind: "plugin" }));
+  const normalizedRoots = [...roots];
   normalizedRoots.sort((left, right) => left.path.localeCompare(right.path, "en"));
   return {
     roots: normalizedRoots,

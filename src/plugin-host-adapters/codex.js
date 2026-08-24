@@ -3,6 +3,7 @@ import path from "node:path";
 import { pluginHostResult } from "./interface.js";
 import {
   GENERIC_MANIFEST_FILES,
+  GENERIC_MARKETPLACE_MANIFEST_FILES,
   safeIdentityPart,
   stringValue,
 } from "./metadata.js";
@@ -10,6 +11,9 @@ import {
 const CODEX_MANIFEST_POLICY = Object.freeze({
   files: [".codex-plugin/plugin.json", ...GENERIC_MANIFEST_FILES],
 });
+const CODEX_MARKETPLACE_MANIFEST_FILES = Object.freeze([
+  ...GENERIC_MARKETPLACE_MANIFEST_FILES,
+]);
 
 function codexPluginIdentity({ host, marketplace, name }) {
   return `local:plugin:${safeIdentityPart(host)}:${safeIdentityPart(marketplace)}:${safeIdentityPart(name)}`;
@@ -413,6 +417,7 @@ export function createCodexAdapter({
       scope: "global",
       marketplaceName: "personal",
       active: false,
+      manifestFiles: CODEX_MARKETPLACE_MANIFEST_FILES,
       manifestPolicy: CODEX_MANIFEST_POLICY,
       localPluginIdentity: codexPluginIdentity,
     });
@@ -437,6 +442,7 @@ export function createCodexAdapter({
           host: "codex",
           scope: "global",
           active: false,
+          manifestFiles: CODEX_MARKETPLACE_MANIFEST_FILES,
           manifestPolicy: CODEX_MANIFEST_POLICY,
           localPluginIdentity: codexPluginIdentity,
         });
@@ -462,6 +468,7 @@ export function createCodexAdapter({
           scope: "global",
           marketplaceName: marketplace.entry.name,
           active: false,
+          manifestFiles: CODEX_MARKETPLACE_MANIFEST_FILES,
           manifestPolicy: CODEX_MANIFEST_POLICY,
           localPluginIdentity: codexPluginIdentity,
         });
@@ -475,6 +482,7 @@ export function createCodexAdapter({
         host: "codex",
         scope: "workspace",
         active: false,
+        manifestFiles: CODEX_MARKETPLACE_MANIFEST_FILES,
         manifestPolicy: CODEX_MANIFEST_POLICY,
         localPluginIdentity: codexPluginIdentity,
       });
@@ -508,6 +516,7 @@ export function createCodexAdapter({
         scope: "global",
         marketplaceName: declaration.marketplace,
         active: false,
+        manifestFiles: CODEX_MARKETPLACE_MANIFEST_FILES,
         manifestPolicy: CODEX_MANIFEST_POLICY,
         localPluginIdentity: codexPluginIdentity,
       });

@@ -1,21 +1,24 @@
 /** @typedef {import("../provenance.js").PluginProvenanceObservation} PluginProvenanceObservation */
+/** @typedef {PluginProvenanceObservation & {synced?: boolean}} PluginHostProvenanceObservation */
 
 /**
  * @typedef {object} PluginHostRootObservation
  * @property {string} path
  * @property {string} owner
  * @property {string} scope
- * @property {string} origin
- * @property {"explicit" | "manager" | "plugin"} kind
+ * @property {"plugin"} origin
+ * @property {"plugin"} kind
+ * @property {readonly string[]} [aliases]
  * @property {readonly string[]} [owners]
- * @property {string} [host]
+ * @property {string} host
  * @property {Record<string, unknown>} [plugin]
  * @property {Record<string, unknown>} [pluginMetadata]
  * @property {string} [pluginManifest]
  * @property {string} [pluginRoot]
+ * @property {readonly string[]} [pluginRoots]
  * @property {string} [pluginIdentity]
  * @property {readonly string[]} [pluginIdentities]
- * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
+ * @property {readonly PluginHostProvenanceObservation[]} [pluginEvidence]
  * @property {boolean} [active]
  * @property {boolean} [singleSkill]
  * @property {boolean} [includeRootSkill]
@@ -148,12 +151,24 @@
  * @returns {PluginHostDiscoveryResult}
  */
 export function pluginHostResult(context) {
-  const roots = context.roots.map((root) => freezeDeep(root));
-  const diagnostics = context.diagnostics.map((entry) => freezeDeep(entry));
+  const roots = context.roots.map((root) => immutablePluginHostRecord(root));
+  const diagnostics = context.diagnostics.map((entry) => immutablePluginHostRecord(entry));
   return Object.freeze({
     roots: Object.freeze(roots),
     diagnostics: Object.freeze(diagnostics),
   });
+}
+
+/**
+ * Clone and freeze one adapter-owned record without freezing the mutable
+ * discovery context that produced it.
+ *
+ * @template T
+ * @param {T} value
+ * @returns {T}
+ */
+export function immutablePluginHostRecord(value) {
+  return freezeDeep(structuredClone(value));
 }
 
 /**

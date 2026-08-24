@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { createClaudeCodeAdapter } from "../src/plugin-host-adapters/claude-code.js";
 import { createCodexAdapter } from "../src/plugin-host-adapters/codex.js";
+import { pluginHostResult } from "../src/plugin-host-adapters/interface.js";
 
 test("Claude Code adapter interface uses injected local filesystem helpers", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-code-adapter-interface-"));
@@ -213,6 +214,12 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
         === "local:plugin:codex:team:reviewer"));
     assert.ok(marketplaceCalls.every(({ manifestPolicy }) =>
       manifestPolicy.files[0] === ".codex-plugin/plugin.json"));
+    assert.ok(marketplaceCalls.every(({ manifestFiles }) =>
+      JSON.stringify(manifestFiles) === JSON.stringify([
+        "marketplace.json",
+        "plugins.json",
+        "manifest.json",
+      ])));
     assert.ok(diagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_CONFIGURATION"));
     assert.equal(
       marketplaceCalls.at(-1).base,
@@ -221,4 +228,34 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("plugin host results clone and freeze nested observations", () => {
+  const root = {
+    kind: "plugin",
+    path: "/fixture/plugin",
+    owner: "plugin:future-host",
+    scope: "global",
+    origin: "plugin",
+    host: "future-host",
+    plugin: { name: "future" },
+    pluginEvidence: [{
+      kind: "plugin",
+      host: "future-host",
+      plugin: "future",
+      marketplace: "local",
+    }],
+  };
+  const result = pluginHostResult({
+    roots: [root],
+    diagnostics: [],
+  });
+
+  root.plugin.name = "mutated-after-return";
+  assert.equal(result.roots[0].plugin.name, "future");
+  assert.equal(Object.isFrozen(result), true);
+  assert.equal(Object.isFrozen(result.roots), true);
+  assert.equal(Object.isFrozen(result.roots[0]), true);
+  assert.equal(Object.isFrozen(result.roots[0].plugin), true);
+  assert.equal(Object.isFrozen(result.roots[0].pluginEvidence[0]), true);
 });

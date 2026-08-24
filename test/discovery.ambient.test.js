@@ -2082,9 +2082,16 @@ test("plugin host specifications extend discovery without changing candidate pol
             pluginIdentity: identity,
             pluginEvidence: [{
               kind: "plugin",
-              ...plugin,
+              host: plugin.host,
+              plugin: plugin.name,
+              marketplace: plugin.marketplace,
               identity,
-                provenance: { kind: "plugin", ...plugin },
+              provenance: {
+                kind: "plugin",
+                host: plugin.host,
+                plugin: plugin.name,
+                marketplace: plugin.marketplace,
+              },
             }],
           }],
           diagnostics: [],
@@ -2129,6 +2136,15 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
               origin: "plugin",
               host: "other-host",
             },
+            {
+              kind: "plugin",
+              path: path.join(root, "invalid-optional-field"),
+              owner: "plugin:future-host",
+              scope: "global",
+              origin: "plugin",
+              host: "future-host",
+              pluginRoots: 1,
+            },
           ],
           diagnostics: [{
             kind: "plugin",
@@ -2146,7 +2162,7 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
   assert.ok(result.pluginDiagnostics.filter(
     ({ code, host }) =>
       code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
-  ).length >= 4);
+  ).length >= 5);
 });
 
 
