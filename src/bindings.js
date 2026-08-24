@@ -1,4 +1,4 @@
-import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -182,6 +182,7 @@ async function filesystemEvidenceRevision({
   targetPath,
   entrypoint,
   additionalPaths = [],
+  optionalAdditionalPaths = [],
 }) {
   const paths = [
     sourcePath,
@@ -200,11 +201,32 @@ async function filesystemEvidenceRevision({
         ...filesystemStatRevision(await lstat(candidate)),
       })),
     );
-    return { canonicalTarget, entries };
+    const optionalEntries = await Promise.all(
+      [...new Set(optionalAdditionalPaths
+        .filter((candidate) => typeof candidate === "string" && candidate.trim())
+        .map((candidate) => path.resolve(candidate)))]
+        .sort()
+        .map(async (candidate) => {
+          try {
+            return { path: candidate, ...filesystemStatRevision(await lstat(candidate)) };
+          } catch (error) {
+            if (isExpectedRecoveryMismatch(error)) return undefined;
+            throw error;
+          }
+        }),
+    );
+    return { canonicalTarget, entries: [...entries, ...optionalEntries.filter(Boolean)] };
   } catch (error) {
     if (isExpectedRecoveryMismatch(error)) return undefined;
     throw error;
   }
+}
+
+function sourceProvenancePaths(sourceRoot) {
+  // Git repository identity can change without touching the skill payload.
+  // Its config is a lock-safe filesystem token; plugin/manager evidence is
+  // additionally refreshed through the targeted pre-publication inspection.
+  return [path.join(sourceRoot, ".git", "config")];
 }
 
 function stableRevisionValue(value) {
@@ -285,9 +307,12 @@ async function replacementCandidateMetadataRevision(candidate) {
   const copy = candidate.copy ?? candidate.identities?.[0]?.copy;
   if (copy?.classification === "customization") {
     try {
-      metadata = JSON.parse(
-        await readFile(path.join(candidate.path, "customization.json"), "utf8"),
-      );
+      // Keep replacement metadata on the same checked-descriptor ingestion
+      // seam as every other customization descriptor.  Raw JSON would accept
+      // metadata Discovery and Binding would subsequently reject.
+      metadata = (await readCheckedDescriptor(
+        path.join(candidate.path, "customization.json"),
+      )).descriptor;
     } catch (error) {
       if (isExpectedRecoveryMismatch(error)) return undefined;
       if (["ENOENT", "ENOTDIR", "ELOOP"].includes(error.code)) return undefined;
@@ -299,6 +324,54 @@ async function replacementCandidateMetadataRevision(candidate) {
     metadata,
     identity: normalizedReplacementIdentity(candidate),
   });
+}
+
+function assertBindingRecord(descriptor, binding) {
+  assertValidDescriptor(descriptor);
+  if (!binding || typeof binding !== "object" || !binding.source) {
+    throw new BindingError("binding record is incomplete", {
+      code: "INVALID_BINDING_RECORD",
+    });
+  }
+  if (
+    binding.customization !== descriptor.id
+    || binding.source.skillName !== descriptor.source.skill_name
+    || binding.source.kind !== descriptor.source.kind
+  ) {
+    throw new BindingError("binding source identity no longer matches the descriptor", {
+      code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
+    });
+  }
+  if (
+    binding.activation?.mode !== descriptor.activation.mode
+    || binding.activation?.precedence !== descriptor.activation.precedence
+  ) {
+    throw new BindingError("binding activation no longer matches the descriptor", {
+      code: "BINDING_DESCRIPTOR_ACTIVATION_MISMATCH",
+    });
+  }
+  bindingSourcePolicyFor(descriptor.source.kind).validateBinding({ descriptor, binding });
+}
+
+async function currentBindingTarget(binding) {
+  const lookupPath = binding.source.alias ?? binding.source.path;
+  let currentTarget;
+  try {
+    currentTarget = await realpath(lookupPath);
+  } catch (error) {
+    throw bindingErrorWithCause(
+      `binding target is missing: ${lookupPath}`,
+      { code: "BINDING_TARGET_MISSING" },
+      error,
+    );
+  }
+  if (path.resolve(currentTarget) !== path.resolve(binding.source.target)) {
+    throw new BindingError(`binding symlink was retargeted: ${lookupPath}`, {
+      code: "BINDING_RETARGETED",
+      details: { previous: binding.source.target, current: currentTarget },
+    });
+  }
+  return { lookupPath, currentTarget };
 }
 
 async function fullFingerprintRevision({
@@ -543,6 +616,25 @@ function bindingConfirmationEvidenceChanged(previous, current) {
   return !isDeepStrictEqual(
     discoveryEvidenceRevision(previous),
     discoveryEvidenceRevision(current),
+  );
+}
+
+function publicationProvenanceRevision(inspection) {
+  return discoveryEvidenceRevision(inspection);
+}
+
+function requiresPublicationProvenanceRefresh(inspection) {
+  // An explicit local path has no Discovery-derived provenance to go stale;
+  // the filesystem revision is rechecked inside the state CAS instead. Any
+  // repository, plugin, manager, or confirmed-selection evidence must be
+  // retargeted immediately before publication because it can change without
+  // changing the selected skill payload.
+  return (
+    inspection.selection !== undefined
+    || inspection.provenance.length > 0
+    || inspection.evidence.some(({ kind }) => kind !== "explicit")
+    || inspection.pluginIdentity !== undefined
+    || inspection.pluginCache !== undefined
   );
 }
 
@@ -1365,48 +1457,9 @@ async function validateBindingReadOnlyInternal({
   binding,
   requireLocalIdentityMatch = false,
 }) {
-  assertValidDescriptor(descriptor);
-  if (!binding || typeof binding !== "object" || !binding.source) {
-    throw new BindingError("binding record is incomplete", {
-      code: "INVALID_BINDING_RECORD",
-    });
-  }
-  if (
-    binding.customization !== descriptor.id
-    || binding.source.skillName !== descriptor.source.skill_name
-    || binding.source.kind !== descriptor.source.kind
-  ) {
-    throw new BindingError("binding source identity no longer matches the descriptor", {
-      code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
-    });
-  }
-  if (
-    binding.activation?.mode !== descriptor.activation.mode
-    || binding.activation?.precedence !== descriptor.activation.precedence
-  ) {
-    throw new BindingError("binding activation no longer matches the descriptor", {
-      code: "BINDING_DESCRIPTOR_ACTIVATION_MISMATCH",
-    });
-  }
+  assertBindingRecord(descriptor, binding);
   const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
-  sourcePolicy.validateBinding({ descriptor, binding });
-  const lookupPath = binding.source.alias ?? binding.source.path;
-  let currentTarget;
-  try {
-    currentTarget = await realpath(lookupPath);
-  } catch (error) {
-    throw bindingErrorWithCause(
-      `binding target is missing: ${lookupPath}`,
-      { code: "BINDING_TARGET_MISSING" },
-      error,
-    );
-  }
-  if (path.resolve(currentTarget) !== path.resolve(binding.source.target)) {
-    throw new BindingError(`binding symlink was retargeted: ${lookupPath}`, {
-      code: "BINDING_RETARGETED",
-      details: { previous: binding.source.target, current: currentTarget },
-    });
-  }
+  const { lookupPath, currentTarget } = await currentBindingTarget(binding);
   let info;
   try {
     info = await stat(currentTarget);
@@ -1865,6 +1918,9 @@ async function revalidateRecoveredBinding({
     customizationRoot,
     discoverySnapshot,
     statePath,
+    discoveryOptions,
+    discovery,
+    revalidateSeededDiscovery,
   } = recoveryContext;
   const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
   let validation;
@@ -1880,8 +1936,11 @@ async function revalidateRecoveredBinding({
       binding: recovered,
       roots,
       managerRecords,
+      discoveryOptions,
+      discovery,
       customizationRoot,
       discoverySnapshot,
+      revalidateSeededDiscovery,
       requireLocalIdentityMatch: descriptor.source.kind === "local",
       // Resolution keeps source-drift decisions with Preflight/Reconciliation;
       // this check still validates the candidate's current source state.
@@ -1947,6 +2006,7 @@ async function revalidateRecoveredBinding({
       validation.replacementEvidence,
       statePath,
     ),
+    optionalAdditionalPaths: sourceProvenancePaths(validation.currentTarget),
   });
   if (!filesystemRevision) return undefined;
   const revision = recoveryRevisionFor({
@@ -2308,6 +2368,8 @@ async function bindCustomizationInternal({
       statePath,
       roots,
       managerRecords,
+      discoveryOptions,
+      discovery,
       customizationRoot,
       discoverySnapshot: operationDiscovery,
       refreshDiscovery: refreshOperationDiscovery,
@@ -2406,11 +2468,7 @@ async function bindCustomizationInternal({
     descriptor.activation.mode === "replace"
     || refreshFinalDiscovery
     || lifecycleChanged
-    || confirmedInspection.selection !== undefined
-    || confirmedInspection.provenance.length > 0
-    || confirmedInspection.evidence.some(({ kind }) => kind !== "explicit")
-    || confirmedInspection.pluginIdentity !== undefined
-    || confirmedInspection.pluginCache !== undefined
+    || requiresPublicationProvenanceRefresh(confirmedInspection)
   );
   let finalDiscovery = needsFreshFinalDiscovery
     ? await refreshOperationDiscovery()
@@ -2501,6 +2559,7 @@ async function bindCustomizationInternal({
       finalReplacementEvidence,
       statePath,
     ),
+    optionalAdditionalPaths: sourceProvenancePaths(finalClassified.targetPath),
   });
   if (!filesystemRevision) {
     throw new BindingError("binding source changed before publication", {
@@ -2515,6 +2574,29 @@ async function bindCustomizationInternal({
     filesystemRevision,
   });
   const timestamp = await now();
+  // Discovery is deliberately outside the state lock. Re-target provenance
+  // evidence after caller callbacks complete, but do not replay a targeted
+  // lookup for a purely explicit local binding: its filesystem token is
+  // compared again inside the publication CAS below.
+  const publicationInspection = requiresPublicationProvenanceRefresh(finalInspection)
+    ? await inspectBindingSource({
+        descriptor,
+        sourcePath,
+        roots,
+        managerRecords,
+        confirmedSelection: finalInspection.selection ?? confirmedSelection,
+        discoverySnapshot: await refreshOperationDiscovery(),
+        revalidateSeededDiscovery: true,
+      })
+    : finalInspection;
+  if (!isDeepStrictEqual(
+    publicationProvenanceRevision(finalInspection),
+    publicationProvenanceRevision(publicationInspection),
+  )) {
+    throw new BindingError("binding source provenance changed before publication", {
+      code: "BINDING_SOURCE_SELECTION_INVALID",
+    });
+  }
   const candidateBinding = {
     customization: descriptor.id,
     context,
@@ -2559,6 +2641,7 @@ async function bindCustomizationInternal({
         evidenceRevision.replacement,
         statePath,
       ),
+      optionalAdditionalPaths: sourceProvenancePaths(candidateBinding.source.target),
     });
     if (!isDeepStrictEqual(currentFilesystemRevision, evidenceRevision.filesystem)) {
       throw new BindingError("binding source evidence changed before publication", {
@@ -2629,8 +2712,11 @@ async function bindCustomizationInternal({
     binding: persistedBinding,
     roots,
     managerRecords,
+    discoveryOptions,
+    discovery,
     customizationRoot,
     discoverySnapshot: operationDiscovery,
+    revalidateSeededDiscovery,
   }).then((result) => result.binding);
 }
 
@@ -2659,30 +2745,7 @@ async function validateBindingInternal({
   requireLocalIdentityMatch = false,
   revalidateSeededDiscovery = false,
 }) {
-  assertValidDescriptor(descriptor);
-  if (!binding || typeof binding !== "object" || !binding.source) {
-    throw new BindingError("binding record is incomplete", {
-      code: "INVALID_BINDING_RECORD",
-    });
-  }
-  if (
-    binding.customization !== descriptor.id ||
-    binding.source.skillName !== descriptor.source.skill_name ||
-    binding.source.kind !== descriptor.source.kind
-  ) {
-    throw new BindingError("binding source identity no longer matches the descriptor", {
-      code: "BINDING_DESCRIPTOR_SOURCE_MISMATCH",
-    });
-  }
-  if (
-    binding.activation?.mode !== descriptor.activation.mode ||
-    binding.activation?.precedence !== descriptor.activation.precedence
-  ) {
-    throw new BindingError("binding activation no longer matches the descriptor", {
-      code: "BINDING_DESCRIPTOR_ACTIVATION_MISMATCH",
-    });
-  }
-  bindingSourcePolicyFor(descriptor.source.kind).validateBinding({ descriptor, binding });
+  assertBindingRecord(descriptor, binding);
   const operationDiscovery = bindingDiscoverySnapshot({
     discovery,
     discoverySnapshot,
@@ -2701,21 +2764,7 @@ async function validateBindingInternal({
     }),
   });
 
-  const lookupPath = binding.source.alias ?? binding.source.path;
-  let currentTarget;
-  try {
-    currentTarget = await realpath(lookupPath);
-  } catch {
-    throw new BindingError(`binding target is missing: ${lookupPath}`, {
-      code: "BINDING_TARGET_MISSING",
-    });
-  }
-  if (path.resolve(currentTarget) !== path.resolve(binding.source.target)) {
-    throw new BindingError(`binding symlink was retargeted: ${lookupPath}`, {
-      code: "BINDING_RETARGETED",
-      details: { previous: binding.source.target, current: currentTarget },
-    });
-  }
+  const { lookupPath, currentTarget } = await currentBindingTarget(binding);
   const inspection = await inspectBindingSource({
     descriptor,
     sourcePath: lookupPath,
@@ -2918,6 +2967,9 @@ async function resolveBindingInternal({
                 validatedForPublication.source.target,
                 validatedForPublication.evidenceRevision?.replacement,
                 statePath,
+              ),
+              optionalAdditionalPaths: sourceProvenancePaths(
+                validatedForPublication.source.target,
               ),
             });
             if (

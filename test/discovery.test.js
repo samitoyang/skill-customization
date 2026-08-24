@@ -83,6 +83,26 @@ test("discovery snapshots seed inventory and memoize targeted lookups per operat
   assert.equal(calls, 2);
 });
 
+test("discovery snapshot revision records an expected targeted miss", async () => {
+  const snapshot = createDiscoverySnapshot({
+    discovery: { groups: [], searchedRoots: [] },
+    discover: async ({ input }) => {
+      if (input === "missing") {
+        const error = new Error("no local copy");
+        error.code = "NO_LOCAL_COPY";
+        throw error;
+      }
+      return { groups: [], searchedRoots: [] };
+    },
+  });
+
+  await assert.rejects(
+    snapshot.discover({ input: "missing" }),
+    (error) => error.code === "NO_LOCAL_COPY",
+  );
+  assert.equal(typeof await snapshot.revision(), "string");
+});
+
 test("discovery normalizes standard, plugin, and manager roots through one registry", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-root-registry-sources-"));
   const home = path.join(root, "home");

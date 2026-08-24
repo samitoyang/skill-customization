@@ -869,7 +869,20 @@ export function createDiscoverySnapshot({
     const targetedResults = await Promise.all(
       [...targeted.entries()]
         .sort(([left], [right]) => left.localeCompare(right, "en"))
-        .map(async ([key, promise]) => [key, await promise]),
+        .map(async ([key, promise]) => {
+          try {
+            return [key, await promise];
+          } catch (error) {
+            // A targeted miss is an intentional, memoized result.  Consumers
+            // such as replacement activation may treat it as an empty
+            // inventory, so observing the snapshot revision must not replay
+            // the rejection as a different outcome.
+            if (error?.code === "NO_LOCAL_COPY") {
+              return [key, { status: "no-local-copy" }];
+            }
+            throw error;
+          }
+        }),
     );
     return stableProvenanceKey({
       defaults,
