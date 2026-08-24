@@ -71,14 +71,12 @@ test("replacement forks remain runtime leaves with advisory-only tracking", asyn
   };
   await writeDescriptor(forkRoot, descriptor);
   const descriptorPath = path.join(forkRoot, "customization.json");
-  const oneActiveSource = [{ name: "review", path: sourceRoot }];
 
   const untracked = await preflightCustomization({
     descriptorPath,
     context: "workspace:test",
     statePath,
     roots,
-    activeSkills: oneActiveSource,
   });
   assert.equal(untracked.status, "ready");
   assert.deepEqual(untracked.advisories, []);
@@ -94,18 +92,16 @@ test("replacement forks remain runtime leaves with advisory-only tracking", asyn
     interactive: true,
     confirm: async () => true,
     confirmReplace: async () => true,
-    activeSkills: oneActiveSource,
   });
 
+  const otherReview = path.join(root, "other-review");
+  await mkdir(otherReview, { recursive: true });
+  await writeFile(path.join(otherReview, "SKILL.md"), "---\nname: review\n---\nOther.\n");
   const ambiguousTracking = await preflightCustomization({
     descriptorPath,
     context: "workspace:test",
     statePath,
     roots,
-    activeSkills: [
-      ...oneActiveSource,
-      { name: "review", path: path.join(root, "other-review") },
-    ],
   });
   assert.equal(ambiguousTracking.status, "ready-with-advisory");
   assert.equal(ambiguousTracking.maintenanceHandler, null);
@@ -113,15 +109,12 @@ test("replacement forks remain runtime leaves with advisory-only tracking", asyn
   assert.match(ambiguousTracking.advisories[0].detail, /ambiguous/i);
   assert.equal(ambiguousTracking.steps.length, 1);
 
+  await rm(otherReview, { recursive: true });
   const confirmed = await preflightCustomization({
     descriptorPath,
     context: "workspace:test",
     statePath,
     roots,
-    activeSkills: [
-      ...oneActiveSource,
-      { name: "review", path: forkRoot },
-    ],
   });
   assert.equal(confirmed.status, "ready");
   assert.deepEqual(confirmed.advisories, []);
@@ -135,7 +128,6 @@ test("replacement forks remain runtime leaves with advisory-only tracking", asyn
     context: "workspace:test",
     statePath,
     roots,
-    activeSkills: [{ name: "review", path: forkRoot }],
   });
   assert.equal(unavailableTracking.status, "ready-with-advisory");
   assert.equal(unavailableTracking.maintenanceHandler, null);

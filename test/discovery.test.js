@@ -8,6 +8,7 @@ import {
   activeSkillInventory,
   confirmDiscoverySelection,
   configuredHostSkillRoots,
+  createDiscoverySnapshot,
   hostSkillRoots,
 } from "../src/discovery.js";
 import { fingerprintPath } from "../src/fingerprint.js";
@@ -52,6 +53,34 @@ test("fixture discovery keeps plugin roots disabled and explicit roots authorita
   });
   assert.equal(explicit.groups.length, 0);
   assert.equal(explicit.searchedRoots.length, 0);
+});
+
+test("discovery snapshots seed inventory and memoize targeted lookups per operation", async () => {
+  const seeded = { groups: [], searchedRoots: [{ path: "/seeded" }] };
+  const targeted = { groups: [], searchedRoots: [{ path: "/targeted" }] };
+  let calls = 0;
+  const discover = async ({ input, roots }) => {
+    calls += 1;
+    assert.deepEqual(roots, [{ path: "/seeded" }]);
+    return input === "outside" ? targeted : seeded;
+  };
+  const snapshot = createDiscoverySnapshot({
+    discovery: seeded,
+    discover,
+  });
+
+  assert.equal(await snapshot.inventory(), seeded);
+  assert.equal(await snapshot.inventory(), seeded);
+  assert.equal(await snapshot.discover({ input: "outside" }), targeted);
+  assert.equal(await snapshot.discover({ input: "outside" }), targeted);
+  assert.equal(calls, 1);
+
+  const nextOperation = createDiscoverySnapshot({
+    roots: [{ path: "/seeded" }],
+    discover,
+  });
+  assert.equal(await nextOperation.inventory(), seeded);
+  assert.equal(calls, 2);
 });
 
 test("discovery normalizes standard, plugin, and manager roots through one registry", async () => {

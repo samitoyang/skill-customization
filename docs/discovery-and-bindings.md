@@ -25,6 +25,8 @@ Bindings live under `$XDG_STATE_HOME/skill-customization/bindings.json` or `~/.a
 
 When a versioned plugin cache path disappears, resolution may update the local binding to one uniquely matching plugin identity, repository or local identity, and reviewed effective fingerprint. Different content, conflicting provenance, or ambiguous copies still require explicit review.
 
+Binding owns source inspection, checked provenance selection, replacement same-name validation, and atomic state persistence. Each bind, resolve, or validation operation uses one request-scoped Discovery snapshot; callers may seed an already-collected result, while a source outside that result uses a memoized targeted lookup for that operation. A later operation rediscovers after relevant filesystem or metadata changes.
+
 An overlay requires a confirmed live binding for each context. A fork needs no runtime binding; an optional confirmed tracking binding only produces advisories when the source drifts, disappears, or its state is unreadable or invalid. No tracking binding is silent.
 
 State updates use atomic replacement and a cross-process owner lock. A live lock is never stolen; abandoned ownership fails closed for explicit recovery. Customization maintenance canonically validates its owned `provenance/` directory before acquiring a lock there.

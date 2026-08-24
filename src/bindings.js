@@ -8,7 +8,13 @@ import {
   matchesCustomizationSource,
   readCheckedDescriptor,
 } from "./descriptor.js";
-import { discoverSkills } from "./discovery.js";
+import {
+  activeSkillInventory,
+  createDiscoverySnapshot,
+  discoverSkills,
+  excludeSkillRootFromInventory,
+  selectDiscoverySource,
+} from "./discovery.js";
 import { BindingError } from "./errors.js";
 import { inspectCustomizationExecution } from "./execution-graph.js";
 import { fingerprintFile, fingerprintPath } from "./fingerprint.js";
@@ -59,6 +65,19 @@ export async function readBindingStore(statePath = bindingStorePath()) {
     await readJsonState(statePath, EMPTY_STORE),
     statePath,
   );
+}
+
+function bindingDiscoverySnapshot({
+  discovery,
+  discoverySnapshot,
+  roots,
+  managerRecords,
+}) {
+  return discoverySnapshot ?? createDiscoverySnapshot({
+    discovery,
+    roots,
+    managerRecords,
+  });
 }
 
 function matchingRoot(targetPath, roots) {
@@ -424,6 +443,8 @@ async function inspectBindingSource({
   roots,
   managerRecords,
   confirmedSelection,
+  selectSource,
+  discoverySnapshot,
   requireLocalIdentityMatch = true,
 }) {
   const resolved = path.resolve(sourcePath);
@@ -466,11 +487,23 @@ async function inspectBindingSource({
   }
   let discovery;
   try {
-    discovery = await discoverSkills({
-      input: sourcePolicy.discoveryInput({ resolved, sourceRoot }),
-      roots,
-      managerRecords,
-    });
+    const discoveryInput = sourcePolicy.discoveryInput({ resolved, sourceRoot });
+    if (discoverySnapshot) {
+      const inventory = await discoverySnapshot.inventory();
+      const selected = selectDiscoverySource(inventory, {
+        sourceRoot,
+        explicitInput: discoveryInput,
+      });
+      discovery = selected
+        ? { ...inventory, groups: [selected] }
+        : await discoverySnapshot.discover({ input: discoveryInput });
+    } else {
+      discovery = await discoverSkills({
+        input: discoveryInput,
+        roots,
+        managerRecords,
+      });
+    }
   } catch (error) {
     throw new BindingError(`binding source is not a discoverable skill: ${error.message}`, {
       code: "BINDING_SOURCE_INVALID",
@@ -483,10 +516,14 @@ async function inspectBindingSource({
       code: "BINDING_SOURCE_INVALID",
     });
   }
+  const selectedSource = confirmedSelection
+    ?? (group.conflict && typeof selectSource === "function"
+      ? await selectSource({ discovery, group, sourceRoot, entrypoint })
+      : undefined);
   const selectionResult = await confirmedSelectionFor({
     descriptor,
     group,
-    confirmedSelection,
+    confirmedSelection: selectedSource,
     sourceDirectory: sourcePolicy.sourceDirectory({ sourceRoot, entrypoint }),
   });
   const selection = selectionResult.selection;
@@ -602,7 +639,7 @@ async function recoverCustomizationFingerprint({
     statePath,
     roots,
     managerRecords,
-    activeSkills,
+    discoverySnapshot,
   } = recoveryContext;
   if (!matchesCustomizationCopy(descriptor.source, group, copy)) return undefined;
   const execution = await inspectCustomizationExecution({
@@ -611,7 +648,7 @@ async function recoverCustomizationFingerprint({
     statePath,
     roots,
     managerRecords,
-    activeSkills,
+    discoverySnapshot,
     bindings: BINDING_OPERATIONS,
   }).catch(() => undefined);
   return execution?.status === "maintenance-required"
@@ -683,6 +720,8 @@ async function recoverMissingPluginBinding({
     descriptor,
     roots,
     managerRecords,
+    customizationRoot,
+    discoverySnapshot,
   } = recoveryContext;
   const { pluginCache, pluginIdentity } = binding.source;
   const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
@@ -695,19 +734,29 @@ async function recoverMissingPluginBinding({
   // stable plugin identity and one already reviewed effective fingerprint.
   let discovery;
   try {
-    discovery = await discoverSkills({
-      input: descriptor.source.skill_name,
-      roots,
-      managerRecords,
-    });
+    discovery = discoverySnapshot
+      ? await discoverySnapshot.inventory()
+      : await discoverSkills({
+          input: descriptor.source.skill_name,
+          roots,
+          managerRecords,
+        });
   } catch (error) {
     if (error.code === "NO_LOCAL_COPY") return undefined;
     throw error;
   }
+  const excludedRoot = descriptor.activation.mode === "replace" && customizationRoot
+    ? await realpath(customizationRoot).catch(() => path.resolve(customizationRoot))
+    : undefined;
   const matches = [];
   for (const group of discovery.groups) {
+    if (group.name !== descriptor.source.skill_name) continue;
     for (const copy of group.copies) {
       if (copy.active === false) continue;
+      if (
+        excludedRoot
+        && path.resolve(copy.realPath ?? copy.path) === excludedRoot
+      ) continue;
       const cacheDecision = checkProvenanceCache(
         checkedProvenanceFor(copy),
         { pluginIdentity, pluginCache, sourceScope: copy.scope },
@@ -747,14 +796,29 @@ async function recoverMissingPluginBinding({
   return { ...binding, source, updatedAt: new Date().toISOString() };
 }
 
-function assertReplacementInventory(descriptor, activeSkills) {
+async function assertReplacementActivation({
+  descriptor,
+  customizationRoot,
+  discoverySnapshot,
+}) {
   if (descriptor.activation.mode !== "replace") return;
-  if (!Array.isArray(activeSkills)) {
-    throw new BindingError("replacement requires the active host inventory", {
-      code: "REPLACEMENT_INVENTORY_REQUIRED",
-    });
+  const discovery = await discoverySnapshot.inventory();
+  let activeSkills = activeSkillInventory(discovery);
+  const descriptorRoots = new Set(
+    discovery.groups.flatMap((group) => group.copies)
+      .filter((copy) =>
+        copy.classification === "customization"
+        && copy.customization?.id === descriptor.id,
+      )
+      .map((copy) => path.resolve(copy.realPath ?? copy.path)),
+  );
+  if (customizationRoot) {
+    activeSkills = await excludeSkillRootFromInventory(activeSkills, customizationRoot);
   }
-  const sameName = activeSkills.filter(({ name }) => name === descriptor.name);
+  const sameName = activeSkills.filter(({ name, path: skillPath, realPath }) =>
+    name === descriptor.name
+    && !descriptorRoots.has(path.resolve(realPath ?? skillPath)),
+  );
   if (sameName.length > 1) {
     throw new BindingError("replacement activation is ambiguous in this host context", {
       code: "AMBIGUOUS_REPLACEMENT",
@@ -769,13 +833,16 @@ export async function bindCustomization({
   context,
   statePath = bindingStorePath(),
   roots,
+  customizationRoot,
   requestedScope,
   interactive = Boolean(process.stdin.isTTY),
   confirm,
   confirmReplace,
-  activeSkills,
   managerRecords = [],
   confirmedSelection,
+  selectSource,
+  discovery,
+  discoverySnapshot,
   now = () => new Date().toISOString(),
 }) {
   assertValidDescriptor(descriptor);
@@ -783,6 +850,12 @@ export async function bindCustomization({
     throw new BindingError("binding context is required", { code: "BINDING_CONTEXT_REQUIRED" });
   }
   const key = bindingKey(descriptor.id, context);
+  const operationDiscovery = bindingDiscoverySnapshot({
+    discovery,
+    discoverySnapshot,
+    roots,
+    managerRecords,
+  });
   const store = await readBindingStore(statePath);
   if (store.bindings[key]) {
     return resolveBinding({
@@ -791,7 +864,8 @@ export async function bindCustomization({
       statePath,
       roots,
       managerRecords,
-      activeSkills,
+      customizationRoot,
+      discoverySnapshot: operationDiscovery,
     });
   }
   if (!interactive) {
@@ -805,6 +879,8 @@ export async function bindCustomization({
     roots,
     managerRecords,
     confirmedSelection,
+    selectSource,
+    discoverySnapshot: operationDiscovery,
   });
   const classified = await classifyBindingScope({
     sourcePath,
@@ -821,7 +897,11 @@ export async function bindCustomization({
     "source binding was not confirmed",
   );
   if (descriptor.activation.mode === "replace") {
-    assertReplacementInventory(descriptor, activeSkills);
+    await assertReplacementActivation({
+      descriptor,
+      customizationRoot,
+      discoverySnapshot: operationDiscovery,
+    });
     await confirmOrFail(
       confirmReplace,
       {
@@ -884,7 +964,8 @@ export async function bindCustomization({
     binding: persistedBinding,
     roots,
     managerRecords,
-    activeSkills,
+    customizationRoot,
+    discoverySnapshot: operationDiscovery,
   }).then((result) => result.binding);
 }
 
@@ -904,8 +985,10 @@ export async function validateBinding({
   descriptor,
   binding,
   roots,
+  customizationRoot,
   managerRecords = [],
-  activeSkills,
+  discovery,
+  discoverySnapshot,
 }) {
   assertValidDescriptor(descriptor);
   if (!binding || typeof binding !== "object" || !binding.source) {
@@ -931,7 +1014,17 @@ export async function validateBinding({
     });
   }
   bindingSourcePolicyFor(descriptor.source.kind).validateBinding({ descriptor, binding });
-  assertReplacementInventory(descriptor, activeSkills);
+  const operationDiscovery = bindingDiscoverySnapshot({
+    discovery,
+    discoverySnapshot,
+    roots,
+    managerRecords,
+  });
+  await assertReplacementActivation({
+    descriptor,
+    customizationRoot,
+    discoverySnapshot: operationDiscovery,
+  });
 
   const lookupPath = binding.source.alias ?? binding.source.path;
   let currentTarget;
@@ -954,6 +1047,7 @@ export async function validateBinding({
     roots,
     managerRecords,
     confirmedSelection: binding.source.selection,
+    discoverySnapshot: operationDiscovery,
     requireLocalIdentityMatch: false,
   });
   return { binding, inspection, currentTarget };
@@ -964,10 +1058,18 @@ export async function resolveBinding({
   context,
   statePath = bindingStorePath(),
   roots,
+  customizationRoot,
   managerRecords = [],
-  activeSkills,
+  discovery,
+  discoverySnapshot,
 }) {
   assertValidDescriptor(descriptor);
+  const operationDiscovery = bindingDiscoverySnapshot({
+    discovery,
+    discoverySnapshot,
+    roots,
+    managerRecords,
+  });
   const store = await readBindingStore(statePath);
   const key = bindingKey(descriptor.id, context);
   const binding = store.bindings[key];
@@ -983,7 +1085,8 @@ export async function resolveBinding({
         binding,
         roots,
         managerRecords,
-        activeSkills,
+        customizationRoot,
+        discoverySnapshot: operationDiscovery,
       })
     ).binding;
   } catch (error) {
@@ -994,7 +1097,8 @@ export async function resolveBinding({
         statePath,
         roots,
         managerRecords,
-        activeSkills,
+        customizationRoot,
+        discoverySnapshot: operationDiscovery,
       };
       const recovered = await recoverMissingPluginBinding({
         binding,
@@ -1016,7 +1120,8 @@ export async function resolveBinding({
           statePath,
           roots,
           managerRecords,
-          activeSkills,
+          customizationRoot,
+          discoverySnapshot: operationDiscovery,
         });
       }
     }
@@ -1047,7 +1152,8 @@ export async function resolveBinding({
           statePath,
           roots,
           managerRecords,
-          activeSkills,
+          customizationRoot,
+          discoverySnapshot: operationDiscovery,
         });
       }
     }

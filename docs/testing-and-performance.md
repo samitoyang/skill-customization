@@ -30,9 +30,9 @@ The shared gate warms up before collecting five samples by default and reports t
 
 ## Discovery snapshot freshness
 
-A discovery result is a request-scoped snapshot of declared roots, manager records, host configuration, plugin manifests, candidate metadata, and fingerprints at the time of the call. It is not a durable inventory cache. Recursive preflight and binding checks perform their own discovery calls through the existing interface; callers that already have an inventory may pass it only where the existing public operation accepts it.
+A discovery result is a request-scoped snapshot of declared roots, manager records, host configuration, plugin manifests, candidate metadata, and fingerprints at the time of the call. It is not a durable inventory cache. Preflight and Binding create one for each operation; a caller that already collected Discovery may seed it without exposing snapshot mechanics to the Binding intent interface.
 
-- Treat each discovery result as valid only for the operation that collected it; recursive preflight does not share results between binding checks.
+- Treat each discovery result as valid only for the operation that collected it; recursive preflight and replacement Binding checks reuse one snapshot, and source lookups outside seeded inventory are memoized only within that operation.
 - Start a new discovery call after installing, removing, or retargeting a skill; changing a manifest, manager record, root, symlink, or relevant environment value; or mutating fingerprinted source content.
 - Fixture tests create fresh inputs per test and never share discovery results across tests.
 - Ambient integration tests mutate only their isolated home/workspace and rediscover after each mutation they intend to observe.

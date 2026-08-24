@@ -733,10 +733,12 @@ test("replacement binding requires a separate explicit confirmation", async () =
       interactive: true,
       confirm: async () => true,
       confirmReplace: async () => false,
-      activeSkills: [{ name: "review", path: source }],
     }),
     (error) => error.code === "REPLACEMENT_CONFIRMATION_REQUIRED",
   );
+  const otherSource = path.join(root, "other-review");
+  await mkdir(otherSource);
+  await writeFile(path.join(otherSource, "SKILL.md"), "---\nname: review\n---\nother\n");
   await assert.rejects(
     bindCustomization({
       descriptor: descriptor({ mode: "replace", precedence: "customization-first" }),
@@ -748,16 +750,12 @@ test("replacement binding requires a separate explicit confirmation", async () =
       interactive: true,
       confirm: async () => true,
       confirmReplace: async () => true,
-      activeSkills: [
-        { name: "review", path: source },
-        { name: "review", path: path.join(root, "other-review") },
-      ],
     }),
     (error) => error.code === "AMBIGUOUS_REPLACEMENT",
   );
 });
 
-test("persisted replacement validation requires an unambiguous active inventory", async () => {
+test("persisted replacement validation owns the current active inventory", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "replace-validation-"));
   const source = path.join(root, "review");
   const roots = [{ path: root, scope: "global", origin: "personal" }];
@@ -768,7 +766,6 @@ test("persisted replacement validation requires an unambiguous active inventory"
     mode: "replace",
     precedence: "customization-first",
   });
-  const activeSkills = [{ name: "review", path: source }];
   const binding = await bindCustomization({
     descriptor: replacement,
     sourcePath: source,
@@ -779,42 +776,23 @@ test("persisted replacement validation requires an unambiguous active inventory"
     interactive: true,
     confirm: async () => true,
     confirmReplace: async () => true,
-    activeSkills,
   });
 
-  await assert.rejects(
-    validateBinding({
-      descriptor: replacement,
-      binding,
-      roots,
-      managerRecords,
-    }),
-    (error) => error.code === "REPLACEMENT_INVENTORY_REQUIRED",
+  assert.equal(
+    (await validateBinding({ descriptor: replacement, binding, roots, managerRecords })).binding,
+    binding,
   );
+  const otherSource = path.join(root, "other-review");
+  await mkdir(otherSource);
+  await writeFile(path.join(otherSource, "SKILL.md"), "---\nname: review\n---\nother\n");
   await assert.rejects(
     validateBinding({
       descriptor: replacement,
       binding,
       roots,
       managerRecords,
-      activeSkills: [
-        ...activeSkills,
-        { name: "review", path: path.join(root, "other-review") },
-      ],
     }),
     (error) => error.code === "AMBIGUOUS_REPLACEMENT",
-  );
-  assert.equal(
-    (
-      await validateBinding({
-        descriptor: replacement,
-        binding,
-        roots,
-        managerRecords,
-        activeSkills,
-      })
-    ).binding,
-    binding,
   );
 });
 
@@ -936,25 +914,6 @@ test("binding persists and revalidates an auditable provenance choice", async ()
   ];
   const roots = [{ path: path.dirname(source), scope: "global", origin: "personal" }];
   const discovery = await discoverFixtureSkills({ input: source, roots, managerRecords });
-  const group = discovery.groups[0];
-  const chosenCopy = group.copies.find(({ owner }) => owner === "manager:asm");
-  const confirmedSelection = confirmDiscoverySelection({
-    discovery,
-    choice: {
-      name: group.name,
-      fingerprint: group.fingerprint,
-      path: chosenCopy.path,
-      owner: chosenCopy.owner,
-    },
-    interactive: true,
-    confirmedProvenance:
-      "repository:https://github.com/example/skills#skills/review/SKILL.md",
-    confirmationEvidence: {
-      actor: "human",
-      reason: "selected the ASM-owned repository source",
-    },
-  });
-
   const binding = await bindCustomization({
     descriptor: descriptor(),
     sourcePath: source,
@@ -962,7 +921,26 @@ test("binding persists and revalidates an auditable provenance choice", async ()
     statePath,
     roots,
     managerRecords,
-    confirmedSelection,
+    discovery,
+    selectSource: async ({ discovery: sourceDiscovery, group: sourceGroup }) => {
+      const copy = sourceGroup.copies.find(({ owner }) => owner === "manager:asm");
+      return confirmDiscoverySelection({
+        discovery: sourceDiscovery,
+        choice: {
+          name: sourceGroup.name,
+          fingerprint: sourceGroup.fingerprint,
+          path: copy.path,
+          owner: copy.owner,
+        },
+        interactive: true,
+        confirmedProvenance:
+          "repository:https://github.com/example/skills#skills/review/SKILL.md",
+        confirmationEvidence: {
+          actor: "human",
+          reason: "selected the ASM-owned repository source",
+        },
+      });
+    },
     interactive: true,
     confirm: async () => true,
   });

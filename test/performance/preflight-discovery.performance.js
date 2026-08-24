@@ -56,9 +56,9 @@ await runPerformanceScenario({
     maxP95Ms: 3000,
     maxMadMs: 500,
     exactWork: {
-      discovery_calls: 2 * iterations,
-      root_scans: 4 * iterations,
-      git_probes: 8 * iterations,
+      discovery_calls: iterations,
+      root_scans: iterations,
+      git_probes: 3 * iterations,
       manager_collections: 0,
       plugin_discovery_calls: 0,
     },
@@ -161,7 +161,7 @@ await runPerformanceScenario({
     if (result.status !== "ready" || result.steps.length !== 3) {
       throw new Error("preflight discovery result changed");
     }
-    if (metrics.discovery_calls !== 2 || metrics.root_scans !== 4) {
+    if (metrics.discovery_calls !== 1 || metrics.root_scans !== 1) {
       throw new Error("preflight discovery work changed");
     }
     if (phase === "measure") {

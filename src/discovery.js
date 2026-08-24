@@ -817,6 +817,92 @@ export async function discoverSkills({
   };
 }
 
+/**
+ * Create a request-scoped Discovery snapshot for one operation.
+ *
+ * The optional seed lets a caller reuse a Discovery result it already owns.
+ * Inventory and targeted lookups are memoized only for this operation; a new
+ * snapshot therefore observes changed roots, evidence, and source content.
+ */
+export function createDiscoverySnapshot({
+  discovery,
+  roots,
+  managerRecords = [],
+  options = {},
+  discover = discoverSkills,
+} = {}) {
+  if (discovery !== undefined && (!discovery || typeof discovery !== "object")) {
+    throw new TypeError("discovery snapshot seed must be an object");
+  }
+  if (typeof discover !== "function") {
+    throw new TypeError("discovery snapshot adapter must be a function");
+  }
+  const seededRoots = roots ?? options.roots ?? discovery?.searchedRoots;
+  const defaults = {
+    ...options,
+    ...(seededRoots === undefined ? {} : { roots: seededRoots }),
+    managerRecords,
+  };
+  let inventoryPromise = discovery === undefined
+    ? undefined
+    : Promise.resolve(discovery);
+  const targeted = new Map();
+
+  async function inventory() {
+    inventoryPromise ??= discover(defaults);
+    return inventoryPromise;
+  }
+
+  async function discoverTarget({ input } = {}) {
+    if (input === undefined) return inventory();
+    const key = JSON.stringify(input);
+    if (!targeted.has(key)) {
+      targeted.set(key, discover({ ...defaults, input }));
+    }
+    return targeted.get(key);
+  }
+
+  return Object.freeze({ inventory, discover: discoverTarget });
+}
+
+/**
+ * Select one concrete source directory from an existing Discovery result.
+ * The explicit observation is added to the copied candidate so Binding can
+ * validate the same checked Provenance decision as a targeted lookup.
+ */
+export function selectDiscoverySource(
+  discovery,
+  { sourceRoot, explicitInput } = {},
+) {
+  if (
+    !discovery
+    || !Array.isArray(discovery.groups)
+    || typeof sourceRoot !== "string"
+  ) return undefined;
+  const canonicalSource = path.resolve(sourceRoot);
+  const groups = discovery.groups.flatMap((group) => {
+    const copies = (group.copies ?? []).filter((copy) => {
+      const candidatePath = copy.realPath ?? copy.path;
+      return typeof candidatePath === "string"
+        && path.resolve(candidatePath) === canonicalSource;
+    });
+    if (copies.length === 0) return [];
+    const explicitPath = path.resolve(explicitInput ?? sourceRoot);
+    return groupCandidates(
+      copies.map((copy) => ({
+        ...copy,
+        name: group.name,
+        fingerprint: group.fingerprint,
+        evidence: [
+          ...(copy.evidence ?? []),
+          { kind: "explicit", path: explicitPath },
+        ],
+      })),
+    );
+  });
+  return groups[0];
+}
+
 export function confirmDiscoverySelection({
   discovery,
   choice,

@@ -5,7 +5,6 @@ import {
   matchesCustomizationSource,
   readCheckedDescriptor,
 } from "./descriptor.js";
-import { excludeSkillRootFromInventory } from "./discovery.js";
 import {
   fingerprintPath,
   fingerprintValues,
@@ -75,7 +74,7 @@ async function forkTrackingAdvisory(descriptor, {
   statePath,
   roots,
   managerRecords,
-  activeSkills,
+  discoverySnapshot,
   depth,
   activeIds,
   activePaths,
@@ -103,16 +102,13 @@ async function forkTrackingAdvisory(descriptor, {
   try {
     let validated;
     try {
-      const trackingInventory = await excludeSkillRootFromInventory(
-        activeSkills,
-        customizationRoot,
-      );
       validated = await bindings.validateBinding({
         descriptor,
         binding,
         roots,
         managerRecords,
-        activeSkills: trackingInventory,
+        customizationRoot,
+        discoverySnapshot,
       });
     } catch (error) {
       return {
@@ -140,7 +136,7 @@ async function forkTrackingAdvisory(descriptor, {
         statePath,
         roots,
         managerRecords,
-        activeSkills,
+        discoverySnapshot,
         depth: depth + 1,
         activeIds,
         activePaths,
@@ -184,7 +180,7 @@ async function visit({
   statePath,
   roots,
   managerRecords,
-  activeSkills,
+  discoverySnapshot,
   depth,
   activeIds,
   activePaths,
@@ -240,7 +236,7 @@ async function visit({
       statePath,
       roots,
       managerRecords,
-      activeSkills,
+      discoverySnapshot,
       depth,
       activeIds: nextIds,
       activePaths: nextPaths,
@@ -261,15 +257,6 @@ async function visit({
     };
   }
 
-  let bindingInventory;
-  try {
-    bindingInventory = descriptor.activation.mode === "replace"
-      ? await excludeSkillRootFromInventory(activeSkills, root)
-      : activeSkills;
-  } catch (error) {
-    return maintenance(descriptor, root, "binding-maintenance", error.message);
-  }
-
   let binding;
   try {
     binding = await bindings.resolveBinding({
@@ -278,7 +265,8 @@ async function visit({
       statePath,
       roots,
       managerRecords,
-      activeSkills: bindingInventory,
+      customizationRoot: root,
+      discoverySnapshot,
     });
   } catch (error) {
     return maintenance(descriptor, root, "binding-maintenance", error.message);
@@ -308,7 +296,7 @@ async function visit({
       statePath,
       roots,
       managerRecords,
-      activeSkills,
+      discoverySnapshot,
       depth: depth + 1,
       activeIds: nextIds,
       activePaths: nextPaths,
@@ -379,7 +367,7 @@ export async function inspectCustomizationExecution({
   statePath,
   roots,
   managerRecords = [],
-  activeSkills,
+  discoverySnapshot,
   bindings,
 }) {
   if (typeof context !== "string" || !context.trim()) {
@@ -391,7 +379,7 @@ export async function inspectCustomizationExecution({
     statePath,
     roots,
     managerRecords,
-    activeSkills,
+    discoverySnapshot,
     depth: 1,
     activeIds: new Set(),
     activePaths: new Set(),

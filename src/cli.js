@@ -13,11 +13,9 @@ import {
 } from "./contracts.js";
 import { readDescriptor } from "./descriptor.js";
 import {
-  activeSkillInventory,
   confirmDiscoverySelection,
   configuredHostSkillRoots,
   discoverSkills,
-  excludeSkillRootFromInventory,
 } from "./discovery.js";
 import { renderDispatcher } from "./dispatcher-renderer.js";
 import { DiscoveryError } from "./errors.js";
@@ -300,16 +298,7 @@ function discoveryRoots(context) {
 async function discoverInventory(context) {
   const discovery = await discoverSkills(discoveryOptions(context));
   context.discoveryRoots = discovery.searchedRoots;
-  return { discovery, activeSkills: activeSkillInventory(discovery) };
-}
-
-async function discoverBindingInventory(context, descriptorPath, descriptor) {
-  const { activeSkills } = await discoverInventory(context);
-  if (descriptor.activation.mode !== "replace") return activeSkills;
-  return excludeSkillRootFromInventory(
-    activeSkills,
-    path.dirname(path.resolve(descriptorPath)),
-  );
+  return { discovery };
 }
 
 async function selectionFromPrompt({
@@ -454,40 +443,7 @@ async function commandBind(descriptorPath, options, io) {
   const sourcePath = requireValue(options.source, "--source is required");
   const bindingContext = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const activeSkills = await discoverBindingInventory(
-    context,
-    resolvedDescriptorPath,
-    descriptor,
-  );
-  let confirmedSelection;
-  if (io.stdin.isTTY) {
-    const sourceDiscovery = await discoverSkills({
-      input: sourcePath,
-      ...discoveryOptions(context),
-    });
-    const group = sourceDiscovery.groups[0];
-    if (group?.conflict) {
-      const prompt = readline.createInterface({
-        input: io.stdin,
-        output: io.stderr,
-      });
-      try {
-        confirmedSelection = await selectionFromPrompt({
-          discovery: sourceDiscovery,
-          group,
-          prompt,
-          io,
-          confirmationEvidence: {
-            method: "interactive-cli-binding",
-            customization: descriptor.id,
-            context: bindingContext,
-          },
-        });
-      } finally {
-        prompt.close();
-      }
-    }
-  }
+  const { discovery } = await discoverInventory(context);
   let requestedScope = options.scope;
   if (!requestedScope && io.stdin.isTTY) {
     try {
@@ -508,6 +464,7 @@ async function commandBind(descriptorPath, options, io) {
       context: bindingContext,
       statePath: options.state,
       roots: discoveryRoots(context),
+      customizationRoot: path.dirname(resolvedDescriptorPath),
       requestedScope,
       interactive: io.stdin.isTTY,
       confirm: async () => ttyConfirmation(io, `Bind ${descriptor.name} to ${sourcePath}?`),
@@ -516,9 +473,31 @@ async function commandBind(descriptorPath, options, io) {
           io,
           `Replace ${descriptor.source.skill_name} with customization-first precedence?`,
         ),
-      activeSkills,
       managerRecords: context.managerRecords,
-      confirmedSelection,
+      discovery,
+      selectSource: io.stdin.isTTY
+        ? async ({ discovery: sourceDiscovery, group }) => {
+            const prompt = readline.createInterface({
+              input: io.stdin,
+              output: io.stderr,
+            });
+            try {
+              return await selectionFromPrompt({
+                discovery: sourceDiscovery,
+                group,
+                prompt,
+                io,
+                confirmationEvidence: {
+                  method: "interactive-cli-binding",
+                  customization: descriptor.id,
+                  context: bindingContext,
+                },
+              });
+            } finally {
+              prompt.close();
+            }
+          }
+        : undefined,
     }),
   );
 }
@@ -529,11 +508,7 @@ async function commandResolve(descriptorPath, options, io) {
   );
   const descriptor = await readDescriptor(resolvedDescriptorPath);
   const context = await discoveryContext(options);
-  const activeSkills = await discoverBindingInventory(
-    context,
-    resolvedDescriptorPath,
-    descriptor,
-  );
+  const { discovery } = await discoverInventory(context);
   outputJson(
     io,
     await resolveBinding({
@@ -541,8 +516,9 @@ async function commandResolve(descriptorPath, options, io) {
       context: requireValue(options.context, "--context is required"),
       statePath: options.state,
       roots: discoveryRoots(context),
+      customizationRoot: path.dirname(resolvedDescriptorPath),
       managerRecords: context.managerRecords,
-      activeSkills,
+      discovery,
     }),
   );
 }
@@ -562,11 +538,7 @@ async function commandReconcile(descriptorPath, options, io) {
   let sourceExecutionPlan;
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
-    const activeSkills = await discoverBindingInventory(
-      context,
-      resolvedDescriptorPath,
-      descriptor,
-    );
+    const { discovery } = await discoverInventory(context);
     const bindingContext = requireValue(
       options.context,
       "--context is required for semantic overlay reconciliation",
@@ -576,8 +548,9 @@ async function commandReconcile(descriptorPath, options, io) {
       context: bindingContext,
       statePath: options.state,
       roots: discoveryRoots(context),
+      customizationRoot: path.dirname(resolvedDescriptorPath),
       managerRecords: context.managerRecords,
-      activeSkills,
+      discovery,
     });
     sourcePath = binding.source.alias ?? binding.source.path;
     if (descriptor.source.kind === "customization") {
@@ -587,7 +560,7 @@ async function commandReconcile(descriptorPath, options, io) {
         statePath: options.state,
         roots: discoveryRoots(context),
         managerRecords: context.managerRecords,
-        activeSkills,
+        discovery,
       });
       if (nested.status === "maintenance-required") {
         throw new TypeError(
@@ -639,14 +612,14 @@ async function commandPreflight(descriptorPath, options, io) {
   );
   const contextValue = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const { activeSkills } = await discoverInventory(context);
+  const { discovery } = await discoverInventory(context);
   const result = await preflightCustomization({
     descriptorPath: resolvedDescriptorPath,
     context: contextValue,
     statePath: options.state,
     roots: discoveryRoots(context),
     managerRecords: context.managerRecords,
-    activeSkills,
+    discovery,
   });
   outputJson(io, result);
   return result.status === "maintenance-required" ? 2 : 0;
