@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { pluginHostResult } from "./interface.js";
 import { isPathContained } from "../paths.js";
 import {
   GENERIC_MANIFEST_FILES,
@@ -16,24 +17,15 @@ const CLAUDE_MARKETPLACE_MANIFEST_FILES = [
   ...GENERIC_MARKETPLACE_MANIFEST_FILES,
 ];
 
-/**
- * @typedef {object} ClaudeCodeAdapterContext
- * @property {string} home
- * @property {string} cwd
- * @property {Record<string, string | undefined>} env
- * @property {readonly string[]} workspaceDirectories
- * @property {string} [host]
- * @property {object[]} roots
- * @property {object[]} diagnostics
- */
+/** @typedef {import("./interface.js").PluginHostDiscoveryContext} ClaudeCodeAdapterContext */
 
 /**
  * Create the Claude Code host adapter from the shared plugin observation
  * primitives. The adapter owns Claude-specific paths, records, and policies;
  * the injected functions only normalize and emit host-independent observations.
  *
- * @param {object} toolkit
- * @returns {{host: string, discover: (context: ClaudeCodeAdapterContext) => Promise<void>}}
+ * @param {import("./interface.js").ClaudeCodeAdapterToolkit} toolkit
+ * @returns {import("./interface.js").PluginHostAdapter}
  */
 export function createClaudeCodeAdapter({
   addPluginInstall,
@@ -341,6 +333,9 @@ export function createClaudeCodeAdapter({
 
   return Object.freeze({
     host: "claude-code",
-    discover: discoverClaude,
+    discover: async (context) => {
+      await discoverClaude(context);
+      return pluginHostResult(context);
+    },
   });
 }

@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { pluginHostResult } from "./interface.js";
 import {
   GENERIC_MANIFEST_FILES,
   safeIdentityPart,
@@ -243,24 +244,15 @@ function codexMarketplaceConfigEntries(contents) {
   return { entries, invalid };
 }
 
-/**
- * @typedef {object} CodexAdapterContext
- * @property {string} home
- * @property {string} cwd
- * @property {Record<string, string | undefined>} env
- * @property {readonly string[]} workspaceDirectories
- * @property {string} [host]
- * @property {object[]} roots
- * @property {object[]} diagnostics
- */
+/** @typedef {import("./interface.js").PluginHostDiscoveryContext} CodexAdapterContext */
 
 /**
  * Create the Codex host adapter from shared plugin observation primitives.
  * The adapter owns Codex locations, configuration interpretation, activation
  * policy, and diagnostics; injected functions emit host-independent records.
  *
- * @param {object} toolkit
- * @returns {{host: string, discover: (context: CodexAdapterContext) => Promise<void>}}
+ * @param {import("./interface.js").PluginHostAdapterToolkit} toolkit
+ * @returns {import("./interface.js").PluginHostAdapter}
  */
 export function createCodexAdapter({
   addPluginInstall,
@@ -463,6 +455,9 @@ export function createCodexAdapter({
 
   return Object.freeze({
     host: "codex",
-    discover: discoverCodex,
+    discover: async (context) => {
+      await discoverCodex(context);
+      return pluginHostResult(context);
+    },
   });
 }

@@ -62,9 +62,11 @@ test("Claude Code adapter interface uses injected local filesystem helpers", asy
       diagnostics: [],
     };
 
-    await adapter.discover(context);
+    const result = await adapter.discover(context);
 
     assert.equal(context.host, "claude-code");
+    assert.equal(result.roots.length, context.roots.length);
+    assert.equal(result.diagnostics.length, context.diagnostics.length);
     assert.equal(cacheCalls.length, 1);
     assert.equal(cacheCalls[0].host, "claude-code");
     assert.equal(cacheCalls[0].manifestPolicy.files[0], ".claude-plugin/plugin.json");
@@ -131,9 +133,11 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
       diagnostics,
     };
 
-    await adapter.discover(context);
+    const result = await adapter.discover(context);
 
     assert.equal(context.host, "codex");
+    assert.equal(result.roots.length, context.roots.length);
+    assert.equal(result.diagnostics.length, context.diagnostics.length);
     assert.deepEqual(readCalls, [{
       file: path.join(codexHome, "config.toml"),
       encoding: "utf8",

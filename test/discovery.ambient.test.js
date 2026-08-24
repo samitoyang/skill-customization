@@ -1996,8 +1996,8 @@ test("plugin host specifications extend discovery without changing candidate pol
     pluginOptions: {
       hostSpecifications: [{
         host: "future-host",
-        discover: async (context) => {
-          context.roots.push({
+        discover: async () => ({
+          roots: [{
             path: path.dirname(skill),
             owner: "plugin:future-host",
             owners: ["plugin:future-host"],
@@ -2010,10 +2010,11 @@ test("plugin host specifications extend discovery without changing candidate pol
               kind: "plugin",
               ...plugin,
               identity,
-              provenance: { kind: "plugin", ...plugin },
+                provenance: { kind: "plugin", ...plugin },
             }],
-          });
-        },
+          }],
+          diagnostics: [],
+        }),
       }],
     },
   });

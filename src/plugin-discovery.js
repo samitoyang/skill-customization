@@ -15,6 +15,7 @@ import {
 import { isPathContained } from "./paths.js";
 import { createClaudeCodeAdapter } from "./plugin-host-adapters/claude-code.js";
 import { createCodexAdapter } from "./plugin-host-adapters/codex.js";
+import { pluginHostResult } from "./plugin-host-adapters/interface.js";
 import {
   GENERIC_MANIFEST_FILES,
   GENERIC_MARKETPLACE_MANIFEST_FILES,
@@ -1375,6 +1376,16 @@ function normalizeWorkspaceDirectories({ cwd, home, workspaceDirectories }) {
 }
 
 // Host adapters own documented locations; callers and candidate grouping stay host-agnostic.
+function createPluginHostSpecification(host, discover) {
+  return Object.freeze({
+    host,
+    discover: async (context) => {
+      await discover(context);
+      return pluginHostResult(context);
+    },
+  });
+}
+
 export const CLAUDE_CODE_HOST_ADAPTER = createClaudeCodeAdapter({
   addPluginInstall,
   canonicalContained,
@@ -1404,8 +1415,8 @@ export const CODEX_HOST_ADAPTER = createCodexAdapter({
 export const PLUGIN_HOST_SPECIFICATIONS = Object.freeze([
   CLAUDE_CODE_HOST_ADAPTER,
   CODEX_HOST_ADAPTER,
-  Object.freeze({ host: "gemini-cli", discover: discoverGemini }),
-  Object.freeze({ host: "cursor", discover: discoverCursor }),
+  createPluginHostSpecification("gemini-cli", discoverGemini),
+  createPluginHostSpecification("cursor", discoverCursor),
 ]);
 
 export async function discoverPluginSkillRoots({
@@ -1414,7 +1425,7 @@ export async function discoverPluginSkillRoots({
   env = process.env,
   workspaceDirectories,
   hostSpecifications = PLUGIN_HOST_SPECIFICATIONS,
-} = {}) {
+  } = {}) {
   const context = {
     home: path.resolve(home),
     cwd: path.resolve(cwd),
@@ -1424,35 +1435,44 @@ export async function discoverPluginSkillRoots({
       home,
       workspaceDirectories,
     }),
-    roots: [],
-    diagnostics: [],
     marketplaceOwnedRootsByHost: new Map(),
   };
+  const roots = [];
+  const diagnostics = [];
   for (const specification of hostSpecifications) {
     if (!specification || typeof specification.discover !== "function") continue;
-    context.host = specification.host ?? "unknown";
+    const host = specification.host ?? "unknown";
+    const hostContext = {
+      ...context,
+      host,
+      roots: [],
+      diagnostics: [],
+    };
     try {
-      await specification.discover(context);
+      const result = await specification.discover(hostContext);
+      const emitted = result ?? pluginHostResult(hostContext);
+      roots.push(...emitted.roots);
+      diagnostics.push(...emitted.diagnostics);
     } catch (error) {
-      context.diagnostics.push(
+      diagnostics.push(
         diagnostic({
-          host: context.host,
+          host,
           path: context.cwd,
           code: "PLUGIN_HOST_DISCOVERY_FAILED",
-          message: `plugin discovery failed for ${context.host}: ${error.message}`,
+          message: `plugin discovery failed for ${host}: ${error.message}`,
         }),
       );
     }
   }
   // Host adapters emit observations. Physical-root identity, policy merging,
   // and duplicate evidence handling belong to the Skill root registry.
-  const roots = context.roots.map((item) => ({
+  const normalizedRoots = roots.map((item) => ({
     ...item,
     kind: item.kind ?? "plugin",
   }));
-  roots.sort((left, right) => left.path.localeCompare(right.path, "en"));
+  normalizedRoots.sort((left, right) => left.path.localeCompare(right.path, "en"));
   return {
-    roots,
-    diagnostics: context.diagnostics,
+    roots: normalizedRoots,
+    diagnostics,
   };
 }
