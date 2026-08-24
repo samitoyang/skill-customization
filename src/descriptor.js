@@ -351,8 +351,9 @@ function validateFork(descriptor, errors) {
       );
     }
   }
-  checkFingerprint(errors, descriptor.fork.snapshot_fingerprint, "/fork/snapshot_fingerprint");
-  checkFingerprint(errors, descriptor.fork.diff_fingerprint, "/fork/diff_fingerprint");
+  for (const field of forkRelationship.fingerprintFields) {
+    checkFingerprint(errors, descriptor.fork[field], `/fork/${field}`);
+  }
   const needsMaterialization = descriptor.source?.kind === forkRelationship.sourceKind
     && descriptor.source.type === forkRelationship.sourceType;
   if (needsMaterialization && descriptor.fork[forkRelationship.materializationField] === undefined) {
@@ -365,29 +366,22 @@ function validateFork(descriptor, errors) {
     const materialization = descriptor.fork[forkRelationship.materializationField];
     if (checkObject(errors, materialization, "/fork/materialization", MATERIALIZATION)) {
       checkRequired(errors, materialization, "/fork/materialization", fields.materialization.required);
-      checkFingerprint(
-        errors,
-        materialization[materializationRelationship.materializationSourceField],
-        materializationRelationship.sourceFingerprintPath,
-      );
-      checkFingerprint(
-        errors,
-        materialization[materializationRelationship.materializationSnapshotField],
-        materializationRelationship.snapshotFingerprintPath,
-      );
-      checkPortableNonEmptyString(errors, materialization.reviewed_at, "/fork/materialization/reviewed_at", "review timestamp");
-      checkPortableNonEmptyString(errors, materialization.evidence, "/fork/materialization/evidence", "review evidence");
-      if (
-        materialization[materializationRelationship.materializationSourceField]
-          !== descriptor.source?.[materializationRelationship.sourceFingerprintField]
-      ) {
-        issue(errors, materializationRelationship.sourceFingerprintPath, "must equal source.effective_fingerprint");
+      for (const field of materializationRelationship.fingerprintFields) {
+        checkFingerprint(errors, materialization[field.field], field.path);
+        const reference = field.reference === "source"
+          ? descriptor.source
+          : descriptor.fork;
+        if (materialization[field.field] !== reference?.[field.referenceField]) {
+          issue(errors, field.path, field.equalityMessage);
+        }
       }
-      if (
-        materialization[materializationRelationship.materializationSnapshotField]
-          !== descriptor.fork[materializationRelationship.snapshotFingerprintField]
-      ) {
-        issue(errors, materializationRelationship.snapshotFingerprintPath, "must equal fork.snapshot_fingerprint");
+      for (const field of materializationRelationship.portableFields) {
+        checkPortableNonEmptyString(
+          errors,
+          materialization[field.field],
+          field.path,
+          field.label,
+        );
       }
     }
   }

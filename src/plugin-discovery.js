@@ -18,6 +18,7 @@ import { createCodexAdapter } from "./plugin-host-adapters/codex.js";
 import {
   GENERIC_MANIFEST_FILES,
   GENERIC_MARKETPLACE_MANIFEST_FILES,
+  safeIdentityPart,
   stringValue,
 } from "./plugin-host-adapters/metadata.js";
 import { publishDiscoveryPerformanceMetric } from "./performance-diagnostics.js";
@@ -72,14 +73,6 @@ const DECLARED_SKILL_DIRECTORY_FIELDS = [
 
 function unique(values) {
   return [...new Set(values.filter((value) => value !== undefined && value !== null))];
-}
-
-function safeIdentityPart(value, fallback = "local") {
-  return (stringValue(value) ?? fallback)
-    .replaceAll("%", "%25")
-    .replaceAll("/", "%2F")
-    .replaceAll("\\", "%5C")
-    .replaceAll(":", "%3A");
 }
 
 function pluginIdentity({ host, marketplace, name }) {

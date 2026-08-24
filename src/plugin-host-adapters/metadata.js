@@ -13,3 +13,11 @@ export const GENERIC_MARKETPLACE_MANIFEST_FILES = Object.freeze([
 export function stringValue(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
+
+export function safeIdentityPart(value, fallback = "local") {
+  return (stringValue(value) ?? fallback)
+    .replaceAll("%", "%25")
+    .replaceAll("/", "%2F")
+    .replaceAll("\\", "%5C")
+    .replaceAll(":", "%3A");
+}

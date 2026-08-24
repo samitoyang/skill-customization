@@ -19,14 +19,30 @@
  */
 
 /**
+ * @typedef {object} DescriptorForkMaterializationFingerprint
+ * @property {string} field
+ * @property {string} path
+ * @property {"source" | "fork"} reference
+ * @property {string} referenceField
+ * @property {string} equalityMessage
+ */
+
+/**
+ * @typedef {object} DescriptorForkMaterializationRelationship
+ * @property {readonly DescriptorForkMaterializationFingerprint[]} fingerprintFields
+ * @property {readonly {field: string, path: string, label: string}[]} portableFields
+ */
+
+/**
  * @typedef {object} DescriptorForkRelationship
  * @property {"fork"} descriptorType
  * @property {"fork"} descriptorField
  * @property {readonly string[]} provenanceFields
+ * @property {readonly string[]} fingerprintFields
  * @property {"customization"} sourceKind
  * @property {"semantic-overlay"} sourceType
  * @property {"materialization"} materializationField
- * @property {{sourceFingerprintField: string, snapshotFingerprintField: string, materializationSourceField: string, materializationSnapshotField: string, sourceFingerprintPath: string, snapshotFingerprintPath: string}} materialization
+ * @property {DescriptorForkMaterializationRelationship} materialization
  */
 
 /**
@@ -216,16 +232,39 @@ const relationships = {
     descriptorType: "fork",
     descriptorField: "fork",
     provenanceFields: ["snapshot", "diff"],
+    fingerprintFields: ["snapshot_fingerprint", "diff_fingerprint"],
     sourceKind: "customization",
     sourceType: "semantic-overlay",
     materializationField: "materialization",
     materialization: {
-      sourceFingerprintField: "effective_fingerprint",
-      snapshotFingerprintField: "snapshot_fingerprint",
-      materializationSourceField: "source_effective_fingerprint",
-      materializationSnapshotField: "snapshot_fingerprint",
-      sourceFingerprintPath: "/fork/materialization/source_effective_fingerprint",
-      snapshotFingerprintPath: "/fork/materialization/snapshot_fingerprint",
+      fingerprintFields: [
+        {
+          field: "source_effective_fingerprint",
+          path: "/fork/materialization/source_effective_fingerprint",
+          reference: "source",
+          referenceField: "effective_fingerprint",
+          equalityMessage: "must equal source.effective_fingerprint",
+        },
+        {
+          field: "snapshot_fingerprint",
+          path: "/fork/materialization/snapshot_fingerprint",
+          reference: "fork",
+          referenceField: "snapshot_fingerprint",
+          equalityMessage: "must equal fork.snapshot_fingerprint",
+        },
+      ],
+      portableFields: [
+        {
+          field: "reviewed_at",
+          path: "/fork/materialization/reviewed_at",
+          label: "review timestamp",
+        },
+        {
+          field: "evidence",
+          path: "/fork/materialization/evidence",
+          label: "review evidence",
+        },
+      ],
     },
   },
 };

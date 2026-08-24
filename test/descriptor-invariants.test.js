@@ -117,30 +117,29 @@ test("exported Descriptor schema is mechanically audited against the catalog", a
   assertObjectInvariant(schema.$defs.materialization, fields.materialization, "materialization");
   assert.equal(schema.$defs.fork.properties.snapshot.$ref, "#/$defs/provenancePath");
   assert.equal(schema.$defs.fork.properties.diff.$ref, "#/$defs/provenancePath");
-  assert.equal(
-    schema.$defs.fork.properties.snapshot_fingerprint.$ref,
-    "#/$defs/fingerprint",
-  );
-  assert.equal(
-    schema.$defs.fork.properties.diff_fingerprint.$ref,
-    "#/$defs/fingerprint",
-  );
-  assert.equal(
-    schema.$defs.materialization.properties.source_effective_fingerprint.$ref,
-    "#/$defs/fingerprint",
-  );
-  assert.equal(
-    schema.$defs.materialization.properties.snapshot_fingerprint.$ref,
-    "#/$defs/fingerprint",
-  );
-  assert.equal(
-    schema.$defs.materialization.properties.reviewed_at.$ref,
-    "#/$defs/nonBlankPortableString",
-  );
-  assert.equal(
-    schema.$defs.materialization.properties.evidence.$ref,
-    "#/$defs/nonBlankPortableString",
-  );
+  const forkPresenceRelationship = relationships.fork;
+  for (const field of forkPresenceRelationship.fingerprintFields) {
+    assert.equal(
+      schema.$defs.fork.properties[field].$ref,
+      "#/$defs/fingerprint",
+      `fork ${field} fingerprint type`,
+    );
+  }
+  for (const field of relationships.fork.materialization.fingerprintFields) {
+    const name = field.field;
+    assert.equal(
+      schema.$defs.materialization.properties[name].$ref,
+      "#/$defs/fingerprint",
+      `materialization ${name} fingerprint type`,
+    );
+  }
+  for (const field of relationships.fork.materialization.portableFields) {
+    assert.equal(
+      schema.$defs.materialization.properties[field.field].$ref,
+      "#/$defs/nonBlankPortableString",
+      `materialization ${field.field} portable type`,
+    );
+  }
 
   assert.equal(schema.$defs.skillName.pattern, patterns.skillName.source);
   assert.equal(schema.$defs.skillName.maxLength, patterns.skillName.maxLength);
@@ -175,7 +174,6 @@ test("exported Descriptor schema is mechanically audited against the catalog", a
     values.activationPrecedence,
   );
 
-  const forkPresenceRelationship = relationships.fork;
   const forkPresence = schema.allOf.find(({ if: condition, then }) =>
     condition?.properties?.type?.const === forkPresenceRelationship.descriptorType
     && then?.required?.includes(forkPresenceRelationship.descriptorField));

@@ -2,20 +2,13 @@ import path from "node:path";
 
 import {
   GENERIC_MANIFEST_FILES,
+  safeIdentityPart,
   stringValue,
 } from "./metadata.js";
 
 const CODEX_MANIFEST_POLICY = Object.freeze({
   files: [".codex-plugin/plugin.json", ...GENERIC_MANIFEST_FILES],
 });
-
-function safeIdentityPart(value, fallback = "local") {
-  return (stringValue(value) ?? fallback)
-    .replaceAll("%", "%25")
-    .replaceAll("/", "%2F")
-    .replaceAll("\\", "%5C")
-    .replaceAll(":", "%3A");
-}
 
 function codexPluginIdentity({ host, marketplace, name }) {
   return `local:plugin:${safeIdentityPart(host)}:${safeIdentityPart(marketplace)}:${safeIdentityPart(name)}`;
