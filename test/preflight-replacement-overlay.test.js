@@ -55,6 +55,7 @@ test("replacement overlays exclude themselves from active inventory", async () =
     context: "workspace:test",
     statePath,
     roots,
+    customizationRoot: overlayRoot,
     interactive: true,
     confirm: async () => true,
     confirmReplace: async () => true,

@@ -3,9 +3,8 @@ import path from "node:path";
 import readline from "node:readline/promises";
 
 import {
-  bindCustomization,
   classifyBindingScope,
-  resolveBinding,
+  createBindingOperation,
 } from "./bindings.js";
 import {
   helperContractSupport,
@@ -444,6 +443,11 @@ async function commandBind(descriptorPath, options, io) {
   const bindingContext = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
   const { discovery } = await discoverInventory(context);
+  const bindingOperation = createBindingOperation({
+    discovery,
+    roots: discoveryRoots(context),
+    managerRecords: context.managerRecords,
+  });
   let requestedScope = options.scope;
   if (!requestedScope && io.stdin.isTTY) {
     try {
@@ -458,12 +462,11 @@ async function commandBind(descriptorPath, options, io) {
   }
   outputJson(
     io,
-    await bindCustomization({
+    await bindingOperation.bindCustomization({
       descriptor,
       sourcePath,
       context: bindingContext,
       statePath: options.state,
-      roots: discoveryRoots(context),
       customizationRoot: path.dirname(resolvedDescriptorPath),
       requestedScope,
       interactive: io.stdin.isTTY,
@@ -473,8 +476,6 @@ async function commandBind(descriptorPath, options, io) {
           io,
           `Replace ${descriptor.source.skill_name} with customization-first precedence?`,
         ),
-      managerRecords: context.managerRecords,
-      discovery,
       selectSource: io.stdin.isTTY
         ? async ({ discovery: sourceDiscovery, group }) => {
             const prompt = readline.createInterface({
@@ -509,16 +510,18 @@ async function commandResolve(descriptorPath, options, io) {
   const descriptor = await readDescriptor(resolvedDescriptorPath);
   const context = await discoveryContext(options);
   const { discovery } = await discoverInventory(context);
+  const bindingOperation = createBindingOperation({
+    discovery,
+    roots: discoveryRoots(context),
+    managerRecords: context.managerRecords,
+  });
   outputJson(
     io,
-    await resolveBinding({
+    await bindingOperation.resolveBinding({
       descriptor,
       context: requireValue(options.context, "--context is required"),
       statePath: options.state,
-      roots: discoveryRoots(context),
       customizationRoot: path.dirname(resolvedDescriptorPath),
-      managerRecords: context.managerRecords,
-      discovery,
     }),
   );
 }
@@ -539,18 +542,20 @@ async function commandReconcile(descriptorPath, options, io) {
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
     const { discovery } = await discoverInventory(context);
+    const bindingOperation = createBindingOperation({
+      discovery,
+      roots: discoveryRoots(context),
+      managerRecords: context.managerRecords,
+    });
     const bindingContext = requireValue(
       options.context,
       "--context is required for semantic overlay reconciliation",
     );
-    const binding = await resolveBinding({
+    const binding = await bindingOperation.resolveBinding({
       descriptor,
       context: bindingContext,
       statePath: options.state,
-      roots: discoveryRoots(context),
       customizationRoot: path.dirname(resolvedDescriptorPath),
-      managerRecords: context.managerRecords,
-      discovery,
     });
     sourcePath = binding.source.alias ?? binding.source.path;
     if (descriptor.source.kind === "customization") {

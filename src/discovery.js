@@ -865,44 +865,6 @@ export function createDiscoverySnapshot({
   return Object.freeze({ inventory, discover: discoverTarget });
 }
 
-/**
- * Select one concrete source directory from an existing Discovery result.
- * The explicit observation is added to the copied candidate so Binding can
- * validate the same checked Provenance decision as a targeted lookup.
- */
-export function selectDiscoverySource(
-  discovery,
-  { sourceRoot, explicitInput } = {},
-) {
-  if (
-    !discovery
-    || !Array.isArray(discovery.groups)
-    || typeof sourceRoot !== "string"
-  ) return undefined;
-  const canonicalSource = path.resolve(sourceRoot);
-  const groups = discovery.groups.flatMap((group) => {
-    const copies = (group.copies ?? []).filter((copy) => {
-      const candidatePath = copy.realPath ?? copy.path;
-      return typeof candidatePath === "string"
-        && path.resolve(candidatePath) === canonicalSource;
-    });
-    if (copies.length === 0) return [];
-    const explicitPath = path.resolve(explicitInput ?? sourceRoot);
-    return groupCandidates(
-      copies.map((copy) => ({
-        ...copy,
-        name: group.name,
-        fingerprint: group.fingerprint,
-        evidence: [
-          ...(copy.evidence ?? []),
-          { kind: "explicit", path: explicitPath },
-        ],
-      })),
-    );
-  });
-  return groups[0];
-}
-
 export function confirmDiscoverySelection({
   discovery,
   choice,

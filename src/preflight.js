@@ -1,24 +1,10 @@
 import {
-  bindingKey,
   bindingStorePath,
-  readBindingStore,
-  resolveBinding,
-  validateBinding,
+  createBindingOperation,
 } from "./bindings.js";
-import { createDiscoverySnapshot } from "./discovery.js";
-import {
-  inspectCustomizationExecution,
-  MAX_CUSTOMIZATION_DEPTH,
-} from "./execution-graph.js";
+import { MAX_CUSTOMIZATION_DEPTH } from "./execution-graph.js";
 
 export { MAX_CUSTOMIZATION_DEPTH };
-
-const bindings = Object.freeze({
-  bindingKey,
-  readBindingStore,
-  resolveBinding,
-  validateBinding,
-});
 
 export async function preflightCustomization({
   descriptorPath,
@@ -28,18 +14,16 @@ export async function preflightCustomization({
   managerRecords = [],
   discovery,
 }) {
-  const discoverySnapshot = createDiscoverySnapshot({
+  const bindings = createBindingOperation({
     discovery,
     roots,
     managerRecords,
   });
-  return inspectCustomizationExecution({
+  return bindings.inspectCustomizationExecution({
     descriptorPath,
     context,
     statePath,
     roots,
     managerRecords,
-    discoverySnapshot,
-    bindings,
   });
 }

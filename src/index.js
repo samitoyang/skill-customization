@@ -1,4 +1,12 @@
-export * from "./bindings.js";
+export {
+  bindingKey,
+  bindingStorePath,
+  bindCustomization,
+  classifyBindingScope,
+  readBindingStore,
+  resolveBinding,
+  validateBinding,
+} from "./bindings.js";
 export * from "./contracts.js";
 export * from "./descriptor.js";
 export * from "./discovery.js";

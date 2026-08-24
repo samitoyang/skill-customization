@@ -13,7 +13,6 @@ import {
   createDiscoverySnapshot,
   discoverSkills,
   excludeSkillRootFromInventory,
-  selectDiscoverySource,
 } from "./discovery.js";
 import { BindingError } from "./errors.js";
 import { inspectCustomizationExecution } from "./execution-graph.js";
@@ -78,6 +77,111 @@ function bindingDiscoverySnapshot({
     roots,
     managerRecords,
   });
+}
+
+function selectBindingSource(
+  discovery,
+  { sourceRoot, explicitInput } = {},
+) {
+  if (
+    !discovery
+    || !Array.isArray(discovery.groups)
+    || typeof sourceRoot !== "string"
+  ) return undefined;
+  const canonicalSource = path.resolve(sourceRoot);
+  const explicitPath = path.resolve(explicitInput ?? sourceRoot);
+  const groups = discovery.groups.flatMap((group) => {
+    const sourceCopies = (group.copies ?? []).filter((copy) => {
+      const candidatePath = copy.realPath ?? copy.path;
+      return typeof candidatePath === "string"
+        && path.resolve(candidatePath) === canonicalSource;
+    });
+    if (sourceCopies.length === 0) return [];
+    const copies = sourceCopies.map((copy) => {
+      const decision = checkProvenance({
+        observations: [
+          ...(copy.evidence ?? []),
+          { kind: "explicit", path: explicitPath },
+        ],
+      });
+      const selected = {
+        ...copy,
+        evidence: [...decision.evidence],
+        provenance: [...decision.provenance],
+        conflict: decision.conflict,
+      };
+      Object.defineProperty(selected, "provenanceDecision", {
+        value: decision,
+        enumerable: false,
+        writable: false,
+      });
+      return selected;
+    });
+    const decision = checkProvenance({
+      observations: copies.flatMap((copy) => copy.evidence),
+    });
+    const selected = {
+      ...group,
+      copies,
+      evidence: [...decision.evidence],
+      provenance: [...decision.provenance],
+      conflict: decision.conflict,
+    };
+    Object.defineProperty(selected, "provenanceDecision", {
+      value: decision,
+      enumerable: false,
+      writable: false,
+    });
+    return [selected];
+  });
+  return groups[0];
+}
+
+/**
+ * Internal operation seam for callers that already own one Discovery pass.
+ * The returned methods keep the caller-facing Binding intent free of the
+ * request-scoped snapshot and other lifecycle state.
+ */
+export function createBindingOperation({
+  discovery,
+  discoverySnapshot,
+  roots,
+  managerRecords = [],
+  discover,
+  selectSource,
+} = {}) {
+  const operationDiscovery = discoverySnapshot ?? createDiscoverySnapshot({
+    discovery,
+    roots,
+    managerRecords,
+    ...(discover ? { discover } : {}),
+  });
+  const withOperationContext = (options = {}) => ({
+    ...options,
+    roots: options.roots ?? roots,
+    managerRecords: options.managerRecords ?? managerRecords,
+    ...(options.selectSource === undefined && selectSource
+      ? { selectSource }
+      : {}),
+    discoverySnapshot: operationDiscovery,
+  });
+  const operation = {
+    bindingKey,
+    readBindingStore,
+    inspectCustomizationExecution: (options) =>
+      inspectCustomizationExecution({
+        ...options,
+        discoverySnapshot: operationDiscovery,
+        bindings: operation,
+      }),
+    bindCustomization: (options) =>
+      bindCustomizationInternal(withOperationContext(options)),
+    resolveBinding: (options) =>
+      resolveBindingInternal(withOperationContext(options)),
+    validateBinding: (options) =>
+      validateBindingInternal(withOperationContext(options)),
+  };
+  return Object.freeze(operation);
 }
 
 function matchingRoot(targetPath, roots) {
@@ -490,7 +594,7 @@ async function inspectBindingSource({
     const discoveryInput = sourcePolicy.discoveryInput({ resolved, sourceRoot });
     if (discoverySnapshot) {
       const inventory = await discoverySnapshot.inventory();
-      const selected = selectDiscoverySource(inventory, {
+      const selected = selectBindingSource(inventory, {
         sourceRoot,
         explicitInput: discoveryInput,
       });
@@ -612,8 +716,8 @@ async function inspectBindingSource({
 const BINDING_OPERATIONS = Object.freeze({
   bindingKey,
   readBindingStore,
-  resolveBinding,
-  validateBinding,
+  resolveBinding: resolveBindingInternal,
+  validateBinding: validateBindingInternal,
 });
 
 function matchesCustomizationCopy(source, group, copy) {
@@ -640,6 +744,7 @@ async function recoverCustomizationFingerprint({
     roots,
     managerRecords,
     discoverySnapshot,
+    bindingOperations = BINDING_OPERATIONS,
   } = recoveryContext;
   if (!matchesCustomizationCopy(descriptor.source, group, copy)) return undefined;
   const execution = await inspectCustomizationExecution({
@@ -649,7 +754,7 @@ async function recoverCustomizationFingerprint({
     roots,
     managerRecords,
     discoverySnapshot,
-    bindings: BINDING_OPERATIONS,
+    bindings: bindingOperations,
   }).catch(() => undefined);
   return execution?.status === "maintenance-required"
     ? undefined
@@ -734,13 +839,20 @@ async function recoverMissingPluginBinding({
   // stable plugin identity and one already reviewed effective fingerprint.
   let discovery;
   try {
-    discovery = discoverySnapshot
-      ? await discoverySnapshot.inventory()
-      : await discoverSkills({
-          input: descriptor.source.skill_name,
-          roots,
-          managerRecords,
-        });
+    if (discoverySnapshot) {
+      const inventory = await discoverySnapshot.inventory();
+      discovery = inventory.groups.some(
+        ({ name }) => name === descriptor.source.skill_name,
+      )
+        ? inventory
+        : await discoverySnapshot.discover({ input: descriptor.source.skill_name });
+    } else {
+      discovery = await discoverSkills({
+        input: descriptor.source.skill_name,
+        roots,
+        managerRecords,
+      });
+    }
   } catch (error) {
     if (error.code === "NO_LOCAL_COPY") return undefined;
     throw error;
@@ -804,21 +916,10 @@ async function assertReplacementActivation({
   if (descriptor.activation.mode !== "replace") return;
   const discovery = await discoverySnapshot.inventory();
   let activeSkills = activeSkillInventory(discovery);
-  const descriptorRoots = new Set(
-    discovery.groups.flatMap((group) => group.copies)
-      .filter((copy) =>
-        copy.classification === "customization"
-        && copy.customization?.id === descriptor.id,
-      )
-      .map((copy) => path.resolve(copy.realPath ?? copy.path)),
-  );
   if (customizationRoot) {
     activeSkills = await excludeSkillRootFromInventory(activeSkills, customizationRoot);
   }
-  const sameName = activeSkills.filter(({ name, path: skillPath, realPath }) =>
-    name === descriptor.name
-    && !descriptorRoots.has(path.resolve(realPath ?? skillPath)),
-  );
+  const sameName = activeSkills.filter(({ name }) => name === descriptor.name);
   if (sameName.length > 1) {
     throw new BindingError("replacement activation is ambiguous in this host context", {
       code: "AMBIGUOUS_REPLACEMENT",
@@ -827,7 +928,7 @@ async function assertReplacementActivation({
   }
 }
 
-export async function bindCustomization({
+async function bindCustomizationInternal({
   descriptor,
   sourcePath,
   context,
@@ -858,7 +959,7 @@ export async function bindCustomization({
   });
   const store = await readBindingStore(statePath);
   if (store.bindings[key]) {
-    return resolveBinding({
+    return resolveBindingInternal({
       descriptor,
       context,
       statePath,
@@ -959,7 +1060,7 @@ export async function bindCustomization({
     return current;
   });
   if (created) return binding;
-  return validateBinding({
+  return validateBindingInternal({
     descriptor,
     binding: persistedBinding,
     roots,
@@ -981,7 +1082,7 @@ async function invalidate(statePath, key, expectedBinding) {
   return invalidated;
 }
 
-export async function validateBinding({
+async function validateBindingInternal({
   descriptor,
   binding,
   roots,
@@ -1053,7 +1154,7 @@ export async function validateBinding({
   return { binding, inspection, currentTarget };
 }
 
-export async function resolveBinding({
+async function resolveBindingInternal({
   descriptor,
   context,
   statePath = bindingStorePath(),
@@ -1070,6 +1171,11 @@ export async function resolveBinding({
     roots,
     managerRecords,
   });
+  const operationBindings = createBindingOperation({
+    discoverySnapshot: operationDiscovery,
+    roots,
+    managerRecords,
+  });
   const store = await readBindingStore(statePath);
   const key = bindingKey(descriptor.id, context);
   const binding = store.bindings[key];
@@ -1080,7 +1186,7 @@ export async function resolveBinding({
   }
   try {
     return (
-      await validateBinding({
+      await validateBindingInternal({
         descriptor,
         binding,
         roots,
@@ -1099,6 +1205,7 @@ export async function resolveBinding({
         managerRecords,
         customizationRoot,
         discoverySnapshot: operationDiscovery,
+        bindingOperations: operationBindings,
       };
       const recovered = await recoverMissingPluginBinding({
         binding,
@@ -1114,7 +1221,7 @@ export async function resolveBinding({
           return store;
         });
         if (persisted) return recovered;
-        return resolveBinding({
+        return resolveBindingInternal({
           descriptor,
           context,
           statePath,
@@ -1146,7 +1253,7 @@ export async function resolveBinding({
     ) {
       const invalidated = await invalidate(statePath, key, binding);
       if (!invalidated) {
-        return resolveBinding({
+        return resolveBindingInternal({
           descriptor,
           context,
           statePath,
@@ -1159,4 +1266,37 @@ export async function resolveBinding({
     }
     throw error;
   }
+}
+
+function callerIntentOptions(options = {}) {
+  const {
+    discovery: _discovery,
+    discoverySnapshot: _discoverySnapshot,
+    ...intent
+  } = options;
+  return intent;
+}
+
+export async function bindCustomization(options = {}) {
+  const operation = createBindingOperation({
+    roots: options.roots,
+    managerRecords: options.managerRecords,
+  });
+  return operation.bindCustomization(callerIntentOptions(options));
+}
+
+export async function validateBinding(options = {}) {
+  const operation = createBindingOperation({
+    roots: options.roots,
+    managerRecords: options.managerRecords,
+  });
+  return operation.validateBinding(callerIntentOptions(options));
+}
+
+export async function resolveBinding(options = {}) {
+  const operation = createBindingOperation({
+    roots: options.roots,
+    managerRecords: options.managerRecords,
+  });
+  return operation.resolveBinding(callerIntentOptions(options));
 }

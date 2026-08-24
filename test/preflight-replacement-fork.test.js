@@ -89,6 +89,7 @@ test("replacement forks remain runtime leaves with advisory-only tracking", asyn
     context: "workspace:test",
     statePath,
     roots,
+    customizationRoot: forkRoot,
     interactive: true,
     confirm: async () => true,
     confirmReplace: async () => true,
