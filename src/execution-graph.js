@@ -71,6 +71,10 @@ function bindingPublicationPaths(binding) {
     ?? [];
 }
 
+function bindingPublicationStateTreePaths(binding) {
+  return binding.evidenceRevision?.filesystem?.stateTreePaths ?? [];
+}
+
 async function sourceRoot(binding) {
   const lookup = binding.source.alias ?? binding.source.path;
   const target = await realpath(lookup);
@@ -395,6 +399,10 @@ async function visit({
       root,
       bindingPublicationPaths(binding),
       publicationTokenFor(sourceResult)?.paths ?? [],
+    ),
+    stateTreePaths: publicationPaths(
+      bindingPublicationStateTreePaths(binding),
+      publicationTokenFor(sourceResult)?.stateTreePaths ?? [],
     ),
     bindings: [
       { key: bindings.bindingKey(descriptor.id, context), binding },

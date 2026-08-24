@@ -56,6 +56,10 @@ function unique(values) {
   return [...new Set(values.filter(Boolean).map((value) => path.resolve(value)))];
 }
 
+function recordsFromControlPath(records, controlPath) {
+  return records.map((record) => ({ ...record, controlPath }));
+}
+
 export function defaultManagerSources({
   home = os.homedir(),
   cwd = process.cwd(),
@@ -134,7 +138,9 @@ export async function collectManagerRecords({
       )
         ? "workspace"
         : "global";
-      records.push(...parseVercelV3Lock(data, { lockPath, scope }));
+      records.push(...recordsFromControlPath(
+        parseVercelV3Lock(data, { lockPath, scope }), lockPath,
+      ));
       diagnostics.push({ manager: "vercel", source: lockPath, status: "read" });
     } catch (error) {
       diagnostics.push({ manager: "vercel", source: lockPath, status: "error", error: error.message });
@@ -168,7 +174,7 @@ export async function collectManagerRecords({
       }
       try {
         const parsed = await readXingSqlite(database, { run: sqliteRun });
-        records.push(...parsed);
+        records.push(...recordsFromControlPath(parsed, database));
         diagnostics.push({ manager: "xing", source: database, status: "read", records: parsed.length });
         break;
       } catch (error) {
@@ -183,7 +189,7 @@ export async function collectManagerRecords({
       if (data === undefined) continue;
       const libraryRoot = path.dirname(sourcePath);
       const parsed = parseJtianlingSources(data, { root: libraryRoot });
-      records.push(...parsed);
+      records.push(...recordsFromControlPath(parsed, sourcePath));
       diagnostics.push({ manager: "jtianling", source: sourcePath, status: "read", records: parsed.length });
     } catch (error) {
       diagnostics.push({ manager: "jtianling", source: sourcePath, status: "error", error: error.message });

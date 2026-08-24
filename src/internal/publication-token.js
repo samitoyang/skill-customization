@@ -8,9 +8,10 @@ function normalizedPaths(values) {
 // This is deliberately an internal seam.  Preflight returns the execution
 // result itself; recovery can retrieve its CAS hand-off only through this
 // module, so neither serialization nor ordinary property access exposes it.
-export function attachPublicationToken(result, { paths = [], bindings = [] } = {}) {
+export function attachPublicationToken(result, { paths = [], stateTreePaths = [], bindings = [] } = {}) {
   publicationTokens.set(result, Object.freeze({
     paths: Object.freeze(normalizedPaths(paths)),
+    stateTreePaths: Object.freeze(normalizedPaths(stateTreePaths)),
     bindings: Object.freeze(bindings.map(({ key, binding }) => Object.freeze({ key, binding }))),
   }));
   return result;

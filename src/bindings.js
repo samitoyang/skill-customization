@@ -44,6 +44,12 @@ const MAX_GIT_INCLUDE_GLOB_MATCHES = 64;
 const MAX_GIT_INCLUDE_GLOB_SCAN_ENTRIES = 4096;
 const MAX_PUBLICATION_EVIDENCE_PATHS = 512;
 const MAX_PUBLICATION_TREE_ENTRIES = 256;
+// A single provenance walk can retain its root metadata, four Git control
+// files, and every permitted include. Reserve that whole envelope before any
+// walk begins so a large candidate inventory cannot multiply bounded walks.
+const MAX_PUBLICATION_PROVENANCE_ROOTS = Math.floor(
+  MAX_PUBLICATION_EVIDENCE_PATHS / (MAX_GIT_INCLUDE_FILES + 8),
+);
 
 const EXPECTED_RECOVERY_MISMATCH_CODES = new Set([
   "BINDING_CUSTOMIZATION_SOURCE_MISMATCH",
@@ -102,7 +108,7 @@ function cloneRevisionValue(value) {
   return value === undefined ? undefined : structuredClone(value);
 }
 
-function discoveryCopyRevision(group, copy) {
+function discoveryCopyRevision(group, copy, controlPaths = []) {
   return {
     name: group.name,
     fingerprint: group.fingerprint,
@@ -111,12 +117,14 @@ function discoveryCopyRevision(group, copy) {
     evidence: cloneRevisionValue(group.evidence ?? []),
     copies: cloneRevisionValue(group.copies ?? []),
     selectedCopy: cloneRevisionValue(copy),
+    controlPaths: cloneRevisionValue(controlPaths),
   };
 }
 
 function bindingInspectionRevision({
   group,
   copy,
+  controlPaths,
   sourceRoot,
   inspection,
 }) {
@@ -130,7 +138,7 @@ function bindingInspectionRevision({
     provenance: cloneRevisionValue(inspection.provenance ?? []),
     evidence: cloneRevisionValue(inspection.evidence ?? []),
     selection: cloneRevisionValue(inspection.selection),
-    discovery: discoveryCopyRevision(group, copy),
+    discovery: discoveryCopyRevision(group, copy, controlPaths),
   };
 }
 
@@ -190,8 +198,11 @@ function filesystemStatRevision(info, { stableDirectory = false } = {}) {
 
 function stateEvidenceExcludedPaths(statePath) {
   if (typeof statePath !== "string" || !statePath.trim()) return [];
+  // Exclude the state file itself, never its parent. A state file may live
+  // beneath a discovery or source root; excluding that directory would make
+  // its non-state children invisible to the bounded tree token.
   const resolved = path.resolve(statePath);
-  return [resolved, path.dirname(resolved)];
+  return [resolved, `${resolved}.lock`];
 }
 
 async function filesystemEvidenceRevision({
@@ -219,6 +230,14 @@ async function filesystemEvidenceRevision({
   const excludedPaths = [...new Set(ignoredPaths
     .filter((candidate) => typeof candidate === "string" && candidate.trim())
     .map((candidate) => path.resolve(candidate)))].sort();
+  const requiredTrees = [...new Set(treePaths
+    .filter((candidate) => typeof candidate === "string" && candidate.trim())
+    .map((candidate) => path.resolve(candidate)))];
+  const optionalTrees = [...new Set(optionalTreePaths
+    .filter((candidate) => typeof candidate === "string" && candidate.trim())
+    .map((candidate) => path.resolve(candidate)))].filter(
+    (candidate) => !requiredTrees.includes(candidate),
+  );
   // State writes can churn every ancestor's directory timestamps when they
   // create the local state directory.  Tree capture still records every
   // non-state child, so a new discovery sibling remains observable even
@@ -227,6 +246,12 @@ async function filesystemEvidenceRevision({
     isPathContained(candidate, excluded) && path.resolve(candidate) !== excluded);
   const isExcluded = (candidate) => excludedPaths.some((excluded) =>
     isPathContained(excluded, candidate));
+  const isStateChurnDirectory = (candidate) => {
+    const resolved = path.resolve(candidate);
+    return excludedPaths.some((excluded) => path.dirname(excluded) === resolved)
+      && !requiredTrees.includes(resolved)
+      && !optionalTrees.includes(resolved);
+  };
   if (uniquePaths.length + optionalPaths.length > MAX_PUBLICATION_EVIDENCE_PATHS) {
     return undefined;
   }
@@ -271,6 +296,10 @@ async function filesystemEvidenceRevision({
     async function captureTree(candidate, { optional = false } = {}) {
       const resolved = path.resolve(candidate);
       if (isExcluded(resolved)) return;
+      // The state directory may be created by the lock itself. Ignore only
+      // that directory, while retaining its containing tree so non-state
+      // siblings remain part of the publication token.
+      if (isStateChurnDirectory(resolved)) return;
       if (seenTrees.has(resolved)) return;
       seenTrees.add(resolved);
       if (!reserveTreeEntry()) return false;
@@ -313,14 +342,6 @@ async function filesystemEvidenceRevision({
       }
     }
     try {
-      const requiredTrees = [...new Set(treePaths
-        .filter((candidate) => typeof candidate === "string" && candidate.trim())
-        .map((candidate) => path.resolve(candidate)))];
-      const optionalTrees = [...new Set(optionalTreePaths
-        .filter((candidate) => typeof candidate === "string" && candidate.trim())
-        .map((candidate) => path.resolve(candidate)))].filter(
-          (candidate) => !requiredTrees.includes(candidate),
-        );
       for (const candidate of requiredTrees) {
         if (await captureTree(candidate) === false) return undefined;
       }
@@ -333,6 +354,12 @@ async function filesystemEvidenceRevision({
     }
     return {
       canonicalTarget,
+      // Only rewalk a tree under the lock when its directory metadata is
+      // deliberately stable because it contains local state. Other trees are
+      // fully covered by their fixed entries and directory revisions.
+      stateTreePaths: [...requiredTrees, ...optionalTrees]
+        .filter((candidate) => hasExcludedDescendant(candidate))
+        .sort((left, right) => left.localeCompare(right, "en")),
       entries: [...new Map(
         [...entries, ...optionalEntries.filter(Boolean), ...treeEntries]
           .map((entry) => [entry.path, entry]),
@@ -445,12 +472,6 @@ async function sourceProvenancePaths(sourceRoot) {
       }
       const setting = inInclude && /^\s*path\s*=\s*(.*?)\s*$/.exec(line);
       if (!setting || !setting[1]) continue;
-      if (includePaths.size >= MAX_GIT_INCLUDE_FILES) {
-        throw new BindingError("Git include files exceed the publication evidence limit", {
-          code: "BINDING_SOURCE_SELECTION_INVALID",
-          details: { configPath, limit: MAX_GIT_INCLUDE_FILES },
-        });
-      }
       const value = setting[1].replace(/^['"]|['"]$/g, "");
       const included = value.startsWith("~/")
         ? path.join(os.homedir(), value.slice(2))
@@ -512,7 +533,15 @@ function discoveryEvidencePaths(value, paths = new Set(), seen = new Set()) {
   if (!value || typeof value !== "object" || seen.has(value)) return paths;
   seen.add(value);
   for (const [key, nested] of Object.entries(value)) {
-    if (typeof nested === "string" && /(?:^|_)(?:path|file|root)$|^(?:path|file|root|pluginRoot|pluginManifest|metadataRoot)$/i.test(key)) {
+    if (key === "controlPaths" && Array.isArray(nested)) {
+      for (const controlPath of nested) {
+        if (typeof controlPath === "string" && path.isAbsolute(controlPath)) {
+          paths.add(path.resolve(controlPath));
+        }
+      }
+      continue;
+    }
+    if (typeof nested === "string" && /(?:^|_)(?:path|file|root)$|^(?:path|file|root|pluginRoot|pluginManifest|metadataRoot|controlPath)$/i.test(key)) {
       if (path.isAbsolute(nested)) paths.add(path.resolve(nested));
       continue;
     }
@@ -528,6 +557,32 @@ function bindingDiscoveryEvidencePaths(inspection, replacementEvidence) {
   return [...paths];
 }
 
+function bindingDiscoveryControlPaths(inspection, replacementEvidence) {
+  const paths = new Set(
+    (inspection?.controlPaths ?? [])
+      .filter((candidate) => typeof candidate === "string" && path.isAbsolute(candidate))
+      .map((candidate) => path.resolve(candidate)),
+  );
+  const collect = (value, seen = new Set()) => {
+    if (!value || typeof value !== "object" || seen.has(value)) return;
+    seen.add(value);
+    for (const [key, nested] of Object.entries(value)) {
+      if (key === "controlPaths" && Array.isArray(nested)) {
+        for (const candidate of nested) {
+          if (typeof candidate === "string" && path.isAbsolute(candidate)) {
+            paths.add(path.resolve(candidate));
+          }
+        }
+        continue;
+      }
+      collect(nested, seen);
+    }
+  };
+  collect(inspection?.discoveryRevision?.discovery);
+  collect(replacementEvidence);
+  return [...paths];
+}
+
 function bindingDiscoverySearchPaths(inspection) {
   return (inspection?.searchedRoots ?? [])
     .flatMap((root) => [
@@ -538,6 +593,16 @@ function bindingDiscoverySearchPaths(inspection) {
       root?.pluginManifest,
       root?.metadataRoot,
     ])
+    .filter((rootPath) => typeof rootPath === "string");
+}
+
+function bindingDiscoveryTreePaths(inspection) {
+  // Control-plane roots and manifests are fixed lstat evidence. Only the
+  // ordinary searched roots participate in recursive state-aware tree walks;
+  // plugin cache roots can be large and must not turn a bounded CAS into a
+  // full ambient installation scan.
+  return (inspection?.searchedRoots ?? [])
+    .map(({ path: rootPath }) => rootPath)
     .filter((rootPath) => typeof rootPath === "string");
 }
 
@@ -748,6 +813,7 @@ async function fullFingerprintRevision({
       targetPath: sourceRoot,
       entrypoint,
       optionalAdditionalPaths: publicationTokenFor(execution)?.paths ?? [],
+      optionalTreePaths: publicationTokenFor(execution)?.stateTreePaths ?? [],
       ignoredPaths: stateEvidenceExcludedPaths(recoveryContext.statePath),
     });
     if (!graphFilesystem) return undefined;
@@ -868,6 +934,9 @@ function bindingEvidenceAdditionalPaths(
         : []),
     ];
   });
+  const controlPaths = new Set(
+    bindingDiscoveryControlPaths(inspection, replacementEvidence),
+  );
   return [
     ...(descriptor.source.kind === "customization"
       ? [path.join(targetPath, "customization.json")]
@@ -880,7 +949,8 @@ function bindingEvidenceAdditionalPaths(
       .filter(({ copy, identities }) =>
         (copy ?? identities?.[0]?.copy)?.classification === "customization")
       .map(({ path: candidatePath }) => path.join(candidatePath, "customization.json")),
-    ...bindingDiscoveryEvidencePaths(inspection, replacementEvidence),
+    ...bindingDiscoveryEvidencePaths(inspection, replacementEvidence)
+      .filter((candidatePath) => !controlPaths.has(path.resolve(candidatePath))),
     ...copyContentPaths,
     ...discoveryEvidencePaths(managerRecords),
   ].filter((candidatePath) =>
@@ -900,7 +970,7 @@ async function bindingEvidenceProvenancePaths(inspection, replacementEvidence) {
       details: { limit: MAX_PUBLICATION_EVIDENCE_PATHS },
     });
   };
-  if (uniqueRoots.length > MAX_PUBLICATION_EVIDENCE_PATHS) rejectUnboundedEvidence();
+  if (uniqueRoots.length > MAX_PUBLICATION_PROVENANCE_ROOTS) rejectUnboundedEvidence();
   const provenance = [];
   for (const candidate of uniqueRoots) {
     const paths = await sourceProvenancePaths(candidate);
@@ -1825,6 +1895,12 @@ async function inspectBindingSource({
       : provenanceSelection.decision.provenance,
     evidence: [...provenanceSelection.decision.evidence],
     searchedRoots: discovery.searchedRoots,
+    controlPaths: [
+      ...(discovery.pluginControlPaths ?? []),
+      ...(discovery.managerDiagnostics ?? [])
+        .map(({ source }) => source)
+        .filter((source) => typeof source === "string" && path.isAbsolute(source)),
+    ],
     selection,
     provenanceSelection,
     ...(bindingPluginIdentity
@@ -1839,6 +1915,7 @@ async function inspectBindingSource({
     bindingInspectionRevision({
       group,
       copy: sourceCopies[0] ?? group.copies[0],
+      controlPaths: inspection.controlPaths,
       sourceRoot,
       inspection,
     }),
@@ -2335,6 +2412,10 @@ async function revalidateRecoveredBinding({
         validation.inspection,
         validation.replacementEvidence,
       )),
+      ...bindingDiscoveryControlPaths(
+        validation.inspection,
+        validation.replacementEvidence,
+      ),
       ...bindingDiscoverySearchPaths(validation.inspection),
     ],
     treePaths: bindingEvidenceTreePaths(
@@ -2342,7 +2423,7 @@ async function revalidateRecoveredBinding({
       validation.replacementEvidence,
       validation.inspection,
     ),
-    optionalTreePaths: bindingDiscoverySearchPaths(validation.inspection),
+    optionalTreePaths: bindingDiscoveryTreePaths(validation.inspection),
     ignoredPaths: stateEvidenceExcludedPaths(statePath),
   });
   if (!filesystemRevision) return undefined;
@@ -2903,6 +2984,7 @@ async function bindCustomizationInternal({
         finalInspection,
         finalReplacementEvidence,
       )),
+      ...bindingDiscoveryControlPaths(finalInspection, finalReplacementEvidence),
       ...bindingDiscoverySearchPaths(finalInspection),
     ],
     treePaths: bindingEvidenceTreePaths(
@@ -2910,7 +2992,7 @@ async function bindCustomizationInternal({
       finalReplacementEvidence,
       finalInspection,
     ),
-    optionalTreePaths: bindingDiscoverySearchPaths(finalInspection),
+    optionalTreePaths: bindingDiscoveryTreePaths(finalInspection),
     ignoredPaths: stateEvidenceExcludedPaths(statePath),
   });
   if (!filesystemRevision) {
@@ -3044,6 +3126,7 @@ async function bindCustomizationInternal({
       // The complete token was enumerated before the lock.  Re-stat those
       // exact paths; do not rediscover or read descriptors/artifacts here.
       optionalAdditionalPaths: evidenceRevision.filesystem.entries.map(({ path: tokenPath }) => tokenPath),
+      optionalTreePaths: evidenceRevision.filesystem.stateTreePaths ?? [],
       ignoredPaths: stateEvidenceExcludedPaths(statePath),
     });
     if (!isDeepStrictEqual(currentFilesystemRevision, evidenceRevision.filesystem)) {
@@ -3335,6 +3418,8 @@ async function resolveBindingInternal({
               entrypoint: validatedForPublication.evidenceRevision?.entrypoint,
               optionalAdditionalPaths: validatedForPublication.evidenceRevision
                 ?.filesystem?.entries.map(({ path: tokenPath }) => tokenPath),
+              optionalTreePaths: validatedForPublication.evidenceRevision
+                ?.filesystem?.stateTreePaths ?? [],
               ignoredPaths: stateEvidenceExcludedPaths(statePath),
             });
             if (
@@ -3378,6 +3463,8 @@ async function resolveBindingInternal({
                 entrypoint: validatedForPublication.evidenceRevision?.entrypoint,
                 optionalAdditionalPaths: finalFullFingerprintRevision
                   ?.graphFilesystem?.entries.map(({ path: tokenPath }) => tokenPath) ?? [],
+                optionalTreePaths: finalFullFingerprintRevision
+                  ?.graphFilesystem?.stateTreePaths ?? [],
                 ignoredPaths: stateEvidenceExcludedPaths(statePath),
               });
               if (!isDeepStrictEqual(

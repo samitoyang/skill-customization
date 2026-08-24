@@ -402,6 +402,7 @@ async function readJsonObject(
     boundary,
   } = {},
 ) {
+  context.controlPaths?.add(path.resolve(file));
   if (boundary) {
     try {
       await lstat(file);
@@ -1370,6 +1371,7 @@ export async function discoverPluginSkillRoots({
       home,
       workspaceDirectories,
     }),
+    controlPaths: new Set(),
   };
   const roots = [];
   const diagnostics = [];
@@ -1424,5 +1426,6 @@ export async function discoverPluginSkillRoots({
   return {
     roots: normalizedRoots,
     diagnostics,
+    controlPaths: [...context.controlPaths].sort((left, right) => left.localeCompare(right, "en")),
   };
 }

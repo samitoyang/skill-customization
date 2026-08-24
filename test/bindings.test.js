@@ -373,6 +373,41 @@ test("publication CAS tracks bounded Git include glob directories and additions"
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
+test("publication CAS retains non-state discovery siblings under a shared state ancestor", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-state-ancestor-race-"));
+  const skills = path.join(root, "skills");
+  const source = path.join(skills, "review");
+  const statePath = path.join(skills, ".state", "bindings.json");
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  const release = await acquireStateLock(statePath);
+  let signalNow;
+  const nowReached = new Promise((resolve) => { signalNow = resolve; });
+  const pending = bindCustomization({
+    descriptor: descriptor(), sourcePath: source, context: "global", statePath,
+    roots: [{ path: skills, scope: "global", origin: "personal" }],
+    interactive: true, confirm: async () => true,
+    now: async () => {
+      const sibling = path.join(skills, "late");
+      await mkdir(sibling);
+      await writeFile(path.join(sibling, "SKILL.md"), "---\nname: late\n---\nsource\n");
+      signalNow();
+      return "2026-08-04T00:00:00.000Z";
+    },
+  });
+  const settled = pending.then(
+    (value) => ({ status: "fulfilled", value }),
+    (error) => ({ status: "rejected", error }),
+  );
+  let gateError;
+  try { await waitForDiscoveryGate(nowReached, "state ancestor race gate"); } catch (error) { gateError = error; } finally { await release(); }
+  const result = await settled;
+  if (gateError) throw gateError;
+  assert.equal(result.status, "rejected");
+  assert.equal(result.error.code, "BINDING_SOURCE_SELECTION_INVALID");
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+});
+
 test("publication ignores oversized Git include configs without blocking", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-git-include-size-"));
   const source = path.join(root, "skills", "review");

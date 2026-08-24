@@ -651,6 +651,7 @@ export async function discoverSkills({
   // An omitted roots option is the ambient mode; an explicit empty array is intentionally deterministic.
   let pluginRoots = [];
   let pluginDiagnostics = [];
+  let pluginControlPaths = [];
   if (!rootsAreExplicit && includePlugins !== false) {
     publishDiscoveryPerformanceMetric("plugin_discovery_calls");
     const plugins = await pluginDiscovery({
@@ -661,6 +662,7 @@ export async function discoverSkills({
     });
     pluginRoots = plugins.roots ?? [];
     pluginDiagnostics = plugins.diagnostics ?? [];
+    pluginControlPaths = plugins.controlPaths ?? [];
   }
   // Manager records and customPath are explicit evidence sources; roots controls ambient host/plugin roots.
   let ambientRootObservations = roots;
@@ -813,6 +815,7 @@ export async function discoverSkills({
     rootDiagnostics,
     managerDiagnostics,
     pluginDiagnostics,
+    pluginControlPaths,
     candidateDiagnostics,
     unresolvedManagerRecords: managerRecords.filter(({ path: managerPath }) => !managerPath),
   };
