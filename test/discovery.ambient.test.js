@@ -1569,6 +1569,7 @@ test("Codex personal marketplaces discover .codex-plugin custom skill directorie
 
   const copy = result.groups[0].copies[0];
   assert.equal(copy.path, path.join(plugin, "custom"));
+  assert.equal(copy.active, false);
   assert.deepEqual(copy.plugin, {
     host: "codex",
     marketplace: "personal",
@@ -1628,6 +1629,7 @@ test("Codex config.toml local marketplaces discover bounded external roots", asy
 
   const copy = result.groups[0].copies[0];
   assert.equal(copy.path, path.join(plugin, "custom"));
+  assert.equal(copy.active, false);
   assert.deepEqual(copy.plugin, {
     host: "codex",
     marketplace: "configured-marketplace",
@@ -1900,6 +1902,7 @@ test("Codex cache versions and synced or bundled marketplace copies remain audit
     cached.groups[0].copies.map(({ plugin }) => plugin.version),
     ["1.0.0", "2.0.0"],
   );
+  assert.deepEqual(cached.groups[0].copies.map(({ active }) => active), [false, false]);
   assert.equal(
     cached.pluginDiagnostics.some(({ code }) => code === "PLUGIN_ROOT_NOT_DIRECTORY"),
     false,
@@ -1907,6 +1910,8 @@ test("Codex cache versions and synced or bundled marketplace copies remain audit
 
   const synced = await discoverAmbientSkills({ input: "synced-review", ...options });
   assert.equal(synced.groups[0].copies[0].plugin.marketplace, "synced-marketplace");
+  assert.equal(synced.groups[0].copies[0].active, false);
+  assert.deepEqual(activeSkillInventory(synced), []);
   assert.deepEqual(synced.groups[0].provenance, [
     "repository:https://github.com/example/synced-plugin",
   ]);

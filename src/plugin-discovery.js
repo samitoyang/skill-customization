@@ -1403,7 +1403,6 @@ export const CODEX_HOST_ADAPTER = createCodexAdapter({
   diagnostic,
   discoverMarketplaceManifests,
   discoverVersionedPluginCache,
-  localPluginIdentity: pluginIdentity,
   pluginDirectories,
   readFile,
   safeDirectory,

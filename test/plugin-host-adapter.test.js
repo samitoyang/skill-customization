@@ -96,14 +96,11 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
     const installCalls = [];
     const readCalls = [];
     const diagnostics = [];
-    const localPluginIdentity = ({ host, marketplace, name }) =>
-      `local:plugin:${host}:${marketplace}:${name}`;
     const adapter = createCodexAdapter({
       addPluginInstall: async (options) => installCalls.push(options),
       diagnostic: (value) => value,
       discoverMarketplaceManifests: async (options) => marketplaceCalls.push(options),
       discoverVersionedPluginCache: async (options) => cacheCalls.push(options),
-      localPluginIdentity,
       pluginDirectories: async (target) => {
         if (target === pluginsRoot) {
           return [{
@@ -145,7 +142,14 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
     assert.equal(cacheCalls[0].host, "codex");
     assert.equal(cacheCalls[0].scope, "global");
     assert.equal(cacheCalls[0].manifestPolicy.files[0], ".codex-plugin/plugin.json");
-    assert.equal(cacheCalls[0].localPluginIdentity, localPluginIdentity);
+    assert.equal(
+      cacheCalls[0].localPluginIdentity({
+        host: "codex",
+        marketplace: "official",
+        name: "reviewer",
+      }),
+      "local:plugin:codex:official:reviewer",
+    );
     assert.equal(installCalls.length, 1);
     assert.deepEqual(installCalls[0], {
       installRoot: path.join(pluginsRoot, "direct"),
@@ -159,8 +163,16 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
       manifestPolicy: {
         files: [".codex-plugin/plugin.json", "plugin.json", "manifest.json", "package.json"],
       },
-      localPluginIdentity,
+      localPluginIdentity: installCalls[0].localPluginIdentity,
     });
+    assert.equal(
+      installCalls[0].localPluginIdentity({
+        host: "codex",
+        marketplace: "local",
+        name: "direct",
+      }),
+      "local:plugin:codex:local:direct",
+    );
     assert.deepEqual(
       marketplaceCalls.map(({ marketplaceName, scope, active }) => ({
         marketplaceName,
@@ -168,15 +180,16 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
         active,
       })),
       [
-        { marketplaceName: "personal", scope: "global", active: true },
-        { marketplaceName: undefined, scope: "global", active: true },
+        { marketplaceName: "personal", scope: "global", active: false },
+        { marketplaceName: undefined, scope: "global", active: false },
         { marketplaceName: "bundled", scope: "global", active: false },
-        { marketplaceName: undefined, scope: "workspace", active: true },
-        { marketplaceName: "team", scope: "global", active: true },
+        { marketplaceName: undefined, scope: "workspace", active: false },
+        { marketplaceName: "team", scope: "global", active: false },
       ],
     );
     assert.ok(marketplaceCalls.every(({ localPluginIdentity: identity }) =>
-      identity === localPluginIdentity));
+      identity({ host: "codex", marketplace: "team", name: "reviewer" })
+        === "local:plugin:codex:team:reviewer"));
     assert.ok(marketplaceCalls.every(({ manifestPolicy }) =>
       manifestPolicy.files[0] === ".codex-plugin/plugin.json"));
     assert.ok(diagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_CONFIGURATION"));

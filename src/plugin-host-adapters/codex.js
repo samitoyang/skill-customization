@@ -9,6 +9,18 @@ const CODEX_MANIFEST_POLICY = Object.freeze({
   files: [".codex-plugin/plugin.json", ...GENERIC_MANIFEST_FILES],
 });
 
+function safeIdentityPart(value, fallback = "local") {
+  return (stringValue(value) ?? fallback)
+    .replaceAll("%", "%25")
+    .replaceAll("/", "%2F")
+    .replaceAll("\\", "%5C")
+    .replaceAll(":", "%3A");
+}
+
+function codexPluginIdentity({ host, marketplace, name }) {
+  return `local:plugin:${safeIdentityPart(host)}:${safeIdentityPart(marketplace)}:${safeIdentityPart(name)}`;
+}
+
 function tomlQuotedValue(quote, value) {
   if (quote === "'") return value;
   return tomlBasicStringValue(value);
@@ -262,7 +274,6 @@ export function createCodexAdapter({
   diagnostic,
   discoverMarketplaceManifests,
   discoverVersionedPluginCache,
-  localPluginIdentity,
   pluginDirectories,
   readFile,
   safeDirectory,
@@ -348,7 +359,7 @@ export function createCodexAdapter({
           source: {},
           context,
           manifestPolicy: CODEX_MANIFEST_POLICY,
-          localPluginIdentity,
+          localPluginIdentity: codexPluginIdentity,
         });
       }
       const cacheRoot = path.join(safePluginsRoot, "cache");
@@ -366,7 +377,7 @@ export function createCodexAdapter({
           host: "codex",
           scope: "global",
           manifestPolicy: CODEX_MANIFEST_POLICY,
-          localPluginIdentity,
+          localPluginIdentity: codexPluginIdentity,
         });
       }
     }
@@ -377,9 +388,9 @@ export function createCodexAdapter({
       host: "codex",
       scope: "global",
       marketplaceName: "personal",
-      active: true,
+      active: false,
       manifestPolicy: CODEX_MANIFEST_POLICY,
-      localPluginIdentity,
+      localPluginIdentity: codexPluginIdentity,
     });
     const syncedMarketplaceRoot = path.join(codexHome, ".tmp", "plugins");
     await discoverMarketplaceManifests({
@@ -388,9 +399,9 @@ export function createCodexAdapter({
       context,
       host: "codex",
       scope: "global",
-      active: true,
+      active: false,
       manifestPolicy: CODEX_MANIFEST_POLICY,
-      localPluginIdentity,
+      localPluginIdentity: codexPluginIdentity,
     });
     const bundledMarketplacesRoot = path.join(codexHome, ".tmp", "bundled-marketplaces");
     for (const marketplace of await pluginDirectories(
@@ -407,7 +418,7 @@ export function createCodexAdapter({
         marketplaceName: marketplace.entry.name,
         active: false,
         manifestPolicy: CODEX_MANIFEST_POLICY,
-        localPluginIdentity,
+        localPluginIdentity: codexPluginIdentity,
       });
     }
     for (const workspace of context.workspaceDirectories) {
@@ -417,9 +428,9 @@ export function createCodexAdapter({
         context,
         host: "codex",
         scope: "workspace",
-        active: true,
+        active: false,
         manifestPolicy: CODEX_MANIFEST_POLICY,
-        localPluginIdentity,
+        localPluginIdentity: codexPluginIdentity,
       });
     }
     // Configured local marketplaces are explicit roots; only their declared plugin trees are searched.
@@ -450,9 +461,9 @@ export function createCodexAdapter({
         host: "codex",
         scope: "global",
         marketplaceName: declaration.marketplace,
-        active: true,
+        active: false,
         manifestPolicy: CODEX_MANIFEST_POLICY,
-        localPluginIdentity,
+        localPluginIdentity: codexPluginIdentity,
       });
     }
   }
