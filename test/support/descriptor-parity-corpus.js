@@ -1,12 +1,9 @@
-import { DESCRIPTOR_SCHEMA_GAPS } from "../../src/descriptor-invariants.js";
+import {
+  DESCRIPTOR_SCHEMA_GAPS,
+  freezeDescriptorValue,
+} from "../../src/descriptor-invariants.js";
 
 const fingerprint = (character) => `sha256:${character.repeat(64)}`;
-
-function freezeDeep(value) {
-  if (!value || typeof value !== "object") return value;
-  for (const child of Object.values(value)) freezeDeep(child);
-  return Object.freeze(value);
-}
 
 function repositoryDescriptor(overrides = {}) {
   return {
@@ -63,14 +60,14 @@ const fork = (materialization) => ({
   } : {}),
 });
 
-const caseOf = (name, descriptor, expected, gap) => freezeDeep({
+const caseOf = (name, descriptor, expected, gap) => freezeDescriptorValue({
   name,
   descriptor,
   expected,
   ...(gap ? { gap } : {}),
 });
 
-export const DESCRIPTOR_PARITY_CORPUS = freezeDeep([
+export const DESCRIPTOR_PARITY_CORPUS = freezeDescriptorValue([
   caseOf("repository-overlay-coexist", repositoryDescriptor({
     $schema: "https://skill-customization.dev/schema/customization-v1.json",
   }), { runtime: true, schema: true }),
@@ -95,6 +92,12 @@ export const DESCRIPTOR_PARITY_CORPUS = freezeDeep([
   caseOf("rejects-duplicate-dependency", repositoryDescriptor({ dependencies: ["lint-review", "lint-review"] }), { runtime: false, schema: false, diagnostic: "/dependencies/1" }),
   caseOf("rejects-machine-local-license", repositoryDescriptor({ license: "/Users/alice/license" }), { runtime: false, schema: false, diagnostic: "/license" }),
   caseOf("rejects-excluded-runtime-selector", repositoryDescriptor({ entrypoint: "provenance/run.md" }), { runtime: false, schema: false, diagnostic: "/entrypoint" }),
+  caseOf("rejects-customization-json-runtime-selector", repositoryDescriptor({ entrypoint: "customization.json" }), { runtime: false, schema: false, diagnostic: "/entrypoint" }),
+  caseOf("rejects-case-insensitive-customization-json-runtime-selector", repositoryDescriptor({ entrypoint: "CUSTOMIZATION.JSON" }), { runtime: false, schema: false, diagnostic: "/entrypoint" }),
+  caseOf("rejects-provenance-root-runtime-selector", repositoryDescriptor({ entrypoint: "provenance" }), { runtime: false, schema: false, diagnostic: "/entrypoint" }),
+  caseOf("rejects-git-metadata-runtime-selector", repositoryDescriptor({ entrypoint: "helpers/.git/run.md" }), { runtime: false, schema: false, diagnostic: "/entrypoint" }),
+  caseOf("rejects-hg-metadata-runtime-selector", repositoryDescriptor({ entrypoint: "helpers/.Hg/run.md" }), { runtime: false, schema: false, diagnostic: "/entrypoint" }),
+  caseOf("rejects-svn-metadata-runtime-selector", repositoryDescriptor({ entrypoint: "helpers/.SVN/run.md" }), { runtime: false, schema: false, diagnostic: "/entrypoint" }),
   caseOf("rejects-invalid-repository-source", repositoryDescriptor({
     source: { ...repositoryDescriptor().source, repository: "https://token@github.com/example/skills" },
   }), { runtime: false, schema: false, diagnostic: "/source/repository" }),

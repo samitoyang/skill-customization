@@ -2,6 +2,7 @@
  * @typedef {object} DescriptorObjectInvariant
  * @property {readonly string[]} allowed
  * @property {readonly string[]} required
+ * @property {readonly string[]} [additionalRequired]
  */
 
 /**
@@ -13,25 +14,58 @@
 /**
  * @typedef {object} DescriptorActivationRelationship
  * @property {"coexist" | "replace"} mode
- * @property {"different-from-source" | "same-as-source"} name
+ * @property {"different-from-source" | "same-as-source"} nameRule
  * @property {"forbidden" | "customization-first"} precedence
+ */
+
+/**
+ * @typedef {object} DescriptorForkRelationship
+ * @property {"fork"} descriptorType
+ * @property {"fork"} descriptorField
+ * @property {readonly string[]} provenanceFields
+ * @property {"customization"} sourceKind
+ * @property {"semantic-overlay"} sourceType
+ * @property {"materialization"} materializationField
+ * @property {{sourceFingerprintField: string, snapshotFingerprintField: string, materializationSourceField: string, materializationSnapshotField: string, sourceFingerprintPath: string, snapshotFingerprintPath: string}} materialization
  */
 
 /**
  * @typedef {object} DescriptorInvariantCatalog
  * @property {1} version
  * @property {{topLevel: DescriptorObjectInvariant, source: {common: DescriptorObjectInvariant, variants: {repository: DescriptorObjectInvariant, local: DescriptorObjectInvariant, customization: DescriptorObjectInvariant}}, review: DescriptorObjectInvariant, ownedPayload: DescriptorObjectInvariant, activation: DescriptorObjectInvariant, fork: DescriptorObjectInvariant, materialization: DescriptorObjectInvariant}} fields
- * @property {{schemaVersion: 1, customizationTypes: readonly string[], sourceKinds: readonly string[], activationModes: readonly string[], activationPrecedence: string}} values
- * @property {{skillName: DescriptorPatternInvariant, stableId: DescriptorPatternInvariant, fingerprint: DescriptorPatternInvariant, localIdentity: DescriptorPatternInvariant, repositoryUrl: DescriptorPatternInvariant, relativePath: DescriptorPatternInvariant, provenancePath: DescriptorPatternInvariant, nonBlank: DescriptorPatternInvariant, nonMachinePath: readonly string[]}} patterns
- * @property {{activation: {coexist: DescriptorActivationRelationship, replace: DescriptorActivationRelationship}, fork: {materialization: {descriptorType: string, sourceKind: string, sourceType: string, sourceFingerprintField: string, snapshotFingerprintField: string, materializationSourceField: string, materializationSnapshotField: string, sourceFingerprintPath: string, snapshotFingerprintPath: string}}}} relationships
+ * @property {{schemaVersion: 1, customizationTypes: readonly string[], sourceKinds: readonly string[], activationModes: readonly string[], activationPrecedence: string, dependenciesUnique: boolean}} values
+ * @property {{skillName: DescriptorPatternInvariant, stableId: DescriptorPatternInvariant, fingerprint: DescriptorPatternInvariant, localIdentity: DescriptorPatternInvariant, repositoryUrl: DescriptorPatternInvariant, relativePath: DescriptorPatternInvariant, provenancePath: DescriptorPatternInvariant, runtimePathExclusion: DescriptorPatternInvariant, nonBlank: DescriptorPatternInvariant, nonMachinePath: readonly string[]}} patterns
+ * @property {{activation: {coexist: DescriptorActivationRelationship, replace: DescriptorActivationRelationship}, fork: DescriptorForkRelationship}} relationships
  * @property {{schemaGaps: Readonly<Record<string, string>>}} runtimeOnly
  */
 
-function freezeDeep(value, seen = new Set()) {
+/**
+ * Freeze a descriptor-shaped value recursively while tolerating repeated
+ * references in the value graph.
+ *
+ * @template T
+ * @param {T} value
+ * @param {Set<object>} [seen]
+ * @returns {T}
+ */
+export function freezeDescriptorValue(value, seen = new Set()) {
   if (!value || typeof value !== "object" || seen.has(value)) return value;
   seen.add(value);
-  for (const child of Object.values(value)) freezeDeep(child, seen);
+  for (const child of Object.values(value)) freezeDescriptorValue(child, seen);
   return Object.freeze(value);
+}
+
+const sourceCommon = {
+  allowed: ["skill_name", "kind", "license", "effective_fingerprint"],
+  required: ["skill_name", "kind", "license", "effective_fingerprint"],
+};
+
+function sourceVariant(allowed, required) {
+  return {
+    allowed: [...sourceCommon.allowed, ...allowed],
+    required: [...sourceCommon.required, ...required],
+    additionalRequired: [...required],
+  };
 }
 
 const fields = {
@@ -66,65 +100,14 @@ const fields = {
     ],
   },
   source: {
-    common: {
-      allowed: ["skill_name", "kind", "license", "effective_fingerprint"],
-      required: ["skill_name", "kind", "license", "effective_fingerprint"],
-    },
+    common: sourceCommon,
     variants: {
-      repository: {
-        allowed: [
-          "skill_name",
-          "kind",
-          "license",
-          "effective_fingerprint",
-          "repository",
-          "upstream_path",
-          "review",
-        ],
-        required: [
-          "skill_name",
-          "kind",
-          "license",
-          "effective_fingerprint",
-          "repository",
-          "upstream_path",
-          "review",
-        ],
-      },
-      local: {
-        allowed: [
-          "skill_name",
-          "kind",
-          "license",
-          "effective_fingerprint",
-          "identity",
-        ],
-        required: [
-          "skill_name",
-          "kind",
-          "license",
-          "effective_fingerprint",
-          "identity",
-        ],
-      },
-      customization: {
-        allowed: [
-          "skill_name",
-          "kind",
-          "license",
-          "effective_fingerprint",
-          "id",
-          "type",
-        ],
-        required: [
-          "skill_name",
-          "kind",
-          "license",
-          "effective_fingerprint",
-          "id",
-          "type",
-        ],
-      },
+      repository: sourceVariant(
+        ["repository", "upstream_path", "review"],
+        ["repository", "upstream_path", "review"],
+      ),
+      local: sourceVariant(["identity"], ["identity"]),
+      customization: sourceVariant(["id", "type"], ["id", "type"]),
     },
   },
   review: {
@@ -176,6 +159,7 @@ const values = {
   sourceKinds: ["repository", "local", "customization"],
   activationModes: ["coexist", "replace"],
   activationPrecedence: "customization-first",
+  dependenciesUnique: true,
 };
 
 const patterns = {
@@ -201,6 +185,9 @@ const patterns = {
   provenancePath: {
     source: String.raw`^provenance/[^/]+(?:/[^/]+)*$`,
   },
+  runtimePathExclusion: {
+    source: String.raw`(?:^(?:[Cc][Uu][Ss][Tt][Oo][Mm][Ii][Zz][Aa][Tt][Ii][Oo][Nn]\.[Jj][Ss][Oo][Nn]|[Pp][Rr][Oo][Vv][Ee][Nn][Aa][Nn][Cc][Ee])(?:/|$)|(?:^|/)\.(?:[Gg][Ii][Tt]|[Hh][Gg]|[Ss][Vv][Nn])(?:/|$))`,
+  },
   nonBlank: {
     source: String.raw`\S`,
   },
@@ -217,20 +204,23 @@ const relationships = {
   activation: {
     coexist: {
       mode: "coexist",
-      name: "different-from-source",
+      nameRule: "different-from-source",
       precedence: "forbidden",
     },
     replace: {
       mode: "replace",
-      name: "same-as-source",
+      nameRule: "same-as-source",
       precedence: "customization-first",
     },
   },
   fork: {
+    descriptorType: "fork",
+    descriptorField: "fork",
+    provenanceFields: ["snapshot", "diff"],
+    sourceKind: "customization",
+    sourceType: "semantic-overlay",
+    materializationField: "materialization",
     materialization: {
-      descriptorType: "fork",
-      sourceKind: "customization",
-      sourceType: "semantic-overlay",
       sourceFingerprintField: "effective_fingerprint",
       snapshotFingerprintField: "snapshot_fingerprint",
       materializationSourceField: "source_effective_fingerprint",
@@ -253,7 +243,7 @@ const runtimeOnly = {
 };
 
 /** @type {DescriptorInvariantCatalog} */
-export const DESCRIPTOR_INVARIANTS = /** @type {DescriptorInvariantCatalog} */ (freezeDeep({
+export const DESCRIPTOR_INVARIANTS = /** @type {DescriptorInvariantCatalog} */ (freezeDescriptorValue({
   version: 1,
   fields,
   values,
