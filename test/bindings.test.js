@@ -153,6 +153,35 @@ test("first use fails closed noninteractively and confirmed writes are atomic", 
   assert.doesNotThrow(() => JSON.parse(persisted));
 });
 
+test("normal binding persistence rechecks the source fingerprint after confirmation", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-final-recheck-"));
+  const source = path.join(root, "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\ninitial\n");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+
+  const binding = await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots,
+    interactive: true,
+    confirm: async () => {
+      await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\ncurrent\n");
+      return true;
+    },
+  });
+
+  assert.equal(binding.source.fingerprint, await fingerprintPath(source));
+  assert.equal(
+    (await readBindingStore(statePath)).bindings[bindingKey(descriptor().id, "global")]
+      .source.fingerprint,
+    binding.source.fingerprint,
+  );
+});
+
 test("plugin cache recovery preserves concurrent binding changes and deletions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-continuity-"));
   const versionOne = path.join(root, "plugin", "1", "skills", "review");
@@ -1820,6 +1849,15 @@ test("binding validation rejects a repository binding after its reviewed source 
       descriptor: repositoryDescriptor,
       binding,
       roots,
+    }),
+    (error) => error.code === "BINDING_SOURCE_FINGERPRINT_MISMATCH",
+  );
+  await assert.rejects(
+    validateBinding({
+      descriptor: repositoryDescriptor,
+      binding,
+      roots,
+      enforceReviewedFingerprint: false,
     }),
     (error) => error.code === "BINDING_SOURCE_FINGERPRINT_MISMATCH",
   );

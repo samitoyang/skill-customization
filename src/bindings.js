@@ -173,6 +173,7 @@ export function createBindingOperation({
       discoveryOptions: _discoveryOptions,
       discover: _discover,
       runtime: _runtime,
+      enforceReviewedFingerprint: _enforceReviewedFingerprint,
       ...intent
     } = options;
     return {
@@ -856,6 +857,43 @@ function bindingSourcePolicyFor(kind) {
   return policy;
 }
 
+function bindingSourceFromInspection({
+  descriptor,
+  sourcePath,
+  targetPath,
+  scope,
+  inspection,
+  aliasPath,
+  confirmation,
+}) {
+  const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
+  const selection = inspection.selection;
+  return {
+    path: path.resolve(sourcePath),
+    target: path.resolve(targetPath),
+    ...(aliasPath ? { alias: aliasPath } : {}),
+    skillName: inspection.declaredName,
+    kind: descriptor.source.kind,
+    ...(sourcePolicy.bindingFields?.({ inspection }) ?? {}),
+    fingerprint: inspection.fingerprint,
+    provenance: inspection.provenance,
+    ...(inspection.pluginIdentity
+      ? { pluginIdentity: inspection.pluginIdentity }
+      : {}),
+    ...(inspection.pluginCache?.scope === scope
+      ? { pluginCache: inspection.pluginCache }
+      : {}),
+    ...(selection ? { selection } : {}),
+    confirmation: confirmation ?? (
+      selection
+        ? "provenance-confirmed"
+        : inspection.provenance.length === 0
+          ? "user-confirmed"
+          : "evidence-confirmed"
+    ),
+  };
+}
+
 async function recoverMissingPluginBinding({
   binding,
   recoveryContext,
@@ -1014,8 +1052,67 @@ async function recoverMissingPluginBinding({
     ...stableSource,
     path: path.resolve(copy.path),
     target: await realpath(copy.path),
+    provenance: [provenance],
   };
-  return { ...binding, source, updatedAt: new Date().toISOString() };
+  return {
+    binding: { ...binding, source, updatedAt: new Date().toISOString() },
+    group,
+    copy,
+  };
+}
+
+async function revalidateRecoveredBinding({
+  descriptor,
+  recovered,
+  group,
+  copy,
+  recoveryContext,
+}) {
+  const {
+    roots,
+    managerRecords,
+    customizationRoot,
+    discoverySnapshot,
+  } = recoveryContext;
+  const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
+  let validation;
+  try {
+    validation = await validateBindingInternal({
+      descriptor,
+      binding: recovered,
+      roots,
+      managerRecords,
+      customizationRoot,
+      discoverySnapshot,
+      // Resolution keeps source-drift decisions with Preflight/Reconciliation;
+      // this check still validates the candidate's current source state.
+      enforceReviewedFingerprint: false,
+    });
+    const effectiveFingerprint = await sourcePolicy.recoveryFingerprint({
+      recoveryContext,
+      group,
+      copy,
+    });
+    if (effectiveFingerprint !== descriptor.source.effective_fingerprint) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+
+  const source = bindingSourceFromInspection({
+    descriptor,
+    sourcePath: copy.path,
+    targetPath: validation.currentTarget,
+    scope: recovered.scope,
+    inspection: validation.inspection,
+    confirmation: recovered.source.confirmation,
+  });
+  return {
+    ...recovered,
+    source,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 async function assertReplacementActivation({
@@ -1135,7 +1232,6 @@ async function bindCustomizationInternal({
       requestedScope: await requestScope({ descriptor, context, sourcePath, inspection }),
     });
   }
-  const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
   await confirmOrFail(
     confirm,
     { descriptor, context, source: classified, inspection },
@@ -1159,38 +1255,6 @@ async function bindCustomizationInternal({
       "replacement activation requires explicit confirmation",
     );
   }
-  const timestamp = now();
-  const binding = {
-    customization: descriptor.id,
-    context,
-    scope: classified.scope,
-    origin: classified.origin,
-    activation: descriptor.activation,
-    source: {
-      path: path.resolve(sourcePath),
-      target: classified.targetPath,
-      ...(classified.aliasPath ? { alias: classified.aliasPath } : {}),
-      skillName: inspection.declaredName,
-      kind: descriptor.source.kind,
-      ...(sourcePolicy.bindingFields?.({ inspection }) ?? {}),
-      fingerprint: inspection.fingerprint,
-      provenance: inspection.provenance,
-      ...(inspection.pluginIdentity
-        ? { pluginIdentity: inspection.pluginIdentity }
-        : {}),
-      ...(inspection.pluginCache?.scope === classified.scope
-        ? { pluginCache: inspection.pluginCache }
-        : {}),
-      ...(inspection.selection ? { selection: inspection.selection } : {}),
-      confirmation: inspection.selection
-        ? "provenance-confirmed"
-        : inspection.provenance.length === 0
-          ? "user-confirmed"
-          : "evidence-confirmed",
-    },
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
   let persistedBinding;
   let created = false;
   await updateJsonAtomic(statePath, EMPTY_STORE, async (current) => {
@@ -1199,12 +1263,45 @@ async function bindCustomizationInternal({
       persistedBinding = current.bindings[key];
       return current;
     }
+    // Reinspect after confirmation and immediately before persistence so the
+    // record does not retain stale identity, target, or fingerprint data.
+    const finalInspection = await inspectBindingSource({
+      descriptor,
+      sourcePath,
+      roots,
+      managerRecords,
+      confirmedSelection: inspection.selection ?? confirmedSelection,
+      discoverySnapshot: operationDiscovery,
+    });
+    const finalClassified = await classifyBindingScope({
+      sourcePath,
+      roots: scopeRoots,
+      requestedScope: classified.scope,
+    });
+    const timestamp = now();
+    const binding = {
+      customization: descriptor.id,
+      context,
+      scope: finalClassified.scope,
+      origin: finalClassified.origin,
+      activation: descriptor.activation,
+      source: bindingSourceFromInspection({
+        descriptor,
+        sourcePath,
+        targetPath: finalClassified.targetPath,
+        scope: finalClassified.scope,
+        inspection: finalInspection,
+        aliasPath: finalClassified.aliasPath,
+      }),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
     current.bindings[key] = binding;
     persistedBinding = binding;
     created = true;
     return current;
   });
-  if (created) return binding;
+  if (created) return persistedBinding;
   return validateBindingInternal({
     descriptor,
     binding: persistedBinding,
@@ -1349,7 +1446,7 @@ async function resolveBindingInternal({
         customizationRoot,
         discoverySnapshot: operationDiscovery,
         // Preflight and Reconciliation own full-source drift decisions after
-        // they have the resolved path; Binding validation remains strict.
+        // they have the resolved path; public Binding validation remains strict.
         enforceReviewedFingerprint: false,
       })
     ).binding;
@@ -1370,15 +1467,26 @@ async function resolveBindingInternal({
         recoveryContext,
       });
       if (recovered) {
-        let persisted = false;
-        await updateJsonAtomic(statePath, EMPTY_STORE, async (store) => {
-          assertBindingStore(store, statePath);
-          if (!isDeepStrictEqual(store.bindings[key], binding)) return store;
-          store.bindings[key] = recovered;
-          persisted = true;
-          return store;
+        const revalidated = await revalidateRecoveredBinding({
+          descriptor,
+          recovered: recovered.binding,
+          group: recovered.group,
+          copy: recovered.copy,
+          recoveryContext,
         });
-        if (persisted) return recovered;
+        let persisted = false;
+        let persistedBinding;
+        if (revalidated) {
+          await updateJsonAtomic(statePath, EMPTY_STORE, async (store) => {
+            assertBindingStore(store, statePath);
+            if (!isDeepStrictEqual(store.bindings[key], binding)) return store;
+            store.bindings[key] = revalidated;
+            persistedBinding = revalidated;
+            persisted = true;
+            return store;
+          });
+        }
+        if (persisted) return persistedBinding;
         return resolveBindingInternal({
           descriptor,
           context,
@@ -1435,6 +1543,7 @@ function callerIntentOptions(options = {}) {
     discoveryOptions: _discoveryOptions,
     discover: _discover,
     runtime: _runtime,
+    enforceReviewedFingerprint: _enforceReviewedFingerprint,
     ...intent
   } = options;
   return intent;
