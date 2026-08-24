@@ -254,9 +254,51 @@ test("Gemini CLI adapter interface owns locations, validation, and activation po
 
     const directoryCalls = [];
     const installCalls = [];
+    const installOutcomes = [];
+    const manifestFixtures = new Map([
+      [globalExtension, {
+        status: "valid",
+        value: { name: "global-extension", version: "1.0.0" },
+        path: path.join(globalExtension, "gemini-extension.json"),
+      }],
+      [workspaceExtension, {
+        status: "valid",
+        value: { name: "wrong-name", version: "1.0.0" },
+        path: path.join(workspaceExtension, "gemini-extension.json"),
+      }],
+    ]);
     const adapter = createGeminiCliAdapter({
       addPluginInstall: async (options) => {
         installCalls.push(options);
+        const validation = await options.manifestValidation({
+          manifest: manifestFixtures.get(options.installRoot),
+          safeInstallRoot: options.installRoot,
+          initialMetadata: {
+            host: options.host,
+            marketplace: options.marketplace,
+            name: options.name,
+            root: options.installRoot,
+          },
+          context: options.context,
+        });
+        const included = validation?.include === true;
+        installOutcomes.push({
+          installRoot: options.installRoot,
+          included,
+          installationMetadata: validation?.installationMetadata,
+          diagnostics: options.context.diagnostics.slice(),
+        });
+        if (included) {
+          options.context.roots.push({
+            kind: "plugin",
+            path: options.installRoot,
+            owner: "plugin:gemini-cli",
+            scope: options.scope,
+            origin: "plugin",
+            host: options.host,
+          });
+        }
+        return included;
       },
       diagnostic: (value) => value,
       pluginDirectories: async (target) => {
@@ -269,9 +311,12 @@ test("Gemini CLI adapter interface owns locations, validation, and activation po
         }
         return [];
       },
-      readJsonObject: async (file) => file.endsWith(".gemini-extension-install.json")
-        ? { source: "https://github.com/example/extension", type: "git" }
-        : undefined,
+      readJsonObject: async (file) => {
+        if (!file.endsWith(".gemini-extension-install.json")) return undefined;
+        return file === path.join(globalExtension, ".gemini-extension-install.json")
+          ? { source: "https://github.com/example/extension", type: "git" }
+          : { source: "not-a-supported-source", type: "unsupported" };
+      },
       safeDirectory: async (target) => target,
     });
     const context = {
@@ -286,8 +331,9 @@ test("Gemini CLI adapter interface owns locations, validation, and activation po
     const result = await adapter.discover(context);
 
     assert.equal(context.host, "gemini-cli");
-    assert.equal(result.roots.length, 0);
-    assert.equal(result.diagnostics.length, 0);
+    assert.equal(result.roots.length, 1);
+    assert.equal(result.roots[0].path, globalExtension);
+    assert.equal(result.diagnostics.length, 2);
     assert.deepEqual(directoryCalls, [globalRoot, workspaceRoot]);
     assert.deepEqual(
       installCalls.map(({ installRoot, boundary, host, marketplace, scope, active }) => ({
@@ -317,31 +363,46 @@ test("Gemini CLI adapter interface owns locations, validation, and activation po
         },
       ],
     );
+    assert.deepEqual(
+      installOutcomes.map(({ installRoot, included, installationMetadata, diagnostics }) => ({
+        installRoot,
+        included,
+        installationMetadata,
+        diagnosticCodes: diagnostics.map(({ code }) => code),
+      })),
+      [
+        {
+          installRoot: globalExtension,
+          included: true,
+          installationMetadata: {
+            source: "https://github.com/example/extension",
+            type: "git",
+          },
+          diagnosticCodes: [],
+        },
+        {
+          installRoot: workspaceExtension,
+          included: false,
+          installationMetadata: undefined,
+          diagnosticCodes: [
+            "INVALID_PLUGIN_METADATA",
+            "INVALID_PLUGIN_INSTALL_METADATA",
+          ],
+        },
+      ],
+    );
     assert.deepEqual(installCalls[0].manifestPolicy, {
       files: ["gemini-extension.json"],
       description: "Gemini extension metadata",
-      skipInvalidExtension: true,
-    });
-
-    const invalidContext = { ...context, diagnostics: [] };
-    const invalid = await installCalls[0].manifestValidation({
-      manifest: {
-        status: "valid",
-        value: { name: "wrong-name", version: "1.0.0" },
-        path: path.join(globalExtension, "gemini-extension.json"),
-      },
-      safeInstallRoot: globalExtension,
-      initialMetadata: { host: "gemini-cli", name: "global-extension" },
-      context: invalidContext,
-    });
-    assert.equal(invalid.invalid, true);
-    assert.deepEqual(invalid.installationMetadata, {
-      source: "https://github.com/example/extension",
-      type: "git",
     });
     assert.equal(
-      invalidContext.diagnostics.some(({ message }) =>
+      result.diagnostics.some(({ message }) =>
         message.includes("must match its extension directory")),
+      true,
+    );
+    assert.equal(
+      result.diagnostics.some(({ message }) =>
+        message.includes("invalid Gemini extension installation metadata")),
       true,
     );
   } finally {

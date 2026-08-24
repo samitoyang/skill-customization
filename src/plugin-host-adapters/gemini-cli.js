@@ -6,7 +6,6 @@ import { stringValue } from "./metadata.js";
 const GEMINI_MANIFEST_POLICY = Object.freeze({
   files: Object.freeze(["gemini-extension.json"]),
   description: "Gemini extension metadata",
-  skipInvalidExtension: true,
 });
 const GEMINI_INSTALL_METADATA_FILE = ".gemini-extension-install.json";
 const GEMINI_REQUIRED_MANIFEST_FIELDS = Object.freeze(["name", "version"]);
@@ -26,9 +25,9 @@ function geminiInstallationValidation({ readJsonObject, diagnostic }) {
     initialMetadata,
     context,
   }) {
-    let invalid = manifest.status === "invalid";
+    let included = manifest.status !== "invalid";
     if (manifest.status === "missing") {
-      invalid = true;
+      included = false;
       context.diagnostics.push(
         diagnostic({
           host: "gemini-cli",
@@ -41,7 +40,7 @@ function geminiInstallationValidation({ readJsonObject, diagnostic }) {
     } else if (manifest.status === "valid") {
       for (const field of GEMINI_REQUIRED_MANIFEST_FIELDS) {
         if (stringValue(manifest.value[field])) continue;
-        invalid = true;
+        included = false;
         context.diagnostics.push(
           diagnostic({
             host: "gemini-cli",
@@ -56,7 +55,7 @@ function geminiInstallationValidation({ readJsonObject, diagnostic }) {
         stringValue(manifest.value.name)
         && stringValue(manifest.value.name) !== path.basename(safeInstallRoot)
       ) {
-        invalid = true;
+        included = false;
         context.diagnostics.push(
           diagnostic({
             host: "gemini-cli",
@@ -102,7 +101,7 @@ function geminiInstallationValidation({ readJsonObject, diagnostic }) {
       installationMetadata = undefined;
     }
     return {
-      invalid,
+      include: included,
       ...(installationMetadata ? { installationMetadata } : {}),
     };
   };

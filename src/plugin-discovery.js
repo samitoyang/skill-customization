@@ -608,6 +608,7 @@ async function addPluginInstall({
     );
   }
   let installationMetadata;
+  let includeInstallation = true;
   if (manifestValidation) {
     const validation = await manifestValidation({
       manifest,
@@ -615,7 +616,7 @@ async function addPluginInstall({
       initialMetadata,
       context,
     });
-    invalidManifest ||= validation?.invalid === true;
+    includeInstallation = validation?.include ?? true;
     installationMetadata = validation?.installationMetadata;
   }
   // Local/link sources identify an external origin; preserve that evidence without traversing or writing it.
@@ -666,10 +667,10 @@ async function addPluginInstall({
     );
   }
   if (
-    skipInvalidExtension
-    && invalidManifest
+    !includeInstallation
+    || (skipInvalidExtension && invalidManifest)
   ) {
-    // Hosts that reject invalid plugin metadata retain diagnostics without exposing its skills.
+    // Host validation can retain diagnostics without exposing an installation's skills.
     return false;
   }
   const hasDeclaredSkillDirectory =

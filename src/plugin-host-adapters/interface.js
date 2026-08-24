@@ -83,7 +83,7 @@
  * @property {string} [defaultSkillDirectory]
  * @property {boolean} [includeDefaultSkillDirectory]
  * @property {Record<string, unknown>} [manifestPolicy]
- * @property {(options: {manifest: {status: "missing"|"invalid"|"valid", value?: Record<string, unknown>, path?: string}, safeInstallRoot: string, initialMetadata: PluginHostMetadata, context: PluginHostDiscoveryContext}) => Promise<{invalid?: boolean, installationMetadata?: Record<string, unknown>}>} [manifestValidation]
+ * @property {(options: {manifest: {status: "missing"|"invalid"|"valid", value?: Record<string, unknown>, path?: string}, safeInstallRoot: string, initialMetadata: PluginHostMetadata, context: PluginHostDiscoveryContext}) => Promise<PluginHostManifestValidationResult>} [manifestValidation]
  * @property {(metadata: Record<string, unknown>) => string} [localPluginIdentity]
  */
 
@@ -115,6 +115,12 @@
  */
 
 /** @typedef {Record<string, unknown>} PluginHostMetadata */
+
+/**
+ * @typedef {object} PluginHostManifestValidationResult
+ * @property {boolean} include Whether the installation should be included.
+ * @property {Record<string, unknown>} [installationMetadata]
+ */
 
 /**
  * @typedef {object} PluginHostAdapterToolkit
@@ -150,9 +156,12 @@
  */
 
 /**
- * @typedef {PluginHostAdapterToolkit & {
- *   readJsonObject: (file: string, context: PluginHostDiscoveryContext, options?: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>,
- * }} GeminiCliAdapterToolkit
+ * @typedef {object} GeminiCliAdapterToolkit
+ * @property {(options: PluginHostInstallOptions) => Promise<boolean>} addPluginInstall
+ * @property {(options: PluginHostDiagnosticInput) => PluginHostDiagnostic} diagnostic
+ * @property {(root: string, context: PluginHostDiscoveryContext, metadata: PluginHostMetadata, filter?: (entry: {name: string}) => boolean) => Promise<readonly PluginHostDirectoryEntry[]>} pluginDirectories
+ * @property {(file: string, context: PluginHostDiscoveryContext, options?: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>} readJsonObject
+ * @property {(target: string, boundary: string, context: PluginHostDiscoveryContext, metadata: PluginHostMetadata, options?: {declared?: boolean}) => Promise<string | undefined>} safeDirectory
  */
 
 /**
