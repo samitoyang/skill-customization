@@ -11,6 +11,7 @@ import {
   payloadFingerprint,
 } from "./fingerprint.js";
 import { createBindingExecutionAdapter } from "./internal/binding-execution-adapter.js";
+import { attachPublicationToken, publicationTokenFor } from "./internal/publication-token.js";
 import { reconcileCustomization } from "./reconcile.js";
 
 export const MAX_CUSTOMIZATION_DEPTH = 32;
@@ -60,15 +61,8 @@ function publicationPaths(...values) {
 // Publication evidence is an internal hand-off between Preflight and Binding
 // recovery.  Keep it off the result interface: callers receive an execution
 // plan, not the implementation details of the CAS that made it safe.
-function withPublicationToken(result, { paths = [], bindings = [] } = {}) {
-  Object.defineProperty(result, "publicationToken", {
-    value: Object.freeze({
-      paths: Object.freeze(publicationPaths(paths)),
-      bindings: Object.freeze(bindings.map(({ key, binding }) => Object.freeze({ key, binding }))),
-    }),
-    enumerable: false,
-  });
-  return result;
+function withPublicationToken(result, token) {
+  return attachPublicationToken(result, token);
 }
 
 function bindingPublicationPaths(binding) {
@@ -400,11 +394,11 @@ async function visit({
     paths: publicationPaths(
       root,
       bindingPublicationPaths(binding),
-      sourceResult.publicationToken?.paths ?? [],
+      publicationTokenFor(sourceResult)?.paths ?? [],
     ),
     bindings: [
       { key: bindings.bindingKey(descriptor.id, context), binding },
-      ...(sourceResult.publicationToken?.bindings ?? []),
+      ...(publicationTokenFor(sourceResult)?.bindings ?? []),
     ],
   });
 }

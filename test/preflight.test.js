@@ -211,6 +211,8 @@ test("preflight flattens recursive overlays from base workflow through inner and
   );
   assert.equal(result.maintenanceHandler, null);
   assert.equal(Object.hasOwn(result, "publicationPaths"), false);
+  assert.equal(Object.hasOwn(result, "publicationToken"), false);
+  assert.equal(result.publicationToken, undefined);
   assert.equal(JSON.stringify(result).includes("publicationToken"), false);
 });
 
