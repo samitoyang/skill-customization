@@ -1,5 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import {
+  lstat as fsLstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath as fsRealpath,
+  rm,
+  stat as fsStat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +20,7 @@ import { createCodexAdapter } from "../src/plugin-host-adapters/codex.js";
 import { createCursorAdapter } from "../src/plugin-host-adapters/cursor.js";
 import { createGeminiCliAdapter } from "../src/plugin-host-adapters/gemini-cli.js";
 import { pluginHostResult } from "../src/plugin-host-adapters/interface.js";
+import { isPathContained } from "../src/paths.js";
 
 test("Claude Code adapter interface uses injected local filesystem helpers", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-code-adapter-interface-"));
@@ -411,7 +423,7 @@ test("Gemini CLI adapter interface owns locations, validation, and activation po
   }
 });
 
-test("Cursor adapter interface owns bounded locations, marketplace policy, and fallback", async () => {
+test("Cursor adapter interface uses isolated filesystem fixtures and normalized observations", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cursor-adapter-interface-"));
   try {
     const home = path.join(root, "home");
@@ -419,44 +431,527 @@ test("Cursor adapter interface owns bounded locations, marketplace policy, and f
     const cursorHome = path.join(home, ".cursor");
     const globalRoot = path.join(cursorHome, "plugins", "local");
     const workspaceRoot = path.join(cwd, ".cursor", "plugins", "local");
-    const globalPlugin = path.join(globalRoot, "global-plugin");
-    const workspacePlugin = path.join(workspaceRoot, "workspace-plugin");
-    const marketplaceFile = path.join(globalRoot, ".cursor-plugin", "marketplace.json");
-    await mkdir(cwd, { recursive: true });
+    const marketplaceRoot = path.join(globalRoot, "team-marketplace");
+    const marketplaceFile = path.join(
+      marketplaceRoot,
+      ".cursor-plugin",
+      "marketplace.json",
+    );
+    const marketplacePlugin = path.join(
+      marketplaceRoot,
+      "plugins",
+      "marketed-plugin",
+    );
+    const marketplacePluginManifest = path.join(
+      marketplacePlugin,
+      ".cursor-plugin",
+      "plugin.json",
+    );
+    const marketplaceSkill = path.join(
+      marketplacePlugin,
+      "custom-skills",
+      "cursor-market-review",
+      "SKILL.md",
+    );
+    const invalidPlugin = path.join(workspaceRoot, "invalid-plugin");
+    const invalidPluginManifest = path.join(
+      invalidPlugin,
+      ".cursor-plugin",
+      "plugin.json",
+    );
+    const escapedPlugin = path.join(cwd, "outside-plugin");
+    const escapedPluginLink = path.join(workspaceRoot, "escaped-plugin");
+
+    const writeJson = async (file, value) => {
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, JSON.stringify(value));
+    };
+    const writeSkill = async (file, name) => {
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(
+        file,
+        `---\nname: ${name}\ndescription: Fixture\n---\nUse this skill.\n`,
+      );
+    };
+
+    await Promise.all([
+      mkdir(globalRoot, { recursive: true }),
+      mkdir(workspaceRoot, { recursive: true }),
+    ]);
+    await writeJson(marketplaceFile, {
+      name: "team-marketplace",
+      owner: { name: "fixture" },
+      metadata: { pluginRoot: "plugins" },
+      plugins: [{ name: "marketed-plugin", source: "marketed-plugin" }],
+    });
+    await writeJson(marketplacePluginManifest, {
+      name: "marketed-plugin",
+      version: "1.0.0",
+      skills: "custom-skills",
+    });
+    await writeSkill(marketplaceSkill, "cursor-market-review");
+    await writeJson(invalidPluginManifest, {
+      name: "Invalid Plugin",
+      skills: "skills",
+    });
+    await writeSkill(
+      path.join(invalidPlugin, "skills", "ignored-review", "SKILL.md"),
+      "ignored-review",
+    );
+    await writeJson(
+      path.join(escapedPlugin, ".cursor-plugin", "plugin.json"),
+      { name: "escaped-plugin" },
+    );
+    await writeSkill(
+      path.join(escapedPlugin, "skills", "escaped-review", "SKILL.md"),
+      "escaped-review",
+    );
+    await symlink(escapedPlugin, escapedPluginLink, "dir");
 
     const directoryCalls = [];
     const installCalls = [];
     const marketplaceCalls = [];
-    const lstatCalls = [];
-    const adapter = createCursorAdapter({
-      addPluginInstall: async (options) => installCalls.push(options),
-      canonicalContained: async () => true,
-      diagnostic: (value) => value,
-      discoverMarketplaceManifests: async (options) => {
-        marketplaceCalls.push(options);
+    const readFiles = [];
+    const diagnostic = ({ host, path: file, code, message, metadata }) => ({
+      kind: "plugin",
+      host,
+      path: path.resolve(file),
+      code,
+      message,
+      ...(metadata ? { plugin: structuredClone(metadata) } : {}),
+    });
+    const pluginIdentity = ({ host, marketplace, name }) =>
+      `local:plugin:${host}:${marketplace}:${name}`;
+    const canonicalContained = async (candidate, boundary) => {
+      try {
+        const [canonicalCandidate, canonicalBoundary] = await Promise.all([
+          fsRealpath(candidate),
+          fsRealpath(boundary),
+        ]);
+        return isPathContained(canonicalBoundary, canonicalCandidate);
+      } catch {
         return false;
-      },
-      lstat: async (file) => {
-        lstatCalls.push(file);
-        if (file === marketplaceFile) return { isFile: () => true };
-        const error = new Error("missing");
-        error.code = "ENOENT";
-        throw error;
-      },
-      pluginDirectories: async (target) => {
-        directoryCalls.push(target);
-        if (target === globalRoot) {
-          return [{ entry: { name: "global-plugin" }, path: globalPlugin }];
+      }
+    };
+    const safeDirectory = async (
+      target,
+      boundary,
+      context,
+      metadata,
+      { declared = false } = {},
+    ) => {
+      const resolvedTarget = path.resolve(target);
+      const resolvedBoundary = path.resolve(boundary);
+      if (!isPathContained(resolvedBoundary, resolvedTarget)) {
+        context.diagnostics.push(diagnostic({
+          host: context.host,
+          path: resolvedTarget,
+          code: "PLUGIN_ROOT_ESCAPE",
+          message: `plugin path escapes its declared root: ${resolvedTarget}`,
+          metadata,
+        }));
+        return undefined;
+      }
+      let info;
+      try {
+        info = await fsLstat(resolvedTarget);
+      } catch (error) {
+        if (error.code === "ENOENT" && !declared) return undefined;
+        context.diagnostics.push(diagnostic({
+          host: context.host,
+          path: resolvedTarget,
+          code: error.code === "ENOENT" ? "PLUGIN_ROOT_MISSING" : "PLUGIN_ROOT_UNREADABLE",
+          message: `cannot inspect plugin path ${resolvedTarget}: ${error.message}`,
+          metadata,
+        }));
+        return undefined;
+      }
+      if (!info.isDirectory() && !info.isSymbolicLink()) {
+        context.diagnostics.push(diagnostic({
+          host: context.host,
+          path: resolvedTarget,
+          code: "PLUGIN_ROOT_NOT_DIRECTORY",
+          message: `plugin skill root is not a directory: ${resolvedTarget}`,
+          metadata,
+        }));
+        return undefined;
+      }
+      if (!(await canonicalContained(resolvedTarget, resolvedBoundary))) {
+        context.diagnostics.push(diagnostic({
+          host: context.host,
+          path: resolvedTarget,
+          code: "PLUGIN_ROOT_ESCAPE",
+          message: `plugin path resolves outside its declared root: ${resolvedTarget}`,
+          metadata,
+        }));
+        return undefined;
+      }
+      if (info.isSymbolicLink() && !(await fsStat(resolvedTarget)).isDirectory()) {
+        context.diagnostics.push(diagnostic({
+          host: context.host,
+          path: resolvedTarget,
+          code: "PLUGIN_ROOT_NOT_DIRECTORY",
+          message: `plugin skill root is not a directory: ${resolvedTarget}`,
+          metadata,
+        }));
+        return undefined;
+      }
+      return resolvedTarget;
+    };
+    const readJsonObject = async (
+      file,
+      context,
+      {
+        host = context.host,
+        metadata,
+        description = "plugin metadata",
+        boundary,
+      } = {},
+    ) => {
+      if (boundary) {
+        try {
+          await fsLstat(file);
+        } catch (error) {
+          if (error.code === "ENOENT") return undefined;
+          context.diagnostics.push(diagnostic({
+            host,
+            path: file,
+            code: "PLUGIN_METADATA_UNREADABLE",
+            message: `cannot inspect ${description} ${file}: ${error.message}`,
+            metadata,
+          }));
+          return undefined;
         }
-        if (target === workspaceRoot) {
-          return [{ entry: { name: "workspace-plugin" }, path: workspacePlugin }];
+        if (!(await canonicalContained(file, boundary))) {
+          context.diagnostics.push(diagnostic({
+            host,
+            path: file,
+            code: "PLUGIN_METADATA_ESCAPE",
+            message: `${description} resolves outside its extension root: ${file}`,
+            metadata,
+          }));
+          return undefined;
         }
+      }
+      let contents;
+      try {
+        contents = await readFile(file, "utf8");
+        readFiles.push(file);
+      } catch (error) {
+        if (error.code === "ENOENT") return undefined;
+        context.diagnostics.push(diagnostic({
+          host,
+          path: file,
+          code: "PLUGIN_METADATA_UNREADABLE",
+          message: `cannot read ${description} ${file}: ${error.message}`,
+          metadata,
+        }));
+        return undefined;
+      }
+      try {
+        const value = JSON.parse(contents);
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          throw new TypeError("metadata must be a JSON object");
+        }
+        return value;
+      } catch (error) {
+        context.diagnostics.push(diagnostic({
+          host,
+          path: file,
+          code: "MALFORMED_PLUGIN_METADATA",
+          message: `malformed ${description} ${file}: ${error.message}`,
+          metadata,
+        }));
+        return undefined;
+      }
+    };
+    const pluginDirectories = async (target, context, metadata) => {
+      directoryCalls.push(target);
+      let entries;
+      try {
+        entries = await readdir(target, { withFileTypes: true });
+      } catch (error) {
+        if (error.code === "ENOENT") return [];
+        context.diagnostics.push(diagnostic({
+          host: context.host,
+          path: target,
+          code: "PLUGIN_ROOT_UNREADABLE",
+          message: `cannot read documented plugin root ${target}: ${error.message}`,
+          metadata,
+        }));
         return [];
-      },
-      pluginIdentity: ({ host, marketplace, name }) =>
-        `local:plugin:${host}:${marketplace}:${name}`,
-      realpath: async (target) => target,
-      safeDirectory: async (target) => target,
+      }
+      const result = [];
+      for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+        const candidate = await safeDirectory(
+          path.join(target, entry.name),
+          target,
+          context,
+          metadata,
+        );
+        if (candidate) result.push({ entry, path: candidate });
+      }
+      return result;
+    };
+    const readManifest = async (installRoot, context, manifestPolicy) => {
+      for (const relative of manifestPolicy.files) {
+        const file = path.join(installRoot, relative);
+        try {
+          await fsLstat(file);
+        } catch (error) {
+          if (error.code === "ENOENT") continue;
+        }
+        const value = await readJsonObject(file, context, {
+          host: context.host,
+          description: manifestPolicy.description,
+          boundary: installRoot,
+        });
+        if (value) return { status: "valid", value, path: file };
+        return { status: "invalid", path: file };
+      }
+      return { status: "missing" };
+    };
+    const addPluginInstall = async (options) => {
+      installCalls.push(options);
+      const manifestPolicy = options.manifestPolicy ?? {};
+      const initialMetadata = {
+        host: options.host,
+        marketplace: options.marketplace,
+        name: options.name,
+        root: path.resolve(options.installRoot),
+      };
+      const safeInstallRoot = await safeDirectory(
+        options.installRoot,
+        options.boundary,
+        options.context,
+        initialMetadata,
+      );
+      if (!safeInstallRoot) return false;
+      const manifest = await readManifest(
+        safeInstallRoot,
+        options.context,
+        manifestPolicy,
+      );
+      let invalidManifest = manifest.status === "invalid";
+      const manifestValue = manifest.status === "valid" ? manifest.value : undefined;
+      if (manifest.status === "missing" && manifestPolicy.requiredFields?.length > 0) {
+        invalidManifest = true;
+        options.context.diagnostics.push(diagnostic({
+          host: options.host,
+          path: safeInstallRoot,
+          code: "MISSING_PLUGIN_METADATA",
+          message: `missing ${manifestPolicy.description} in ${safeInstallRoot}`,
+          metadata: initialMetadata,
+        }));
+      }
+      for (const field of manifestPolicy.requiredFields ?? []) {
+        if (manifestValue && typeof manifestValue[field] === "string" && manifestValue[field].trim()) {
+          continue;
+        }
+        if (!manifestValue) break;
+        invalidManifest = true;
+        options.context.diagnostics.push(diagnostic({
+          host: options.host,
+          path: manifest.path,
+          code: "INVALID_PLUGIN_METADATA",
+          message: `${manifestPolicy.description} is missing a valid ${field}: ${manifest.path}`,
+          metadata: initialMetadata,
+        }));
+      }
+      if (
+        manifestValue
+        && manifestPolicy.manifestNamePattern
+        && typeof manifestValue.name === "string"
+        && !manifestPolicy.manifestNamePattern.test(manifestValue.name)
+      ) {
+        invalidManifest = true;
+        options.context.diagnostics.push(diagnostic({
+          host: options.host,
+          path: manifest.path,
+          code: "INVALID_PLUGIN_METADATA",
+          message: `${manifestPolicy.description} has an invalid plugin name: ${manifest.path}`,
+          metadata: initialMetadata,
+        }));
+      }
+      if (manifestPolicy.skipInvalidExtension && invalidManifest) return false;
+
+      const metadata = {
+        ...initialMetadata,
+        ...(manifestValue?.name ? { name: manifestValue.name } : {}),
+        ...(manifestValue?.version ? { version: manifestValue.version } : {}),
+        root: safeInstallRoot,
+        ...(manifest.path ? { manifestPath: manifest.path } : {}),
+      };
+      const declaredSkillDirectory = manifestValue?.skills;
+      const directories = declaredSkillDirectory === undefined
+        ? ["skills"]
+        : typeof declaredSkillDirectory === "string"
+          ? [declaredSkillDirectory]
+          : Array.isArray(declaredSkillDirectory)
+            ? declaredSkillDirectory
+            : [];
+      let addedRoot = false;
+      for (const relativeDirectory of directories) {
+        if (typeof relativeDirectory !== "string" || !relativeDirectory.trim()) continue;
+        const skillRoot = await safeDirectory(
+          path.isAbsolute(relativeDirectory)
+            ? relativeDirectory
+            : path.resolve(safeInstallRoot, relativeDirectory),
+          safeInstallRoot,
+          options.context,
+          metadata,
+          { declared: relativeDirectory !== "skills" },
+        );
+        if (!skillRoot) continue;
+        const identity = options.localPluginIdentity(metadata);
+        options.context.roots.push({
+          kind: "plugin",
+          path: skillRoot,
+          owner: "plugin:cursor",
+          owners: ["plugin:cursor"],
+          scope: options.scope,
+          origin: "plugin",
+          host: "cursor",
+          plugin: {
+            host: metadata.host,
+            marketplace: metadata.marketplace,
+            name: metadata.name,
+            ...(metadata.version ? { version: metadata.version } : {}),
+          },
+          pluginMetadata: metadata,
+          pluginIdentity: identity,
+          pluginEvidence: [{
+            kind: "plugin",
+            host: metadata.host,
+            plugin: metadata.name,
+            marketplace: metadata.marketplace,
+            ...(metadata.version ? { version: metadata.version } : {}),
+            identity,
+            provenance: {
+              kind: "plugin",
+              host: metadata.host,
+              plugin: metadata.name,
+              marketplace: metadata.marketplace,
+              ...(metadata.version ? { version: metadata.version } : {}),
+            },
+          }],
+          pluginRoot: safeInstallRoot,
+          ...(manifest.path ? { pluginManifest: manifest.path } : {}),
+          includeRootSkill: relativeDirectory !== "skills"
+            || manifestPolicy.includeDefaultSkillRoot !== false,
+        });
+        addedRoot = true;
+      }
+      return addedRoot;
+    };
+    const discoverMarketplaceManifests = async (options) => {
+      marketplaceCalls.push(options);
+      const safeBase = await safeDirectory(
+        options.base,
+        options.boundary,
+        options.context,
+        { host: options.host, source: "marketplace" },
+      );
+      if (!safeBase) return false;
+      let file;
+      let manifest;
+      for (const relative of options.manifestFiles) {
+        const candidate = path.join(safeBase, relative);
+        try {
+          await fsLstat(candidate);
+        } catch (error) {
+          if (error.code === "ENOENT") continue;
+        }
+        manifest = await readJsonObject(candidate, options.context, {
+          host: options.host,
+          description: "marketplace metadata",
+          boundary: safeBase,
+        });
+        if (!manifest) return false;
+        file = candidate;
+        break;
+      }
+      if (!file) return false;
+      const sourceBase = options.marketplaceRootDirectories.includes(path.basename(path.dirname(file)))
+        ? path.dirname(path.dirname(file))
+        : safeBase;
+      const marketplace = manifest.name ?? options.marketplaceName ?? path.basename(safeBase);
+      const validation = await options.marketplacePolicy.validate({
+        manifest,
+        file,
+        safeBase,
+        sourceBase,
+        context: options.context,
+        host: options.host,
+        marketplace,
+      });
+      if (!validation?.valid) return false;
+      const declaredPluginRoot = validation.pluginRoot
+        ? await safeDirectory(
+            path.resolve(sourceBase, validation.pluginRoot),
+            sourceBase,
+            options.context,
+            { host: options.host, marketplace, source: "marketplace" },
+            { declared: true },
+          )
+        : undefined;
+      if (validation.pluginRoot && !declaredPluginRoot) return false;
+      let declaredPlugin = false;
+      for (const entry of validation.entries) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+        if (
+          options.marketplacePolicy.validateEntry
+          && !(await options.marketplacePolicy.validateEntry({
+            entry,
+            file,
+            context: options.context,
+            marketplace,
+          }))
+        ) continue;
+        const configuredPath = entry.path
+          ?? entry.directory
+          ?? entry.root
+          ?? entry.installPath
+          ?? (typeof entry.source === "string" ? entry.source : undefined);
+        if (typeof configuredPath !== "string" || !configuredPath.trim()) continue;
+        const boundary = declaredPluginRoot ?? sourceBase;
+        const installRoot = path.resolve(boundary, configuredPath);
+        declaredPlugin = true;
+        await options.onDeclaredPlugin?.({
+          location: { installRoot, boundary },
+          entry,
+          file,
+          context: options.context,
+        });
+        await addPluginInstall({
+          installRoot,
+          boundary,
+          host: options.host,
+          marketplace,
+          name: entry.name,
+          version: entry.version,
+          scope: options.scope,
+          source: entry,
+          declaration: { ...entry, sourceType: "marketplace", marketplace },
+          context: options.context,
+          active: options.active,
+          manifestPolicy: options.manifestPolicy,
+          localPluginIdentity: options.localPluginIdentity,
+        });
+      }
+      return declaredPlugin;
+    };
+    const adapter = createCursorAdapter({
+      addPluginInstall,
+      canonicalContained,
+      diagnostic,
+      discoverMarketplaceManifests,
+      lstat: fsLstat,
+      pluginDirectories,
+      pluginIdentity,
+      realpath: fsRealpath,
+      safeDirectory,
     });
     const context = {
       home,
@@ -473,10 +968,6 @@ test("Cursor adapter interface owns bounded locations, marketplace policy, and f
     assert.equal(result.roots.length, context.roots.length);
     assert.equal(result.diagnostics.length, context.diagnostics.length);
     assert.deepEqual(directoryCalls, [globalRoot, workspaceRoot]);
-    assert.deepEqual(lstatCalls, [
-      path.join(globalPlugin, ".cursor-plugin", "marketplace.json"),
-      path.join(workspacePlugin, ".cursor-plugin", "marketplace.json"),
-    ]);
     assert.deepEqual(
       marketplaceCalls.map(({ base, boundary, scope, marketplaceName, active }) => ({
         base,
@@ -494,6 +985,13 @@ test("Cursor adapter interface owns bounded locations, marketplace policy, and f
           active: true,
         },
         {
+          base: marketplaceRoot,
+          boundary: globalRoot,
+          scope: "global",
+          marketplaceName: "local",
+          active: true,
+        },
+        {
           base: workspaceRoot,
           boundary: cwd,
           scope: "workspace",
@@ -502,9 +1000,13 @@ test("Cursor adapter interface owns bounded locations, marketplace policy, and f
         },
       ],
     );
-    assert.equal(marketplaceCalls[0].manifestFiles[0], ".cursor-plugin/marketplace.json");
-    assert.deepEqual(marketplaceCalls[0].marketplaceRootDirectories, [".cursor-plugin"]);
-    assert.deepEqual(marketplaceCalls[0].manifestPolicy, {
+    const marketplaceOptions = marketplaceCalls[1];
+    assert.equal(
+      marketplaceOptions.manifestFiles[0],
+      ".cursor-plugin/marketplace.json",
+    );
+    assert.deepEqual(marketplaceOptions.marketplaceRootDirectories, [".cursor-plugin"]);
+    assert.deepEqual(marketplaceOptions.manifestPolicy, {
       files: [".cursor-plugin/plugin.json", "plugin.json"],
       description: "Cursor plugin metadata",
       requiredFields: ["name"],
@@ -513,39 +1015,53 @@ test("Cursor adapter interface owns bounded locations, marketplace policy, and f
       declaredSkillDirectoriesReplaceDefault: true,
       includeRootSkillFallback: true,
       includeDefaultSkillRoot: false,
-      manifestNamePattern: marketplaceCalls[0].manifestPolicy.manifestNamePattern,
+      manifestNamePattern: marketplaceOptions.manifestPolicy.manifestNamePattern,
     });
-    assert.equal(typeof marketplaceCalls[0].marketplacePolicy.validate, "function");
-    const marketplaceValidation = await marketplaceCalls[0].marketplacePolicy.validate({
-      manifest: {
-        name: "team",
-        owner: { name: "fixture" },
-        metadata: { pluginRoot: "plugins" },
-        plugins: [{ name: "reviewer", source: "reviewer" }],
-      },
-      file: marketplaceFile,
-      safeBase: globalRoot,
-      sourceBase: globalRoot,
-      context,
-      host: "cursor",
-      marketplace: "team",
-    });
-    assert.equal(marketplaceValidation.valid, true);
-    assert.equal(marketplaceValidation.pluginRoot, "plugins");
-    assert.deepEqual(marketplaceValidation.entries, [
-      { name: "reviewer", source: "reviewer" },
+    assert.equal(readFiles.includes(marketplaceFile), true);
+    assert.equal(readFiles.includes(marketplacePluginManifest), true);
+    assert.deepEqual(result.roots.map(({ path: rootPath }) => rootPath), [
+      path.dirname(path.dirname(marketplaceSkill)),
     ]);
-    assert.equal(installCalls.length, 2);
-    assert.ok(installCalls.every(({ host }) => host === "cursor"));
-    assert.ok(installCalls.every(({ active }) => active === true));
-    assert.equal(
-      installCalls[0].localPluginIdentity({
-        host: "cursor",
-        marketplace: "local",
-        name: "global-plugin",
-      }),
-      "local:plugin:cursor:local:global-plugin",
+    assert.deepEqual(result.roots[0].plugin, {
+      host: "cursor",
+      marketplace: "team-marketplace",
+      name: "marketed-plugin",
+      version: "1.0.0",
+    });
+    assert.deepEqual(result.roots[0].pluginMetadata, {
+      host: "cursor",
+      marketplace: "team-marketplace",
+      name: "marketed-plugin",
+      version: "1.0.0",
+      root: marketplacePlugin,
+      manifestPath: marketplacePluginManifest,
+    });
+    assert.equal(result.roots[0].pluginManifest, marketplacePluginManifest);
+    assert.equal(result.roots[0].pluginIdentity, "local:plugin:cursor:team-marketplace:marketed-plugin");
+    assert.match(
+      await readFile(
+        path.join(result.roots[0].path, "cursor-market-review", "SKILL.md"),
+        "utf8",
+      ),
+      /cursor-market-review/,
     );
+    assert.ok(installCalls.every(({ host }) => host === "cursor"));
+    assert.equal(
+      installCalls.some(({ marketplace, name }) =>
+        marketplace === "team-marketplace" && name === "marketed-plugin"),
+      true,
+    );
+    assert.equal(
+      result.diagnostics.some(({ code, path: diagnosticPath }) =>
+        code === "INVALID_PLUGIN_METADATA" && diagnosticPath === invalidPluginManifest),
+      true,
+    );
+    assert.equal(
+      result.diagnostics.some(({ code, path: diagnosticPath }) =>
+        code === "PLUGIN_ROOT_ESCAPE" && diagnosticPath === escapedPluginLink),
+      true,
+    );
+    assert.equal(result.roots.some(({ path: rootPath }) => rootPath.startsWith(escapedPlugin)), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
