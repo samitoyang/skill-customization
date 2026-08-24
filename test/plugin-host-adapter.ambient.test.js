@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { discoverAmbientSkills } from "./support/discovery-modes.js";
 import { CLAUDE_CODE_HOST_ADAPTER } from "../src/plugin-discovery.js";
 import { checkProvenance } from "../src/provenance.js";
-import { normalizeSkillRootObservations } from "../src/skill-root-registry.js";
 
 async function writeSkill(root, name, body = "fixture\n") {
   const skill = path.join(root, name);
@@ -16,20 +16,6 @@ async function writeSkill(root, name, body = "fixture\n") {
     `---\nname: ${name}\ndescription: Fixture\n---\n${body}`,
   );
   return skill;
-}
-
-function adapterContext({ home, cwd, claudeHome, workspaceDirectories }) {
-  return {
-    home,
-    cwd,
-    env: {
-      CLAUDE_CONFIG_DIR: claudeHome,
-      CLAUDE_CODE_SYNC_SKILLS: "0",
-    },
-    workspaceDirectories,
-    roots: [],
-    diagnostics: [],
-  };
 }
 
 test("Claude Code adapter emits registry and provenance compatible observations", async () => {
@@ -93,20 +79,24 @@ test("Claude Code adapter emits registry and provenance compatible observations"
       }),
     );
 
-    const context = adapterContext({
+    const result = await discoverAmbientSkills({
+      input: "review",
       home,
       cwd,
-      claudeHome,
-      workspaceDirectories: [cwd],
+      env: {
+        CLAUDE_CONFIG_DIR: claudeHome,
+        CLAUDE_CODE_SYNC_SKILLS: "0",
+      },
+      managerRecords: [],
+      pluginOptions: {
+        hostSpecifications: [CLAUDE_CODE_HOST_ADAPTER],
+      },
     });
-    await CLAUDE_CODE_HOST_ADAPTER.discover(context);
 
-    assert.ok(context.roots.length >= 2);
-    const normalized = normalizeSkillRootObservations(context.roots);
-    assert.deepEqual(normalized.diagnostics, []);
-    assert.ok(normalized.roots.some(({ pluginIdentity }) =>
+    assert.ok(result.searchedRoots.length >= 2);
+    assert.ok(result.searchedRoots.some(({ pluginIdentity }) =>
       pluginIdentity === "local:plugin:claude-code:official:reviewer"));
-    const marketplaceRoot = normalized.roots.find(({ pluginIdentity }) =>
+    const marketplaceRoot = result.searchedRoots.find(({ pluginIdentity }) =>
       pluginIdentity === "local:plugin:claude-code:team:audit");
     assert.ok(marketplaceRoot);
     assert.equal(marketplaceRoot.active, false);
@@ -114,7 +104,7 @@ test("Claude Code adapter emits registry and provenance compatible observations"
       checkProvenance({ observations: marketplaceRoot.pluginEvidence }).provenance,
       ["repository:https://github.com/example/audit"],
     );
-    const malformed = context.diagnostics.find(
+    const malformed = result.pluginDiagnostics.find(
       ({ code }) => code === "MALFORMED_PLUGIN_METADATA",
     );
     assert.equal(malformed?.host, "claude-code");
