@@ -10,4 +10,6 @@ Primary seams are typed, immutable `ingestDescriptor` results that combine descr
 
 For a customization source, pass the successful nested preflight's `effectiveFingerprint` and `steps` to `reconcileCustomization` as `sourceEffectiveFingerprint` and `sourceExecutionPlan`; the CLI performs this nested preflight automatically. When semantic review is required, the callback receives that ordered `sourceExecutionPlan` and its base workflow as `sourceEntrypoint`. Reconciliation never substitutes the customization directory's raw fingerprint or a thin dispatcher for the checked plan.
 
+Direct `resolveBinding` calls can validate an existing customization binding, but automatic plugin-cache recovery of a missing customization source requires the CLI or Preflight composition root. Without that injected graph inspector, Binding returns the structured `BINDING_CUSTOMIZATION_RECOVERY_UNAVAILABLE` failure; callers do not provide recursive traversal through the public intent interface.
+
 Keep resolved sources read-only and machine-local state outside portable customization artifacts. Read [Descriptor v1](descriptor-v1.md), [Discovery and bindings](discovery-and-bindings.md), and [Reconciliation](reconciliation.md) before constructing a runtime integration.

@@ -9,12 +9,15 @@ import {
   readCheckedDescriptor,
 } from "./descriptor.js";
 import {
-  activeSkillInventory,
   createDiscoverySnapshot,
   discoverSkills,
 } from "./discovery.js";
 import { BindingError } from "./errors.js";
-import { fingerprintFile, fingerprintPath } from "./fingerprint.js";
+import {
+  fingerprintFile,
+  fingerprintPath,
+  payloadFingerprint,
+} from "./fingerprint.js";
 import { createCustomizationRecoveryAdapter } from "./internal/customization-recovery-adapter.js";
 import {
   generateLocalIdentity,
@@ -190,6 +193,108 @@ async function filesystemEvidenceRevision({
   }
 }
 
+async function fullFingerprintRevision({
+  descriptor,
+  sourceRoot,
+  entrypoint,
+  expectedEffectiveFingerprint,
+  replacementEvidence,
+  recoveryContext,
+  requireEffectiveMatch = false,
+}) {
+  let sourceFingerprint;
+  let entrypointFingerprint;
+  try {
+    [sourceFingerprint, entrypointFingerprint] = await Promise.all([
+      fingerprintPath(sourceRoot),
+      fingerprintFile(entrypoint),
+    ]);
+  } catch (error) {
+    if (isExpectedRecoveryMismatch(error)) return undefined;
+    throw error;
+  }
+
+  let effectiveFingerprint = expectedEffectiveFingerprint;
+  if (descriptor.source.kind === "customization" && requireEffectiveMatch) {
+    if (typeof recoveryContext?.recoverCustomizationExecution !== "function") {
+      throw new BindingError(
+        "customization source recovery requires the CLI or Preflight runtime",
+        {
+          code: "BINDING_CUSTOMIZATION_RECOVERY_UNAVAILABLE",
+          details: { sourceRoot },
+        },
+      );
+    }
+    let execution;
+    try {
+      execution = await recoveryContext.recoverCustomizationExecution({
+        descriptorPath: path.join(sourceRoot, "customization.json"),
+        context: recoveryContext.context,
+        statePath: recoveryContext.statePath,
+        discoverySnapshot: recoveryContext.discoverySnapshot,
+        bindings: recoveryContext.bindingOperations,
+      });
+    } catch (error) {
+      if (isExpectedRecoveryMismatch(error)) return undefined;
+      throw error;
+    }
+    if (
+      execution?.status === "maintenance-required"
+      || typeof execution?.effectiveFingerprint !== "string"
+    ) return undefined;
+    effectiveFingerprint = execution.effectiveFingerprint;
+  } else if (requireEffectiveMatch) {
+    effectiveFingerprint = sourceFingerprint;
+  }
+
+  const replacement = [];
+  for (const candidate of replacementEvidence?.candidates ?? []) {
+    try {
+      const copy = candidate.copy ?? candidate.identities?.[0]?.copy;
+      const classification = copy?.classification;
+      const hasReviewedPayload = typeof copy?.customization
+        ?.reviewedPayloadFingerprint === "string";
+      replacement.push({
+        path: path.resolve(candidate.path),
+        fingerprint: classification === "customization" && hasReviewedPayload
+          ? await payloadFingerprint(candidate.path)
+          : await fingerprintPath(candidate.path),
+      });
+    } catch (error) {
+      if (isExpectedRecoveryMismatch(error)) return undefined;
+      throw error;
+    }
+  }
+  replacement.sort((left, right) => left.path.localeCompare(right.path, "en"));
+
+  return {
+    sourceFingerprint,
+    entrypointFingerprint,
+    effectiveFingerprint,
+    replacement,
+  };
+}
+
+function fullFingerprintRevisionMatches(
+  expected,
+  current,
+  replacementEvidence,
+) {
+  if (!current) return false;
+  const expectedReplacement = (replacementEvidence?.candidates ?? [])
+    .map(({ path: candidatePath, fingerprint }) => ({
+      path: path.resolve(candidatePath),
+      fingerprint,
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path, "en"));
+  return (
+    current.sourceFingerprint === expected.sourceFingerprint
+    && current.entrypointFingerprint === expected.entrypointFingerprint
+    && current.effectiveFingerprint === expected.effectiveFingerprint
+    && isDeepStrictEqual(current.replacement, expectedReplacement)
+  );
+}
+
 function bindingEvidenceAdditionalPaths(
   descriptor,
   targetPath,
@@ -356,6 +461,7 @@ function sanitizeBindingIntentOptions(options = {}) {
     enforceReviewedFingerprint: _enforceReviewedFingerprint,
     refreshDiscovery: _refreshDiscovery,
     refreshFinalDiscovery: _refreshFinalDiscovery,
+    revalidateSeededDiscovery: _revalidateSeededDiscovery,
     recoverCustomizationExecution: _recoverCustomizationExecution,
     inspectExecution: _inspectExecution,
     ...intent
@@ -455,7 +561,10 @@ export function createBindingOperation({
     discover,
     recoverCustomizationExecution,
     refreshDiscovery: suppliedRefreshDiscovery,
+    revalidateSeededDiscovery: suppliedRevalidateSeededDiscovery,
   } = runtime;
+  const revalidateSeededDiscovery = suppliedRevalidateSeededDiscovery
+    ?? (discovery !== undefined || discoverySnapshot !== undefined);
   const operationDiscovery = discoverySnapshot ?? createDiscoverySnapshot({
     discovery,
     roots,
@@ -485,6 +594,7 @@ export function createBindingOperation({
       discoverySnapshot: operationDiscovery,
       refreshDiscovery: operationRefreshDiscovery,
       refreshFinalDiscovery: hasSuppliedRefreshDiscovery,
+      revalidateSeededDiscovery,
       ...(recoverCustomizationExecution
         ? { recoverCustomizationExecution }
         : {}),
@@ -907,6 +1017,7 @@ async function inspectBindingSource({
   confirmedSelection,
   selectSource,
   discoverySnapshot,
+  revalidateSeededDiscovery = false,
   requireLocalIdentityMatch = true,
 }) {
   const resolved = path.resolve(sourcePath);
@@ -958,7 +1069,14 @@ async function inspectBindingSource({
   let discovery;
   try {
     const discoveryInput = sourcePolicy.discoveryInput({ resolved, sourceRoot });
-    if (discoverySnapshot) {
+    if (discoverySnapshot && revalidateSeededDiscovery) {
+      // A seeded inventory is request-scoped evidence, not a durable source
+      // identity. Always target the source path for Binding inspection so a
+      // persisted provenance or selection cannot be accepted from stale
+      // inventory metadata. The snapshot still memoizes this targeted lookup
+      // for the rest of the operation.
+      discovery = await discoverySnapshot.discover({ input: discoveryInput });
+    } else if (discoverySnapshot) {
       const inventory = await discoverySnapshot.inventory();
       const selected = selectBindingSource(inventory, {
         sourceRoot,
@@ -1131,7 +1249,15 @@ async function recoverCustomizationFingerprint({
   if (!matchesCustomizationCopy(descriptor.source, group, copy)) return undefined;
   // The graph runner is injected by the Preflight/runtime composition root;
   // Binding only asks for the candidate's checked effective result.
-  if (typeof recoverCustomizationExecution !== "function") return undefined;
+  if (typeof recoverCustomizationExecution !== "function") {
+    throw new BindingError(
+      "customization source recovery requires the CLI or Preflight runtime",
+      {
+        code: "BINDING_CUSTOMIZATION_RECOVERY_UNAVAILABLE",
+        details: { sourcePath: copy.path, customizationId: descriptor.source.id },
+      },
+    );
+  }
   let execution;
   try {
     execution = await recoverCustomizationExecution({
@@ -1659,6 +1785,52 @@ async function recoveryCandidateStillCurrent(candidate, recoveryContext) {
   return current.binding;
 }
 
+function replacementGroupIdentity(group) {
+  return {
+    name: group.name,
+    fingerprint: group.fingerprint,
+    conflict: Boolean(group.conflict),
+    nameCollision: Boolean(group.nameCollision),
+    provenance: cloneRevisionValue(group.provenance ?? []),
+    evidence: cloneRevisionValue(group.evidence ?? []),
+  };
+}
+
+function replacementCopyIdentity(copy, canonicalPath) {
+  return {
+    ...structuredClone(copy),
+    path: path.resolve(copy.path),
+    realPath: canonicalPath,
+  };
+}
+
+function mergeReplacementCandidateIdentity(candidate, identity) {
+  candidate.identities.push(identity);
+  candidate.identities.sort((left, right) =>
+    JSON.stringify(left).localeCompare(JSON.stringify(right), "en"));
+  candidate.fingerprints = [
+    ...new Set(candidate.identities.map(({ group }) => group.fingerprint)),
+  ].sort();
+  candidate.provenance = [
+    ...new Set(candidate.identities.flatMap(({ group, copy }) => [
+      ...(group.provenance ?? []),
+      ...(copy.provenance ?? []),
+    ])),
+  ].sort();
+  candidate.evidence = [
+    ...new Map(
+      candidate.identities
+        .flatMap(({ group, copy }) => [
+          ...(group.evidence ?? []),
+          ...(copy.evidence ?? []),
+        ])
+        .map((evidence) => [JSON.stringify(evidence), evidence]),
+    ).values(),
+  ].sort((left, right) =>
+    JSON.stringify(left).localeCompare(JSON.stringify(right), "en"));
+  return candidate;
+}
+
 async function assertReplacementActivation({
   descriptor,
   customizationRoot,
@@ -1679,17 +1851,51 @@ async function assertReplacementActivation({
     discovery = { groups: [] };
   }
   const activeSkillsByPath = new Map();
-  for (const skill of activeSkillInventory(discovery)) {
-    // Only current canonical paths participate in ambiguity; never fall back
-    // to a stale lexical path.
-    const canonicalPath = await existingCanonicalPath(skill.path ?? skill.realPath);
-    if (!canonicalPath) continue;
-    const key = `${skill.name}\0${canonicalPath}`;
-    if (!activeSkillsByPath.has(key)) {
-      activeSkillsByPath.set(key, {
-        ...skill,
-        realPath: canonicalPath,
-      });
+  for (const group of discovery.groups ?? []) {
+    for (const copy of group.copies ?? []) {
+      if (copy.active === false) continue;
+      const candidatePath = copy.realPath ?? copy.path;
+      // Only current canonical paths participate in ambiguity; never fall
+      // back to a stale lexical path.
+      const canonicalPath = await existingCanonicalPath(candidatePath);
+      if (!canonicalPath) continue;
+      const key = `${group.name}\0${canonicalPath}`;
+      const identity = {
+        group: replacementGroupIdentity(group),
+        copy: replacementCopyIdentity(copy, canonicalPath),
+      };
+      const current = activeSkillsByPath.get(key);
+      if (!current) {
+        activeSkillsByPath.set(key, {
+          name: group.name,
+          path: canonicalPath,
+          fingerprint: group.fingerprint,
+          owner: copy.owner,
+          scope: copy.scope,
+          origin: copy.origin,
+          fingerprints: [group.fingerprint],
+          provenance: [
+            ...new Set([
+              ...(group.provenance ?? []),
+              ...(copy.provenance ?? []),
+            ]),
+          ].sort(),
+          evidence: [
+            ...new Map(
+              [
+                ...(group.evidence ?? []),
+                ...(copy.evidence ?? []),
+              ].map((evidence) => [JSON.stringify(evidence), evidence]),
+            ).values(),
+          ].sort((left, right) =>
+            JSON.stringify(left).localeCompare(JSON.stringify(right), "en")),
+          group: identity.group,
+          copy: identity.copy,
+          identities: [identity],
+        });
+      } else {
+        mergeReplacementCandidateIdentity(current, identity);
+      }
     }
   }
   let activeSkills = [...activeSkillsByPath.values()];
@@ -1697,8 +1903,7 @@ async function assertReplacementActivation({
     const excludedRoot = await existingCanonicalPath(customizationRoot)
       ?? path.resolve(customizationRoot);
     activeSkills = activeSkills.filter(
-      ({ realPath, path: skillPath }) =>
-        path.resolve(realPath ?? skillPath) !== excludedRoot,
+      ({ path: skillPath }) => path.resolve(skillPath) !== excludedRoot,
     );
   }
   const sameName = activeSkills.filter(({ name }) => name === descriptor.name);
@@ -1716,18 +1921,22 @@ async function assertReplacementActivation({
       .sort(),
     candidates: sameName.map((skill) => ({
       name: skill.name,
-      path: path.resolve(skill.realPath ?? skill.path),
+      path: path.resolve(skill.path),
       fingerprint: skill.fingerprint,
       owner: skill.owner,
       scope: skill.scope,
       origin: skill.origin,
-      provenance: cloneRevisionValue(skill.provenance ?? []),
-      evidence: cloneRevisionValue(skill.evidence ?? []),
-      ...(skill.pluginIdentity !== undefined
-        ? { pluginIdentity: skill.pluginIdentity }
+      fingerprints: [...skill.fingerprints],
+      provenance: cloneRevisionValue(skill.provenance),
+      evidence: cloneRevisionValue(skill.evidence),
+      group: cloneRevisionValue(skill.group),
+      copy: cloneRevisionValue(skill.copy),
+      identities: cloneRevisionValue(skill.identities),
+      ...(skill.copy?.pluginIdentity !== undefined
+        ? { pluginIdentity: skill.copy.pluginIdentity }
         : {}),
-      ...(skill.pluginCache !== undefined
-        ? { pluginCache: cloneRevisionValue(skill.pluginCache) }
+      ...(skill.copy?.pluginCache !== undefined
+        ? { pluginCache: cloneRevisionValue(skill.copy.pluginCache) }
         : {}),
     })),
   };
@@ -1754,6 +1963,7 @@ async function bindCustomizationInternal({
   discovery,
   discoverySnapshot,
   recoverCustomizationExecution,
+  revalidateSeededDiscovery = false,
   now = () => new Date().toISOString(),
 }) {
   assertValidDescriptor(descriptor);
@@ -1787,6 +1997,7 @@ async function bindCustomizationInternal({
       discoverySnapshot: operationDiscovery,
       refreshDiscovery: refreshOperationDiscovery,
       recoverCustomizationExecution,
+      revalidateSeededDiscovery,
     });
   }
   if (!interactive) {
@@ -1802,6 +2013,7 @@ async function bindCustomizationInternal({
     confirmedSelection,
     selectSource,
     discoverySnapshot: operationDiscovery,
+    revalidateSeededDiscovery: revalidateSeededDiscovery && confirmedSelection !== undefined,
   });
   const initialEffectiveFingerprint = descriptor.source.effective_fingerprint;
   const scopeRoots = roots ?? inspection.searchedRoots.filter(
@@ -1857,6 +2069,8 @@ async function bindCustomizationInternal({
     managerRecords,
     confirmedSelection: inspection.selection ?? confirmedSelection,
     discoverySnapshot: operationDiscovery,
+    revalidateSeededDiscovery: revalidateSeededDiscovery
+      && (inspection.selection !== undefined || confirmedSelection !== undefined),
   });
 
   // Finish the source and replacement decision before acquiring the state
@@ -1889,6 +2103,8 @@ async function bindCustomizationInternal({
     managerRecords,
     confirmedSelection: confirmedInspection.selection ?? confirmedSelection,
     discoverySnapshot: finalDiscovery,
+    revalidateSeededDiscovery: revalidateSeededDiscovery
+      && (confirmedInspection.selection !== undefined || confirmedSelection !== undefined),
   });
   if (
     finalDiscovery === operationDiscovery
@@ -1902,6 +2118,8 @@ async function bindCustomizationInternal({
       managerRecords,
       confirmedSelection: confirmedInspection.selection ?? confirmedSelection,
       discoverySnapshot: finalDiscovery,
+      revalidateSeededDiscovery: revalidateSeededDiscovery
+        && (confirmedInspection.selection !== undefined || confirmedSelection !== undefined),
     });
   }
   if (bindingConfirmationEvidenceChanged(confirmedInspection, finalInspection)) {
@@ -1997,9 +2215,10 @@ async function bindCustomizationInternal({
   await updateJsonAtomic(statePath, EMPTY_STORE, async (current) => {
     assertBindingStore(current, statePath);
     // This is the complete atomic decision: publish only if the caller's
-    // expected key and checked evidence token are unchanged. No source
-    // inspection, full fingerprint, or Discovery occurs while the
-    // cross-process state lock is held.
+    // expected key and checked evidence token are unchanged. Discovery and
+    // candidate generation stay outside the lock; the selected source,
+    // entrypoint, effective, and replacement fingerprints are rechecked
+    // inside the cross-process state lock.
     if (
       bindingRecordRevision(current.bindings[key]) !== initialBindingRevision
     ) {
@@ -2025,6 +2244,31 @@ async function bindCustomizationInternal({
           current: {
             ...evidenceRevision,
             filesystem: currentFilesystemRevision,
+          },
+        },
+      });
+    }
+    const currentFullFingerprintRevision = await fullFingerprintRevision({
+      descriptor,
+      sourceRoot: evidenceRevision.canonicalSource ?? path.resolve(sourcePath),
+      entrypoint: evidenceRevision.entrypoint,
+      expectedEffectiveFingerprint: evidenceRevision.effectiveFingerprint,
+      replacementEvidence: evidenceRevision.replacement,
+    });
+    if (
+      !fullFingerprintRevisionMatches(
+        evidenceRevision,
+        currentFullFingerprintRevision,
+        evidenceRevision.replacement,
+      )
+    ) {
+      throw new BindingError("binding source fingerprint changed before publication", {
+        code: "BINDING_SOURCE_SELECTION_INVALID",
+        details: {
+          expected: evidenceRevision,
+          current: {
+            ...evidenceRevision,
+            ...currentFullFingerprintRevision,
           },
         },
       });
@@ -2081,6 +2325,7 @@ async function validateBindingInternal({
   discoverySnapshot,
   enforceReviewedFingerprint = true,
   requireLocalIdentityMatch = false,
+  revalidateSeededDiscovery = false,
 }) {
   assertValidDescriptor(descriptor);
   if (!binding || typeof binding !== "object" || !binding.source) {
@@ -2140,6 +2385,7 @@ async function validateBindingInternal({
     managerRecords,
     confirmedSelection: binding.source.selection,
     discoverySnapshot: operationDiscovery,
+    revalidateSeededDiscovery,
     requireLocalIdentityMatch,
   });
   if (enforceReviewedFingerprint) {
@@ -2168,6 +2414,7 @@ async function resolveBindingInternal({
   discoverySnapshot,
   refreshDiscovery,
   recoverCustomizationExecution,
+  revalidateSeededDiscovery = false,
   recoveryAttempts = 0,
 }) {
   assertValidDescriptor(descriptor);
@@ -2187,6 +2434,7 @@ async function resolveBindingInternal({
       managerRecords,
       refreshDiscovery: refreshOperationDiscovery,
       recoverCustomizationExecution,
+      revalidateSeededDiscovery,
     },
   });
   const operationBindings = createRecoveryBindingOperations(operationDiscovery);
@@ -2214,6 +2462,7 @@ async function resolveBindingInternal({
         managerRecords,
         customizationRoot,
         discoverySnapshot: operationDiscovery,
+        revalidateSeededDiscovery,
         // Preflight and Reconciliation own full-source drift decisions after
         // they have the resolved path; public Binding validation remains strict.
         enforceReviewedFingerprint: false,
@@ -2236,6 +2485,7 @@ async function resolveBindingInternal({
         bindingOperations: operationBindings,
         createRecoveryBindingOperations,
         recoverCustomizationExecution,
+        revalidateSeededDiscovery,
       };
       const recovered = await recoverMissingPluginBinding({
         binding,
@@ -2259,6 +2509,46 @@ async function resolveBindingInternal({
           ? await recoveryCandidateStillCurrent(prevalidated, recoveryContext)
           : undefined;
         if (validatedForPublication) {
+          // Recheck the complete candidate, including a recursively derived
+          // customization effective fingerprint, before entering the narrow
+          // state-publication critical section. The graph inspector belongs
+          // outside that section because it may perform Discovery for nested
+          // bindings; the lock callback below repeats only direct
+          // fingerprint reads that do not generate candidates.
+          const finalFullFingerprintRevision = await fullFingerprintRevision({
+            descriptor,
+            sourceRoot:
+              validatedForPublication.evidenceRevision?.canonicalSource
+              ?? path.resolve(validatedForPublication.source.path),
+            entrypoint: validatedForPublication.evidenceRevision?.entrypoint,
+            expectedEffectiveFingerprint:
+              validatedForPublication.evidenceRevision?.effectiveFingerprint,
+            replacementEvidence:
+              validatedForPublication.evidenceRevision?.replacement,
+            recoveryContext,
+            requireEffectiveMatch: true,
+          });
+          if (
+            !fullFingerprintRevisionMatches(
+              validatedForPublication.evidenceRevision,
+              finalFullFingerprintRevision,
+              validatedForPublication.evidenceRevision?.replacement,
+            )
+          ) {
+            throw new BindingError(
+              "binding recovery fingerprint changed before publication",
+              {
+                code: "BINDING_SOURCE_SELECTION_INVALID",
+                details: {
+                  expected: validatedForPublication.evidenceRevision,
+                  current: {
+                    ...validatedForPublication.evidenceRevision,
+                    ...finalFullFingerprintRevision,
+                  },
+                },
+              },
+            );
+          }
           await updateJsonAtomic(statePath, EMPTY_STORE, async (store) => {
             assertBindingStore(store, statePath);
             const currentBinding = store.bindings[key];
@@ -2303,9 +2593,44 @@ async function resolveBindingInternal({
                 },
               });
             }
-            // Candidate generation and full validation completed before the
-            // lock. The critical section only compares state and the cheap
-            // filesystem revision token before publishing the checked record.
+            const currentFullFingerprintRevision = await fullFingerprintRevision({
+              descriptor,
+              sourceRoot:
+                validatedForPublication.evidenceRevision?.canonicalSource
+                ?? path.resolve(validatedForPublication.source.path),
+              entrypoint: validatedForPublication.evidenceRevision?.entrypoint,
+              expectedEffectiveFingerprint:
+                validatedForPublication.evidenceRevision?.effectiveFingerprint,
+              replacementEvidence:
+                validatedForPublication.evidenceRevision?.replacement,
+            });
+            if (
+              !fullFingerprintRevisionMatches(
+                validatedForPublication.evidenceRevision,
+                currentFullFingerprintRevision,
+                validatedForPublication.evidenceRevision?.replacement,
+              )
+            ) {
+              throw new BindingError(
+                "binding recovery fingerprint changed before publication",
+                {
+                  code: "BINDING_SOURCE_SELECTION_INVALID",
+                  details: {
+                    expected: validatedForPublication.evidenceRevision,
+                    current: {
+                      ...validatedForPublication.evidenceRevision,
+                      ...currentFullFingerprintRevision,
+                    },
+                  },
+                },
+              );
+            }
+            // Candidate generation and recursive effective validation
+            // completed before the lock. The critical section rechecks the
+            // selected source, entrypoint, and replacement fingerprints
+            // before publishing the checked record; its effective token is
+            // the full value already rechecked immediately before lock
+            // acquisition, and Discovery remains outside it.
             store.bindings[key] = validatedForPublication;
             persistedBinding = validatedForPublication;
             persisted = true;
@@ -2324,6 +2649,7 @@ async function resolveBindingInternal({
             discoverySnapshot: await refreshOperationDiscovery(),
             refreshDiscovery: refreshOperationDiscovery,
             recoverCustomizationExecution,
+            revalidateSeededDiscovery,
             recoveryAttempts: recoveryAttempts + 1,
           });
         }
@@ -2360,6 +2686,7 @@ async function resolveBindingInternal({
           discoverySnapshot: await refreshOperationDiscovery(),
           refreshDiscovery: refreshOperationDiscovery,
           recoverCustomizationExecution,
+          revalidateSeededDiscovery,
           recoveryAttempts: recoveryAttempts + 1,
         });
       }
@@ -2383,15 +2710,11 @@ function createPublicBindingOperation(options = {}) {
     ...(typeof options.refreshDiscovery === "function"
       ? { refreshDiscovery: options.refreshDiscovery }
       : {}),
-    ...(typeof options.inspectExecution === "function"
-      ? { inspectExecution: options.inspectExecution }
-      : {}),
   });
   return createCustomizationRecoveryAdapter({
     runtime,
     selectSource: options.selectSource,
     createOperation: createBindingOperation,
-    inspectExecution: options.inspectExecution,
   });
 }
 
