@@ -15,6 +15,7 @@ import {
 import { isPathContained } from "./paths.js";
 import { createClaudeCodeAdapter } from "./plugin-host-adapters/claude-code.js";
 import { createCodexAdapter } from "./plugin-host-adapters/codex.js";
+import { createGeminiCliAdapter } from "./plugin-host-adapters/gemini-cli.js";
 import {
   immutablePluginHostRecord,
   isPluginHostResult,
@@ -31,17 +32,6 @@ import { boundedWorkspaceDirectories } from "./workspace-roots.js";
 
 const PLUGIN_OWNER_PREFIX = "plugin:";
 
-const GEMINI_MANIFEST_FILES = ["gemini-extension.json"];
-const GEMINI_INSTALL_METADATA_FILE = ".gemini-extension-install.json";
-const GEMINI_REQUIRED_MANIFEST_FIELDS = ["name", "version"];
-const GEMINI_MANIFEST_POLICY = Object.freeze({
-  files: GEMINI_MANIFEST_FILES,
-  description: "Gemini extension metadata",
-  requiredFields: GEMINI_REQUIRED_MANIFEST_FIELDS,
-  installationFile: GEMINI_INSTALL_METADATA_FILE,
-  nameMatchesDirectory: true,
-  skipInvalidExtension: true,
-});
 const CURSOR_MANIFEST_POLICY = Object.freeze({
   files: [".cursor-plugin/plugin.json", "plugin.json"],
   description: "Cursor plugin metadata",
@@ -52,10 +42,6 @@ const CURSOR_MANIFEST_POLICY = Object.freeze({
   includeRootSkillFallback: true,
   includeDefaultSkillRoot: false,
   manifestNamePattern: /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
-});
-const HOST_MANIFEST_POLICIES = Object.freeze({
-  "gemini-cli": GEMINI_MANIFEST_POLICY,
-  cursor: CURSOR_MANIFEST_POLICY,
 });
 const HOST_MARKETPLACE_MANIFEST_FILES = Object.freeze({
   cursor: [
@@ -540,15 +526,14 @@ async function addPluginInstall({
   defaultSkillDirectory = "skills",
   includeDefaultSkillDirectory = true,
   manifestPolicy,
+  manifestValidation,
   localPluginIdentity = pluginIdentity,
 }) {
-  const effectiveManifestPolicy = manifestPolicy ?? HOST_MANIFEST_POLICIES[host] ?? {};
+  const effectiveManifestPolicy = manifestPolicy ?? {};
   const {
     files: manifestFiles = GENERIC_MANIFEST_FILES,
     description: manifestDescription = "plugin metadata",
     requiredFields: requiredManifestFields = [],
-    installationFile: installationMetadataFile,
-    nameMatchesDirectory = false,
     skipInvalidExtension = false,
     manifestOverridesDeclaration = false,
     declaredSkillDirectoriesReplaceDefault = false,
@@ -622,52 +607,16 @@ async function addPluginInstall({
       }),
     );
   }
-  if (
-    nameMatchesDirectory
-    && manifestValue
-    && stringValue(manifestValue.name)
-    && stringValue(manifestValue.name) !== path.basename(safeInstallRoot)
-  ) {
-    invalidManifest = true;
-    context.diagnostics.push(
-      diagnostic({
-        host,
-        path: manifest.path,
-        code: "INVALID_PLUGIN_METADATA",
-        message: `Gemini extension name must match its extension directory: ${manifest.path}`,
-        metadata: initialMetadata,
-      }),
-    );
-  }
-  const installationMetadataPath = installationMetadataFile
-    ? path.join(safeInstallRoot, installationMetadataFile)
-    : undefined;
-  let installationMetadata = installationMetadataPath
-    ? await readJsonObject(installationMetadataPath, context, {
-      host,
-      metadata: initialMetadata,
-      description: "Gemini extension installation metadata",
-      boundary: safeInstallRoot,
-    })
-    : undefined;
-  if (
-    installationMetadataFile
-    && installationMetadata
-    && (
-      !stringValue(installationMetadata.source)
-      || !["git", "github-release", "local", "link"].includes(installationMetadata.type)
-    )
-  ) {
-    context.diagnostics.push(
-      diagnostic({
-        host,
-        path: installationMetadataPath,
-        code: "INVALID_PLUGIN_INSTALL_METADATA",
-        message: `invalid Gemini extension installation metadata: ${installationMetadataPath}`,
-        metadata: initialMetadata,
-      }),
-    );
-    installationMetadata = undefined;
+  let installationMetadata;
+  if (manifestValidation) {
+    const validation = await manifestValidation({
+      manifest,
+      safeInstallRoot,
+      initialMetadata,
+      context,
+    });
+    invalidManifest ||= validation?.invalid === true;
+    installationMetadata = validation?.installationMetadata;
   }
   // Local/link sources identify an external origin; preserve that evidence without traversing or writing it.
   const manifestField = (field) => manifestOverridesDeclaration
@@ -961,66 +910,6 @@ function marketplaceEntries(value) {
   return Object.entries(plugins).map(([name, entry]) =>
     typeof entry === "string" ? { name, path: entry } : { name, ...entry },
   );
-}
-
-async function discoverDirectExtensionRoots({
-  root,
-  boundary = root,
-  host,
-  scope,
-  context,
-  marketplace = "local",
-  manifestPolicy,
-}) {
-  const safeRoot = await safeDirectory(
-    root,
-    boundary,
-    context,
-    { host, source: "extension" },
-  );
-  if (!safeRoot) return;
-  for (const extension of await pluginDirectories(
-    safeRoot,
-    context,
-    { host, source: "extension" },
-  )) {
-    await addPluginInstall({
-      installRoot: extension.path,
-      boundary: safeRoot,
-      host,
-      marketplace,
-      name: extension.entry.name,
-      scope,
-      source: {},
-      context,
-      ...(manifestPolicy ? { manifestPolicy } : {}),
-    });
-  }
-}
-
-async function discoverGemini(context) {
-  const { home, env } = context;
-  // Gemini resolves GEMINI_CLI_HOME as a user-home override, then appends .gemini.
-  const geminiCliHome = path.resolve(stringValue(env.GEMINI_CLI_HOME) ?? home);
-  const geminiHome = path.join(geminiCliHome, ".gemini");
-  await discoverDirectExtensionRoots({
-    root: path.join(geminiHome, "extensions"),
-    boundary: geminiHome,
-    host: "gemini-cli",
-    scope: "global",
-    context,
-    manifestPolicy: GEMINI_MANIFEST_POLICY,
-  });
-  for (const workspace of context.workspaceDirectories) {
-    await discoverDirectExtensionRoots({
-      root: path.join(workspace, ".gemini", "extensions"),
-      boundary: workspace,
-      host: "gemini-cli",
-      scope: "workspace",
-      context,
-      manifestPolicy: GEMINI_MANIFEST_POLICY,
-    });
-  }
 }
 
 async function discoverCursor(context) {
@@ -1655,10 +1544,18 @@ export const CODEX_HOST_ADAPTER = createCodexAdapter({
   safeDirectory,
 });
 
+export const GEMINI_CLI_HOST_ADAPTER = createGeminiCliAdapter({
+  addPluginInstall,
+  diagnostic,
+  pluginDirectories,
+  readJsonObject,
+  safeDirectory,
+});
+
 export const PLUGIN_HOST_SPECIFICATIONS = Object.freeze([
   CLAUDE_CODE_HOST_ADAPTER,
   CODEX_HOST_ADAPTER,
-  createPluginHostSpecification("gemini-cli", discoverGemini),
+  GEMINI_CLI_HOST_ADAPTER,
   createPluginHostSpecification("cursor", discoverCursor),
 ]);
 

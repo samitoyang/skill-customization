@@ -83,6 +83,7 @@
  * @property {string} [defaultSkillDirectory]
  * @property {boolean} [includeDefaultSkillDirectory]
  * @property {Record<string, unknown>} [manifestPolicy]
+ * @property {(options: {manifest: {status: "missing"|"invalid"|"valid", value?: Record<string, unknown>, path?: string}, safeInstallRoot: string, initialMetadata: PluginHostMetadata, context: PluginHostDiscoveryContext}) => Promise<{invalid?: boolean, installationMetadata?: Record<string, unknown>}>} [manifestValidation]
  * @property {(metadata: Record<string, unknown>) => string} [localPluginIdentity]
  */
 
@@ -146,6 +147,12 @@
  * @typedef {PluginHostCacheToolkit & {
  *   readFile: (target: string, encoding: "utf8") => Promise<string>,
  * }} CodexAdapterToolkit
+ */
+
+/**
+ * @typedef {PluginHostAdapterToolkit & {
+ *   readJsonObject: (file: string, context: PluginHostDiscoveryContext, options?: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>,
+ * }} GeminiCliAdapterToolkit
  */
 
 /**

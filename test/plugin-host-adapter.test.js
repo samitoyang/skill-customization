@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { createClaudeCodeAdapter } from "../src/plugin-host-adapters/claude-code.js";
 import { createCodexAdapter } from "../src/plugin-host-adapters/codex.js";
+import { createGeminiCliAdapter } from "../src/plugin-host-adapters/gemini-cli.js";
 import { pluginHostResult } from "../src/plugin-host-adapters/interface.js";
 
 test("Claude Code adapter interface uses injected local filesystem helpers", async () => {
@@ -229,6 +230,119 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
     assert.equal(
       marketplaceCalls.at(-1).base,
       path.join(configuredRoot, ".agents", "plugins"),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Gemini CLI adapter interface owns locations, validation, and activation policy", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gemini-cli-adapter-interface-"));
+  try {
+    const home = path.join(root, "home");
+    const configuredHome = path.join(root, "configured-home");
+    const cwd = path.join(root, "workspace");
+    const globalRoot = path.join(
+      configuredHome,
+      ".gemini",
+      "extensions",
+    );
+    const globalExtension = path.join(globalRoot, "global-extension");
+    const workspaceRoot = path.join(cwd, ".gemini", "extensions");
+    const workspaceExtension = path.join(workspaceRoot, "workspace-extension");
+    await mkdir(cwd, { recursive: true });
+
+    const directoryCalls = [];
+    const installCalls = [];
+    const adapter = createGeminiCliAdapter({
+      addPluginInstall: async (options) => {
+        installCalls.push(options);
+      },
+      diagnostic: (value) => value,
+      pluginDirectories: async (target) => {
+        directoryCalls.push(target);
+        if (target === globalRoot) {
+          return [{ entry: { name: "global-extension" }, path: globalExtension }];
+        }
+        if (target === workspaceRoot) {
+          return [{ entry: { name: "workspace-extension" }, path: workspaceExtension }];
+        }
+        return [];
+      },
+      readJsonObject: async (file) => file.endsWith(".gemini-extension-install.json")
+        ? { source: "https://github.com/example/extension", type: "git" }
+        : undefined,
+      safeDirectory: async (target) => target,
+    });
+    const context = {
+      home,
+      cwd,
+      env: { GEMINI_CLI_HOME: configuredHome },
+      workspaceDirectories: [cwd],
+      roots: [],
+      diagnostics: [],
+    };
+
+    const result = await adapter.discover(context);
+
+    assert.equal(context.host, "gemini-cli");
+    assert.equal(result.roots.length, 0);
+    assert.equal(result.diagnostics.length, 0);
+    assert.deepEqual(directoryCalls, [globalRoot, workspaceRoot]);
+    assert.deepEqual(
+      installCalls.map(({ installRoot, boundary, host, marketplace, scope, active }) => ({
+        installRoot,
+        boundary,
+        host,
+        marketplace,
+        scope,
+        active,
+      })),
+      [
+        {
+          installRoot: globalExtension,
+          boundary: globalRoot,
+          host: "gemini-cli",
+          marketplace: "local",
+          scope: "global",
+          active: true,
+        },
+        {
+          installRoot: workspaceExtension,
+          boundary: workspaceRoot,
+          host: "gemini-cli",
+          marketplace: "local",
+          scope: "workspace",
+          active: true,
+        },
+      ],
+    );
+    assert.deepEqual(installCalls[0].manifestPolicy, {
+      files: ["gemini-extension.json"],
+      description: "Gemini extension metadata",
+      skipInvalidExtension: true,
+    });
+
+    const invalidContext = { ...context, diagnostics: [] };
+    const invalid = await installCalls[0].manifestValidation({
+      manifest: {
+        status: "valid",
+        value: { name: "wrong-name", version: "1.0.0" },
+        path: path.join(globalExtension, "gemini-extension.json"),
+      },
+      safeInstallRoot: globalExtension,
+      initialMetadata: { host: "gemini-cli", name: "global-extension" },
+      context: invalidContext,
+    });
+    assert.equal(invalid.invalid, true);
+    assert.deepEqual(invalid.installationMetadata, {
+      source: "https://github.com/example/extension",
+      type: "git",
+    });
+    assert.equal(
+      invalidContext.diagnostics.some(({ message }) =>
+        message.includes("must match its extension directory")),
+      true,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
