@@ -60,11 +60,11 @@ const sourceCommon = {
   required: ["skill_name", "kind", "license", "effective_fingerprint"],
 };
 
-function sourceVariant(allowed, required) {
+function sourceVariant(additionalFields) {
   return {
-    allowed: [...sourceCommon.allowed, ...allowed],
-    required: [...sourceCommon.required, ...required],
-    additionalRequired: [...required],
+    allowed: [...sourceCommon.allowed, ...additionalFields],
+    required: [...sourceCommon.required, ...additionalFields],
+    additionalRequired: [...additionalFields],
   };
 }
 
@@ -104,10 +104,9 @@ const fields = {
     variants: {
       repository: sourceVariant(
         ["repository", "upstream_path", "review"],
-        ["repository", "upstream_path", "review"],
       ),
-      local: sourceVariant(["identity"], ["identity"]),
-      customization: sourceVariant(["id", "type"], ["id", "type"]),
+      local: sourceVariant(["identity"]),
+      customization: sourceVariant(["id", "type"]),
     },
   },
   review: {

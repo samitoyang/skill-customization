@@ -7,6 +7,7 @@ import {
 } from "./descriptor-invariants.js";
 import { DescriptorError } from "./errors.js";
 import { normalizeRepositoryUrl } from "./normalization.js";
+import { isOwnedPayloadExcludedPath } from "./owned-payload.js";
 import { isMachineAbsolutePath, resolveOwnedPath } from "./paths.js";
 
 /**
@@ -171,7 +172,6 @@ const LOCAL_IDENTITY = new RegExp(patterns.localIdentity.source);
 const REPOSITORY_URL = new RegExp(patterns.repositoryUrl.source);
 const PORTABLE_RELATIVE_PATH = new RegExp(patterns.relativePath.source);
 const PROVENANCE_PATH = new RegExp(patterns.provenancePath.source);
-const RUNTIME_PATH_EXCLUSION = new RegExp(patterns.runtimePathExclusion.source);
 const NON_BLANK = new RegExp(patterns.nonBlank.source);
 
 function issue(errors, pointer, message) {
@@ -420,7 +420,7 @@ export function validateDescriptor(descriptor) {
   for (const key of ["entrypoint", "customization"]) {
     if (!isPortableRelativePath(descriptor[key])) {
       issue(errors, `/${key}`, "must be a portable relative path");
-    } else if (RUNTIME_PATH_EXCLUSION.test(descriptor[key])) {
+    } else if (isOwnedPayloadExcludedPath(descriptor[key])) {
       issue(
         errors,
         `/${key}`,
