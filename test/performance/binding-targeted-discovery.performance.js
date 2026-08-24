@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { createBindingOperation } from "../../src/bindings.js";
 import { fingerprintFile, fingerprintPath, payloadFingerprint } from "../../src/fingerprint.js";
+import { createBindingRuntime } from "../../src/internal/binding-runtime.js";
 import { generateLocalIdentity } from "../../src/normalization.js";
 import { discoverFixtureSkills } from "../support/discovery-modes.js";
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
@@ -101,10 +101,12 @@ await runPerformanceScenario({
   },
   measure: async (state, { phase }) => {
     const { metrics } = await captureDiscoveryWork(async () => {
-      const operation = createBindingOperation({
+      const operation = createBindingRuntime({
         discovery: state.discovery,
-        roots: state.roots,
-        managerRecords: [],
+        context: {
+          roots: state.roots,
+          managerRecords: [],
+        },
       });
       await operation.bindCustomization({
         descriptor: state.descriptor,

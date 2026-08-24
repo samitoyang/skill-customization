@@ -20,7 +20,6 @@ import {
   bindingKey,
   bindingStorePath,
   classifyBindingScope,
-  createBindingOperation,
   readBindingStore,
   resolveBinding,
   validateBinding,
@@ -33,6 +32,7 @@ import {
 import { generateLocalIdentity } from "../src/normalization.js";
 import { preflightCustomization } from "../src/preflight.js";
 import { confirmDiscoverySelection } from "../src/discovery.js";
+import { createBindingRuntime } from "../src/internal/binding-runtime.js";
 import { discoverFixtureSkills } from "./support/discovery-modes.js";
 import { acquireStateLock } from "../src/state.js";
 
@@ -430,10 +430,12 @@ test("plugin cache recovery targets outside a seeded same-name inventory", async
   await rename(installOne, path.join(root, "removed"));
   await mkdir(sourceTwo, { recursive: true });
   await writeFile(path.join(sourceTwo, "SKILL.md"), workflow);
-  const operation = createBindingOperation({
+  const operation = createBindingRuntime({
     discovery: seeded,
-    roots: [initialRoot, replacementRoot],
-    managerRecords: [],
+    context: {
+      roots: [initialRoot, replacementRoot],
+      managerRecords: [],
+    },
   });
   const recovered = await operation.resolveBinding({
     descriptor: sourceDescriptor,
@@ -443,6 +445,94 @@ test("plugin cache recovery targets outside a seeded same-name inventory", async
 
   assert.equal(recovered.source.path, path.resolve(sourceTwo));
   assert.equal(recovered.source.pluginIdentity, identity);
+});
+
+test("plugin cache recovery keeps seeded and targeted eligible copies ambiguous", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-cache-ambiguous-targeted-"));
+  const installOne = path.join(root, "plugin", "1");
+  const sourceOne = path.join(installOne, "skills", "review");
+  const seededInstall = path.join(root, "plugin", "seed");
+  const seededSource = path.join(seededInstall, "skills", "review");
+  const installTwo = path.join(root, "plugin", "2");
+  const sourceTwo = path.join(installTwo, "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const identity = "local:plugin:fixture-host:fixture-marketplace:reviewer";
+  const repository = "https://github.com/example/skills";
+  const workflow = "---\nname: review\n---\nstable\n";
+  const rootRecord = (directory, version) => ({
+    path: path.dirname(directory),
+    owner: "plugin:fixture-host",
+    scope: "global",
+    origin: "plugin",
+    plugin: {
+      host: "fixture-host",
+      marketplace: "fixture-marketplace",
+      name: "reviewer",
+      version,
+    },
+    pluginIdentity: identity,
+    pluginRoot: path.dirname(path.dirname(directory)),
+    pluginEvidence: [{
+      kind: "plugin",
+      host: "fixture-host",
+      marketplace: "fixture-marketplace",
+      plugin: "reviewer",
+      repository,
+      identity,
+      version,
+      cache: { kind: "versioned", scope: "global" },
+    }],
+  });
+
+  await mkdir(sourceOne, { recursive: true });
+  await mkdir(seededSource, { recursive: true });
+  await writeFile(path.join(sourceOne, "SKILL.md"), workflow);
+  await writeFile(path.join(seededSource, "SKILL.md"), workflow);
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      ...descriptor().source,
+      effective_fingerprint: await fingerprintPath(sourceOne),
+    },
+  };
+  const initialRoots = [
+    rootRecord(sourceOne, "1"),
+    rootRecord(seededSource, "seed"),
+  ];
+  const replacementRoot = rootRecord(sourceTwo, "2");
+  await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: sourceOne,
+    context: "global",
+    statePath,
+    roots: initialRoots,
+    interactive: true,
+    confirm: async () => true,
+  });
+  const seeded = await discoverFixtureSkills({
+    roots: initialRoots,
+    managerRecords: [],
+  });
+
+  await rename(installOne, path.join(root, "removed"));
+  await mkdir(sourceTwo, { recursive: true });
+  await writeFile(path.join(sourceTwo, "SKILL.md"), workflow);
+  const operation = createBindingRuntime({
+    discovery: seeded,
+    context: {
+      roots: [...initialRoots, replacementRoot],
+      managerRecords: [],
+    },
+  });
+  await assert.rejects(
+    operation.resolveBinding({
+      descriptor: sourceDescriptor,
+      context: "global",
+      statePath,
+    }),
+    (error) => error.code === "BINDING_TARGET_MISSING",
+  );
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
 test("automatic plugin recovery requires a same-scope versioned cache", async () => {

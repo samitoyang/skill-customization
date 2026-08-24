@@ -2,10 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline/promises";
 
-import {
-  classifyBindingScope,
-  createBindingOperation,
-} from "./bindings.js";
+import { createBindingRuntime } from "./internal/binding-runtime.js";
 import {
   helperContractSupport,
   isValidHelperContract,
@@ -290,15 +287,12 @@ function discoveryOptions(context) {
   };
 }
 
-function discoveryRoots(context) {
-  return context.discoveryRoots ?? context.roots ?? context.additionalRoots;
-}
-
 function createContextBindingOperation(context) {
-  return createBindingOperation({
-    roots: context.roots,
-    managerRecords: context.managerRecords,
-    discoveryOptions: discoveryOptions(context),
+  return createBindingRuntime({
+    context: {
+      ...context,
+      discoveryOptions: discoveryOptions(context),
+    },
   });
 }
 
@@ -379,7 +373,6 @@ async function commandDiscover(input, options, io) {
     ...discoveryOptions(context),
     customPath: options["custom-path"],
   });
-  context.discoveryRoots = discovery.searchedRoots;
   discovery.managerDiagnostics = context.managerDiagnostics;
   discovery.hostDiagnostics = context.hostDiagnostics;
   discovery.settingsEvidence = context.settingsEvidence;
@@ -445,18 +438,6 @@ async function commandBind(descriptorPath, options, io) {
   const bindingContext = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
   const bindingOperation = createContextBindingOperation(context);
-  let requestedScope = options.scope;
-  if (!requestedScope && io.stdin.isTTY) {
-    try {
-      await classifyBindingScope({
-        sourcePath,
-        roots: discoveryRoots(context),
-      });
-    } catch (error) {
-      if (error.code !== "BINDING_SCOPE_REQUIRED") throw error;
-      requestedScope = await ttyBindingScope(io);
-    }
-  }
   outputJson(
     io,
     await bindingOperation.bindCustomization({
@@ -465,7 +446,8 @@ async function commandBind(descriptorPath, options, io) {
       context: bindingContext,
       statePath: options.state,
       customizationRoot: path.dirname(resolvedDescriptorPath),
-      requestedScope,
+      requestedScope: options.scope,
+      requestScope: io.stdin.isTTY ? async () => ttyBindingScope(io) : undefined,
       interactive: io.stdin.isTTY,
       confirm: async () => ttyConfirmation(io, `Bind ${descriptor.name} to ${sourcePath}?`),
       confirmReplace: async () =>

@@ -1,0 +1,23 @@
+import { createBindingOperation } from "../bindings.js";
+
+/**
+ * Construct the opaque request-scoped Binding runtime used by CLI and
+ * Preflight. Discovery lifecycle data stays in this private composition root;
+ * the returned operation accepts only Binding intent and interaction policy.
+ */
+export function createBindingRuntime({
+  context = {},
+  discovery,
+  discoverySnapshot,
+  selectSource,
+} = {}) {
+  const runtime = Object.freeze({
+    discovery,
+    discoverySnapshot,
+    roots: context.roots,
+    managerRecords: context.managerRecords ?? [],
+    discoveryOptions: context.discoveryOptions ?? {},
+    ...(context.discover ? { discover: context.discover } : {}),
+  });
+  return createBindingOperation({ runtime, selectSource });
+}
