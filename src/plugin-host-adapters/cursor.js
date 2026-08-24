@@ -25,6 +25,14 @@ const CURSOR_MARKETPLACE_MANIFEST_FILES = Object.freeze([
 const CURSOR_MARKETPLACE_ROOT_DIRECTORIES = Object.freeze([".cursor-plugin"]);
 const CURSOR_MARKETPLACE_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 
+function invalidMarketplaceResult(pluginRoot) {
+  return {
+    valid: false,
+    entries: [],
+    ...(pluginRoot ? { pluginRoot } : {}),
+  };
+}
+
 function createCursorMarketplacePolicy({ diagnostic }) {
   return Object.freeze({
     validate({ manifest, file, host, marketplace, context }) {
@@ -92,11 +100,7 @@ function createCursorMarketplacePolicy({ diagnostic }) {
             metadata: { host, marketplace },
           }),
         );
-        return {
-          valid: false,
-          entries: [],
-          ...(normalizedPluginRoot ? { pluginRoot: normalizedPluginRoot } : {}),
-        };
+        return invalidMarketplaceResult(normalizedPluginRoot);
       }
       if (!Array.isArray(manifest.plugins)) {
         context.diagnostics.push(
@@ -108,11 +112,7 @@ function createCursorMarketplacePolicy({ diagnostic }) {
             metadata: { host, marketplace },
           }),
         );
-        return {
-          valid: false,
-          entries: [],
-          ...(normalizedPluginRoot ? { pluginRoot: normalizedPluginRoot } : {}),
-        };
+        return invalidMarketplaceResult(normalizedPluginRoot);
       }
       if (manifest.plugins.length > 500) {
         context.diagnostics.push(
@@ -124,11 +124,7 @@ function createCursorMarketplacePolicy({ diagnostic }) {
             metadata: { host, marketplace },
           }),
         );
-        return {
-          valid: false,
-          entries: [],
-          ...(normalizedPluginRoot ? { pluginRoot: normalizedPluginRoot } : {}),
-        };
+        return invalidMarketplaceResult(normalizedPluginRoot);
       }
       return {
         valid,
