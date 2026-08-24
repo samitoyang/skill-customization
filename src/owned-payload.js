@@ -1,8 +1,4 @@
-import { DESCRIPTOR_INVARIANTS } from "./descriptor-invariants.js";
-
-const RUNTIME_PATH_EXCLUSION = new RegExp(
-  DESCRIPTOR_INVARIANTS.patterns.runtimePathExclusion.source,
-);
+const EXCLUDED_ROOTS = new Set(["customization.json", "provenance"]);
 const VERSION_CONTROL_METADATA = new Set([".git", ".hg", ".svn"]);
 const EMBEDDED_SOURCE_METADATA = ".skill-source.json";
 
@@ -22,5 +18,6 @@ export function isSourceFingerprintExcludedPath(relativePath) {
 }
 
 export function isOwnedPayloadExcludedPath(relativePath) {
-  return typeof relativePath === "string" && RUNTIME_PATH_EXCLUSION.test(relativePath);
+  return EXCLUDED_ROOTS.has(relativePath.split("/", 1)[0].toLowerCase())
+    || isVersionControlMetadataPath(relativePath);
 }

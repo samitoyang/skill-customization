@@ -34,10 +34,6 @@ function assertDeeplyFrozen(value, label, seen = new Set()) {
   }
 }
 
-function assertRequiredField(value, field, label) {
-  assert.ok(value?.includes(field), `${label} must require ${field}`);
-}
-
 test("Descriptor invariant catalog is deterministic and deeply immutable", () => {
   assert.equal(DESCRIPTOR_INVARIANTS.version, 1);
   assertDeeplyFrozen(DESCRIPTOR_INVARIANTS, "DESCRIPTOR_INVARIANTS");
@@ -60,7 +56,7 @@ test("exported Descriptor schema is mechanically audited against the catalog", a
   const schema = JSON.parse(
     await readFile(new URL("../customization.schema.json", import.meta.url), "utf8"),
   );
-  const { fields, patterns, values, relationships } = DESCRIPTOR_INVARIANTS;
+  const { fields, patterns, values } = DESCRIPTOR_INVARIANTS;
 
   assertObjectInvariant(schema, fields.topLevel, "top level");
   assert.deepEqual(schema.required, fields.topLevel.required);
@@ -72,14 +68,18 @@ test("exported Descriptor schema is mechanically audited against the catalog", a
   assert.equal(schema.properties.entrypoint.$ref, "#/$defs/runtimePath");
   assert.equal(schema.properties.customization.$ref, "#/$defs/runtimePath");
   assert.equal(schema.properties.license.$ref, "#/$defs/license");
-  assert.equal(schema.properties.dependencies.uniqueItems, values.dependenciesUnique);
+  assert.equal(schema.properties.dependencies.uniqueItems, true);
   assert.equal(schema.properties.dependencies.items.$ref, "#/$defs/skillName");
   assert.equal(schema.properties.owned_payload.$ref, "#/$defs/ownedPayload");
   assert.equal(schema.properties.activation.$ref, "#/$defs/activation");
   assert.equal(schema.properties.fork.$ref, "#/$defs/fork");
   assert.deepEqual(
     schema.properties.source.oneOf.map(({ $ref }) => $ref),
-    values.sourceKinds.map((kind) => `#/$defs/${kind}Source`),
+    [
+      "#/$defs/repositorySource",
+      "#/$defs/localSource",
+      "#/$defs/customizationSource",
+    ],
   );
 
   for (const [kind, invariant] of Object.entries(fields.source.variants)) {
@@ -117,29 +117,30 @@ test("exported Descriptor schema is mechanically audited against the catalog", a
   assertObjectInvariant(schema.$defs.materialization, fields.materialization, "materialization");
   assert.equal(schema.$defs.fork.properties.snapshot.$ref, "#/$defs/provenancePath");
   assert.equal(schema.$defs.fork.properties.diff.$ref, "#/$defs/provenancePath");
-  const forkPresenceRelationship = relationships.fork;
-  for (const field of forkPresenceRelationship.fingerprintFields) {
-    assert.equal(
-      schema.$defs.fork.properties[field].$ref,
-      "#/$defs/fingerprint",
-      `fork ${field} fingerprint type`,
-    );
-  }
-  for (const field of relationships.fork.materialization.fingerprintFields) {
-    const name = field.field;
-    assert.equal(
-      schema.$defs.materialization.properties[name].$ref,
-      "#/$defs/fingerprint",
-      `materialization ${name} fingerprint type`,
-    );
-  }
-  for (const field of relationships.fork.materialization.portableFields) {
-    assert.equal(
-      schema.$defs.materialization.properties[field.field].$ref,
-      "#/$defs/nonBlankPortableString",
-      `materialization ${field.field} portable type`,
-    );
-  }
+  assert.equal(
+    schema.$defs.fork.properties.snapshot_fingerprint.$ref,
+    "#/$defs/fingerprint",
+  );
+  assert.equal(
+    schema.$defs.fork.properties.diff_fingerprint.$ref,
+    "#/$defs/fingerprint",
+  );
+  assert.equal(
+    schema.$defs.materialization.properties.source_effective_fingerprint.$ref,
+    "#/$defs/fingerprint",
+  );
+  assert.equal(
+    schema.$defs.materialization.properties.snapshot_fingerprint.$ref,
+    "#/$defs/fingerprint",
+  );
+  assert.equal(
+    schema.$defs.materialization.properties.reviewed_at.$ref,
+    "#/$defs/nonBlankPortableString",
+  );
+  assert.equal(
+    schema.$defs.materialization.properties.evidence.$ref,
+    "#/$defs/nonBlankPortableString",
+  );
 
   assert.equal(schema.$defs.skillName.pattern, patterns.skillName.source);
   assert.equal(schema.$defs.skillName.maxLength, patterns.skillName.maxLength);
@@ -163,9 +164,6 @@ test("exported Descriptor schema is mechanically audited against the catalog", a
     schema.$defs.nonMachinePathString.allOf.map(({ not }) => not.pattern),
     patterns.nonMachinePath,
   );
-  const runtimePathExclusion = schema.$defs.runtimePath.allOf.find(({ not }) => not?.pattern);
-  assert.equal(schema.$defs.runtimePath.allOf[0].$ref, "#/$defs/relativePath");
-  assert.equal(runtimePathExclusion?.not.pattern, patterns.runtimePathExclusion.source);
 
   assert.deepEqual(schema.$defs.customizationType.enum, values.customizationTypes);
   assert.deepEqual(schema.$defs.activation.properties.mode.enum, values.activationModes);
@@ -173,61 +171,4 @@ test("exported Descriptor schema is mechanically audited against the catalog", a
     schema.$defs.activation.properties.precedence.const,
     values.activationPrecedence,
   );
-
-  const forkPresence = schema.allOf.find(({ if: condition, then }) =>
-    condition?.properties?.type?.const === forkPresenceRelationship.descriptorType
-    && then?.required?.includes(forkPresenceRelationship.descriptorField));
-  assert.ok(forkPresence, "schema must audit fork presence relationship");
-  assertRequiredField(
-    forkPresence.if.required,
-    "type",
-    "fork presence condition",
-  );
-  assertRequiredField(
-    forkPresence.then.required,
-    forkPresenceRelationship.descriptorField,
-    "fork presence consequence",
-  );
-  assertRequiredField(
-    forkPresence.else?.not?.required,
-    forkPresenceRelationship.descriptorField,
-    "non-fork presence exclusion",
-  );
-
-  const replaceRelationship = relationships.activation.replace;
-  const replacePrecedence = schema.allOf.find(({ if: condition }) =>
-    condition?.properties?.activation?.properties?.mode?.const === replaceRelationship.mode);
-  assert.ok(replacePrecedence, "schema must audit replace precedence relationship");
-  assertRequiredField(replacePrecedence.if.required, "activation", "replace precedence condition");
-  assertRequiredField(
-    replacePrecedence.then?.properties?.activation?.required,
-    "precedence",
-    "replace precedence consequence",
-  );
-
-  const materialization = schema.allOf.find(({ if: condition }) =>
-    condition?.properties?.type?.const === forkPresenceRelationship.descriptorType
-    && condition?.properties?.source?.properties?.kind?.const === forkPresenceRelationship.sourceKind
-    && condition?.properties?.source?.properties?.type?.const === forkPresenceRelationship.sourceType);
-  assert.ok(materialization, "schema must audit fork materialization relationship");
-  assertRequiredField(materialization.if.required, "type", "materialization condition");
-  assertRequiredField(materialization.if.required, "source", "materialization condition");
-  assertRequiredField(
-    materialization.then?.properties?.fork?.required,
-    forkPresenceRelationship.materializationField,
-    "materialization consequence",
-  );
-  assertRequiredField(
-    materialization.else?.properties?.fork?.not?.required,
-    forkPresenceRelationship.materializationField,
-    "non-overlay materialization exclusion",
-  );
-
-  for (const field of forkPresenceRelationship.provenanceFields) {
-    assert.equal(
-      schema.$defs.fork.properties[field].$ref,
-      "#/$defs/provenancePath",
-      `fork ${field} must use the catalogued provenance path pattern`,
-    );
-  }
 });

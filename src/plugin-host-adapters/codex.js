@@ -255,59 +255,18 @@ function codexMarketplaceConfigEntries(contents) {
  * The adapter owns Codex locations, configuration interpretation, activation
  * policy, and diagnostics; injected functions emit host-independent records.
  *
- * @param {import("./interface.js").PluginHostAdapterToolkit} toolkit
+ * @param {import("./interface.js").CodexAdapterToolkit} toolkit
  * @returns {import("./interface.js").PluginHostAdapter}
  */
 export function createCodexAdapter({
   addPluginInstall,
   diagnostic,
   discoverMarketplaceManifests,
+  discoverVersionedPluginCache,
   pluginDirectories,
   readFile,
   safeDirectory,
 }) {
-  async function discoverCodexVersionedPluginCache({
-    cacheRoot,
-    boundary,
-    context,
-    scope,
-  }) {
-    const cacheMetadata = { host: "codex", source: "cache" };
-    for (const marketplace of await pluginDirectories(cacheRoot, context, cacheMetadata)) {
-      for (const plugin of await pluginDirectories(
-        marketplace.path,
-        context,
-        { ...cacheMetadata, marketplace: marketplace.entry.name },
-      )) {
-        for (const version of await pluginDirectories(
-          plugin.path,
-          context,
-          {
-            ...cacheMetadata,
-            marketplace: marketplace.entry.name,
-            name: plugin.entry.name,
-          },
-        )) {
-          await addPluginInstall({
-            installRoot: version.path,
-            boundary,
-            host: "codex",
-            marketplace: marketplace.entry.name,
-            name: plugin.entry.name,
-            version: version.entry.name,
-            scope,
-            source: {},
-            cache: { kind: "versioned", scope },
-            active: false,
-            context,
-            manifestPolicy: CODEX_MANIFEST_POLICY,
-            localPluginIdentity: codexPluginIdentity,
-          });
-        }
-      }
-    }
-  }
-
   async function codexMarketplaceDeclarations(codexHome, context) {
     const file = path.join(codexHome, "config.toml");
     let contents;
@@ -401,11 +360,15 @@ export function createCodexAdapter({
         { host: "codex", source: "cache" },
       );
       if (safeCacheRoot) {
-        await discoverCodexVersionedPluginCache({
+        await discoverVersionedPluginCache({
           cacheRoot: safeCacheRoot,
           boundary: safeCacheRoot,
           context,
+          host: "codex",
           scope: "global",
+          active: false,
+          manifestPolicy: CODEX_MANIFEST_POLICY,
+          localPluginIdentity: codexPluginIdentity,
         });
       }
     }

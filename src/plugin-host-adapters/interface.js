@@ -108,6 +108,7 @@
  * @property {PluginHostDiscoveryContext} context
  * @property {string} host
  * @property {string} scope
+ * @property {boolean} [active]
  * @property {Record<string, unknown>} [manifestPolicy]
  * @property {(metadata: Record<string, unknown>) => string} [localPluginIdentity]
  */
@@ -119,10 +120,8 @@
  * @property {(options: PluginHostInstallOptions) => Promise<boolean>} addPluginInstall
  * @property {(options: PluginHostDiagnosticInput) => PluginHostDiagnostic} diagnostic
  * @property {(options: PluginHostMarketplaceOptions) => Promise<boolean>} discoverMarketplaceManifests
- * @property {(options: PluginHostCacheOptions) => Promise<void>} discoverVersionedPluginCache
  * @property {(root: string, context: PluginHostDiscoveryContext, metadata: PluginHostMetadata, filter?: (entry: {name: string}) => boolean) => Promise<readonly PluginHostDirectoryEntry[]>} pluginDirectories
  * @property {(target: string, boundary: string, context: PluginHostDiscoveryContext, metadata: PluginHostMetadata, options?: {declared?: boolean}) => Promise<string | undefined>} safeDirectory
- * @property {(target: string, encoding: "utf8") => Promise<string>} readFile
  */
 
 /**
@@ -135,6 +134,13 @@
  *   realpath: (target: string) => Promise<string>,
  *   stat: (target: string) => Promise<{isDirectory: () => boolean}>,
  * }} ClaudeCodeAdapterToolkit
+ */
+
+/**
+ * @typedef {PluginHostAdapterToolkit & {
+ *   discoverVersionedPluginCache: (options: PluginHostCacheOptions) => Promise<void>,
+ *   readFile: (target: string, encoding: "utf8") => Promise<string>,
+ * }} CodexAdapterToolkit
  */
 
 /**

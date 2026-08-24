@@ -2220,7 +2220,7 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
 });
 
 
-test("plugin host adapters must return a result instead of exposing the context sink", async () => {
+test("plugin host adapters preserve legacy context-sink observations", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-missing-result-"));
   const home = path.join(root, "home");
   const skill = await writeSkill(path.join(root, "future-plugin", "skills"), "future-review");
@@ -2241,7 +2241,39 @@ test("plugin host adapters must return a result instead of exposing the context 
             origin: "plugin",
             host: "future-host",
           });
+          context.diagnostics.push({
+            kind: "plugin",
+            host: "future-host",
+            path: path.dirname(skill),
+            code: "FUTURE_DIAGNOSTIC",
+            message: "legacy context sink diagnostic",
+          });
         },
+      }],
+    },
+  });
+
+  assert.equal(result.groups[0].copies[0].path, skill);
+  assert.equal(result.pluginDiagnostics.some(
+    ({ code, host }) =>
+      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
+  ), false);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, host }) => code === "FUTURE_DIAGNOSTIC" && host === "future-host",
+  ));
+});
+
+test("plugin host adapters reject an empty undefined result", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-empty-result-"));
+  const result = await discoverAmbientSkills({
+    home: path.join(root, "home"),
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+    pluginOptions: {
+      hostSpecifications: [{
+        host: "future-host",
+        discover: async () => undefined,
       }],
     },
   });

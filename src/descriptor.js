@@ -1,11 +1,7 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import {
-  DESCRIPTOR_INVARIANTS,
-  freezeDescriptorValue,
-} from "./descriptor-invariants.js";
-import { getActivationNameConflict } from "./descriptor-activation.js";
+import { DESCRIPTOR_INVARIANTS } from "./descriptor-invariants.js";
 import { DescriptorError } from "./errors.js";
 import { normalizeRepositoryUrl } from "./normalization.js";
 import { isOwnedPayloadExcludedPath } from "./owned-payload.js";
@@ -172,7 +168,6 @@ const FINGERPRINT = new RegExp(patterns.fingerprint.source);
 const LOCAL_IDENTITY = new RegExp(patterns.localIdentity.source);
 const REPOSITORY_URL = new RegExp(patterns.repositoryUrl.source);
 const PORTABLE_RELATIVE_PATH = new RegExp(patterns.relativePath.source);
-const PROVENANCE_PATH = new RegExp(patterns.provenancePath.source);
 const NON_BLANK = new RegExp(patterns.nonBlank.source);
 
 function issue(errors, pointer, message) {
@@ -261,7 +256,14 @@ function validateSource(source, errors) {
   checkFingerprint(errors, source.effective_fingerprint, "/source/effective_fingerprint");
 
   if (source.kind === "repository") {
-    checkRequired(errors, source, "/source", fields.source.variants.repository.additionalRequired);
+    checkRequired(
+      errors,
+      source,
+      "/source",
+      fields.source.variants.repository.required.filter(
+        (key) => !fields.source.common.required.includes(key),
+      ),
+    );
     let canonicalRepository = false;
     try {
       const url = new URL(source.repository);
@@ -291,18 +293,32 @@ function validateSource(source, errors) {
       );
     }
   } else if (source.kind === "local") {
-    checkRequired(errors, source, "/source", fields.source.variants.local.additionalRequired);
+    checkRequired(
+      errors,
+      source,
+      "/source",
+      fields.source.variants.local.required.filter(
+        (key) => !fields.source.common.required.includes(key),
+      ),
+    );
     if (!LOCAL_IDENTITY.test(source.identity ?? "")) {
       issue(errors, "/source/identity", "must be a generated local:sha256 identity, never a filesystem path");
     }
   } else if (source.kind === "customization") {
-    checkRequired(errors, source, "/source", fields.source.variants.customization.additionalRequired);
+    checkRequired(
+      errors,
+      source,
+      "/source",
+      fields.source.variants.customization.required.filter(
+        (key) => !fields.source.common.required.includes(key),
+      ),
+    );
     checkStableId(errors, source.id, "/source/id");
     if (!values.customizationTypes.includes(source.type)) {
       issue(errors, "/source/type", "must be semantic-overlay or fork");
     }
   } else {
-    issue(errors, "/source/kind", `must be ${values.sourceKinds.join(", ")}`);
+    issue(errors, "/source/kind", "must be repository, local, or customization");
   }
 }
 
@@ -314,15 +330,15 @@ function validateActivation(descriptor, errors) {
     issue(errors, "/activation/mode", "must be coexist or replace");
   }
   if (mode === relationships.activation.coexist.mode) {
-    if (relationships.activation.coexist.precedence === "forbidden" && "precedence" in descriptor.activation) {
+    if ("precedence" in descriptor.activation) {
       issue(errors, "/activation/precedence", "is only valid for replace mode");
     }
-    if (getActivationNameConflict(mode, descriptor.name, descriptor.source?.skill_name) === mode) {
+    if (descriptor.name === descriptor.source?.skill_name) {
       issue(errors, "/name", "coexist mode requires a name different from the source skill");
     }
   }
   if (mode === relationships.activation.replace.mode) {
-    if (getActivationNameConflict(mode, descriptor.name, descriptor.source?.skill_name) === mode) {
+    if (descriptor.name !== descriptor.source?.skill_name) {
       issue(errors, "/name", "replace mode requires the same name as the source skill");
     }
     if (descriptor.activation.precedence !== relationships.activation.replace.precedence) {
@@ -332,18 +348,17 @@ function validateActivation(descriptor, errors) {
 }
 
 function validateFork(descriptor, errors) {
-  const forkRelationship = relationships.fork;
-  const materializationRelationship = forkRelationship.materialization;
-  if (descriptor.type !== forkRelationship.descriptorType) {
+  const materializationRelationship = relationships.fork.materialization;
+  if (descriptor.type !== materializationRelationship.descriptorType) {
     if (descriptor.fork !== undefined) issue(errors, "/fork", "is only valid for fork customizations");
     return;
   }
   if (!checkObject(errors, descriptor.fork, "/fork", FORK)) return;
   checkRequired(errors, descriptor.fork, "/fork", fields.fork.required);
-  for (const key of forkRelationship.provenanceFields) {
+  for (const key of ["snapshot", "diff"]) {
     if (!isPortableRelativePath(descriptor.fork[key])) {
       issue(errors, `/fork/${key}`, "must be a portable relative path");
-    } else if (!PROVENANCE_PATH.test(descriptor.fork[key])) {
+    } else if (!descriptor.fork[key].startsWith("provenance/")) {
       issue(
         errors,
         `/fork/${key}`,
@@ -351,37 +366,43 @@ function validateFork(descriptor, errors) {
       );
     }
   }
-  for (const field of forkRelationship.fingerprintFields) {
-    checkFingerprint(errors, descriptor.fork[field], `/fork/${field}`);
-  }
-  const needsMaterialization = descriptor.source?.kind === forkRelationship.sourceKind
-    && descriptor.source.type === forkRelationship.sourceType;
-  if (needsMaterialization && descriptor.fork[forkRelationship.materializationField] === undefined) {
+  checkFingerprint(errors, descriptor.fork.snapshot_fingerprint, "/fork/snapshot_fingerprint");
+  checkFingerprint(errors, descriptor.fork.diff_fingerprint, "/fork/diff_fingerprint");
+  const needsMaterialization = descriptor.source?.kind === materializationRelationship.sourceKind
+    && descriptor.source.type === materializationRelationship.sourceType;
+  if (needsMaterialization && descriptor.fork.materialization === undefined) {
     issue(errors, "/fork/materialization", "is required when forking an overlay source");
   }
-  if (!needsMaterialization && descriptor.fork[forkRelationship.materializationField] !== undefined) {
+  if (!needsMaterialization && descriptor.fork.materialization !== undefined) {
     issue(errors, "/fork/materialization", "is only valid when forking an overlay source");
   }
-  if (descriptor.fork[forkRelationship.materializationField] !== undefined) {
-    const materialization = descriptor.fork[forkRelationship.materializationField];
+  if (descriptor.fork.materialization !== undefined) {
+    const materialization = descriptor.fork.materialization;
     if (checkObject(errors, materialization, "/fork/materialization", MATERIALIZATION)) {
       checkRequired(errors, materialization, "/fork/materialization", fields.materialization.required);
-      for (const field of materializationRelationship.fingerprintFields) {
-        checkFingerprint(errors, materialization[field.field], field.path);
-        const reference = field.reference === "source"
-          ? descriptor.source
-          : descriptor.fork;
-        if (materialization[field.field] !== reference?.[field.referenceField]) {
-          issue(errors, field.path, field.equalityMessage);
-        }
+      checkFingerprint(
+        errors,
+        materialization[materializationRelationship.materializationSourceField],
+        materializationRelationship.sourceFingerprintPath,
+      );
+      checkFingerprint(
+        errors,
+        materialization[materializationRelationship.materializationSnapshotField],
+        materializationRelationship.snapshotFingerprintPath,
+      );
+      checkPortableNonEmptyString(errors, materialization.reviewed_at, "/fork/materialization/reviewed_at", "review timestamp");
+      checkPortableNonEmptyString(errors, materialization.evidence, "/fork/materialization/evidence", "review evidence");
+      if (
+        materialization[materializationRelationship.materializationSourceField]
+          !== descriptor.source?.[materializationRelationship.sourceFingerprintField]
+      ) {
+        issue(errors, materializationRelationship.sourceFingerprintPath, "must equal source.effective_fingerprint");
       }
-      for (const field of materializationRelationship.portableFields) {
-        checkPortableNonEmptyString(
-          errors,
-          materialization[field.field],
-          field.path,
-          field.label,
-        );
+      if (
+        materialization[materializationRelationship.materializationSnapshotField]
+          !== descriptor.fork[materializationRelationship.snapshotFingerprintField]
+      ) {
+        issue(errors, materializationRelationship.snapshotFingerprintPath, "must equal fork.snapshot_fingerprint");
       }
     }
   }
@@ -423,7 +444,7 @@ export function validateDescriptor(descriptor) {
     const seen = new Set();
     descriptor.dependencies.forEach((dependency, index) => {
       checkName(errors, dependency, `/dependencies/${index}`);
-      if (values.dependenciesUnique && seen.has(dependency)) issue(errors, `/dependencies/${index}`, "must be unique");
+      if (seen.has(dependency)) issue(errors, `/dependencies/${index}`, "must be unique");
       seen.add(dependency);
     });
   }
@@ -467,6 +488,13 @@ export function matchesCustomizationSource(source, descriptor) {
     && source.license === descriptor.license;
 }
 
+function freezeDeep(value, seen = new Set()) {
+  if (!value || typeof value !== "object" || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) freezeDeep(child, seen);
+  return Object.freeze(value);
+}
+
 function assertInventoryAvailable(descriptor, inventory) {
   for (const item of inventory ?? []) {
     if (item.id === descriptor.id && item.name !== descriptor.name) {
@@ -503,7 +531,7 @@ function diagnostic({
  * @returns {DescriptorIngestionFailure}
  */
 function failed(value) {
-  return /** @type {DescriptorIngestionFailure} */ (freezeDescriptorValue({
+  return /** @type {DescriptorIngestionFailure} */ (freezeDeep({
     ok: false,
     checked: null,
     diagnostics: [value],
@@ -515,7 +543,7 @@ function failed(value) {
  * @returns {DescriptorIngestionSuccess}
  */
 function successfulIngestion(value) {
-  return /** @type {DescriptorIngestionSuccess} */ (freezeDescriptorValue({
+  return /** @type {DescriptorIngestionSuccess} */ (freezeDeep({
     ok: true,
     checked: value,
     diagnostics: [],
@@ -776,7 +804,7 @@ export async function ingestDescriptor({ descriptorPath, inventory = [] } = {}) 
   }
 
   return successfulIngestion({
-    descriptor: freezeDescriptorValue(structuredClone(descriptor)),
+    descriptor: freezeDeep(structuredClone(descriptor)),
     location: {
       descriptorPath: absoluteDescriptorPath,
       root,

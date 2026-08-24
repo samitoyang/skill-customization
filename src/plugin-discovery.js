@@ -913,6 +913,7 @@ async function discoverVersionedPluginCache({
   context,
   host,
   scope,
+  active,
   manifestPolicy,
   localPluginIdentity,
 }) {
@@ -943,6 +944,7 @@ async function discoverVersionedPluginCache({
           source: {},
           cache: { kind: "versioned", scope },
           context,
+          ...(active === undefined ? {} : { active }),
           ...(manifestPolicy ? { manifestPolicy } : {}),
           ...(localPluginIdentity ? { localPluginIdentity } : {}),
         });
@@ -1646,6 +1648,7 @@ export const CODEX_HOST_ADAPTER = createCodexAdapter({
   addPluginInstall,
   diagnostic,
   discoverMarketplaceManifests,
+  discoverVersionedPluginCache,
   pluginDirectories,
   readFile,
   safeDirectory,
@@ -1695,7 +1698,11 @@ export async function discoverPluginSkillRoots({
       diagnostics: [],
     };
     try {
-      const result = await specification.discover(hostContext);
+      const discovered = await specification.discover(hostContext);
+      const result = discovered === undefined
+        && (hostContext.roots.length > 0 || hostContext.diagnostics.length > 0)
+        ? pluginHostResult(hostContext)
+        : discovered;
       appendPluginHostResult({
         result,
         host,

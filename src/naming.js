@@ -1,9 +1,7 @@
 import { DESCRIPTOR_INVARIANTS } from "./descriptor-invariants.js";
-import { getActivationNameConflict } from "./descriptor-activation.js";
 
 const KEBAB = new RegExp(DESCRIPTOR_INVARIANTS.patterns.skillName.source);
 const MAX_NAME_LENGTH = DESCRIPTOR_INVARIANTS.patterns.skillName.maxLength;
-const ACTIVATION_RELATIONSHIPS = DESCRIPTOR_INVARIANTS.relationships.activation;
 const AVOIDED_SUFFIXES = ["-overlay", "-fork", "-custom"];
 
 export function validateSkillName(name) {
@@ -40,10 +38,10 @@ export function validateCustomizationName({
     inventory.map((item) => (typeof item === "string" ? item : item.name)),
   );
   if (inventoryNames.has(name)) errors.push(`name ${name} collides with the inventory`);
-  if (getActivationNameConflict(mode, name, sourceName) === ACTIVATION_RELATIONSHIPS.coexist.mode) {
+  if (mode === "coexist" && name === sourceName) {
     errors.push("coexist mode requires a name different from the source");
   }
-  if (getActivationNameConflict(mode, name, sourceName) === ACTIVATION_RELATIONSHIPS.replace.mode) {
+  if (mode === "replace" && name !== sourceName) {
     errors.push("replace mode requires the same name as the source");
   }
   return errors;

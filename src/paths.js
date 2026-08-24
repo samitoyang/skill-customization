@@ -1,16 +1,16 @@
 import { lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { DESCRIPTOR_INVARIANTS } from "./descriptor-invariants.js";
 import { isOwnedPayloadExcludedPath } from "./owned-payload.js";
-
-const NON_MACHINE_PATHS = DESCRIPTOR_INVARIANTS.patterns.nonMachinePath.map(
-  (source) => new RegExp(source),
-);
 
 export function isMachineAbsolutePath(value) {
   if (typeof value !== "string") return false;
-  return NON_MACHINE_PATHS.some((pattern) => pattern.test(value));
+  return (
+    path.posix.isAbsolute(value) ||
+    path.win32.isAbsolute(value) ||
+    /^file:/i.test(value) ||
+    /^~[^\\/]*(?:[\\/]|$)/.test(value)
+  );
 }
 
 export function isPathContained(root, target) {

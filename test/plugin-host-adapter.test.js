@@ -99,6 +99,7 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
     await mkdir(cwd, { recursive: true });
 
     const marketplaceCalls = [];
+    const cacheCalls = [];
     const installCalls = [];
     const readCalls = [];
     const diagnostics = [];
@@ -106,6 +107,7 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
       addPluginInstall: async (options) => installCalls.push(options),
       diagnostic: (value) => value,
       discoverMarketplaceManifests: async (options) => marketplaceCalls.push(options),
+      discoverVersionedPluginCache: async (options) => cacheCalls.push(options),
       pluginDirectories: async (target) => {
         if (target === pluginsRoot) {
           return [{
@@ -154,7 +156,7 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
       file: path.join(codexHome, "config.toml"),
       encoding: "utf8",
     }]);
-    assert.equal(installCalls.length, 2);
+    assert.equal(installCalls.length, 1);
     assert.deepEqual(installCalls[0], {
       installRoot: path.join(pluginsRoot, "direct"),
       boundary: pluginsRoot,
@@ -170,23 +172,18 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
       },
       localPluginIdentity: installCalls[0].localPluginIdentity,
     });
-    assert.deepEqual(installCalls[1], {
-      installRoot: cacheVersionRoot,
+    assert.deepEqual(cacheCalls, [{
+      cacheRoot,
       boundary: cacheRoot,
-      host: "codex",
-      marketplace: "official",
-      name: "reviewer",
-      version: "1.0.0",
-      scope: "global",
-      source: {},
-      cache: { kind: "versioned", scope: "global" },
-      active: false,
       context,
+      host: "codex",
+      scope: "global",
+      active: false,
       manifestPolicy: {
         files: [".codex-plugin/plugin.json", "plugin.json", "manifest.json", "package.json"],
       },
-      localPluginIdentity: installCalls[1].localPluginIdentity,
-    });
+      localPluginIdentity: cacheCalls[0].localPluginIdentity,
+    }]);
     assert.equal(
       installCalls[0].localPluginIdentity({
         host: "codex",
@@ -194,6 +191,14 @@ test("Codex adapter interface owns bounded locations, catalogs, and configuratio
         name: "direct",
       }),
       "local:plugin:codex:local:direct",
+    );
+    assert.equal(
+      cacheCalls[0].localPluginIdentity({
+        host: "codex",
+        marketplace: "official",
+        name: "reviewer",
+      }),
+      "local:plugin:codex:official:reviewer",
     );
     assert.deepEqual(
       marketplaceCalls.map(({ marketplaceName, scope, active }) => ({
