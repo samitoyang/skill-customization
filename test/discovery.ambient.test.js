@@ -2069,6 +2069,7 @@ test("plugin host specifications extend discovery without changing candidate pol
     pluginOptions: {
       hostSpecifications: [{
         host: "future-host",
+        returnsResult: true,
         discover: async () => ({
           roots: [{
             kind: "plugin",
@@ -2119,6 +2120,7 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
     pluginOptions: {
       hostSpecifications: [{
         host: "future-host",
+        returnsResult: true,
         discover: async () => ({
           roots: [
             { owner: "plugin:future-host" },
@@ -2261,6 +2263,40 @@ test("plugin host adapters preserve legacy context-sink observations", async () 
   assert.ok(result.pluginDiagnostics.some(
     ({ code, host }) => code === "FUTURE_DIAGNOSTIC" && host === "future-host",
   ));
+});
+
+test("legacy plugin host adapters ignore incidental returned values", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-incidental-result-"));
+  const home = path.join(root, "home");
+  const skill = await writeSkill(path.join(root, "future-plugin", "skills"), "future-review");
+  const result = await discoverAmbientSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+    pluginOptions: {
+      hostSpecifications: [{
+        host: "future-host",
+        discover: async (context) => {
+          context.roots.push({
+            kind: "plugin",
+            path: path.dirname(skill),
+            owner: "plugin:future-host",
+            scope: "global",
+            origin: "plugin",
+            host: "future-host",
+          });
+          return 1;
+        },
+      }],
+    },
+  });
+
+  assert.equal(result.groups[0].copies[0].path, skill);
+  assert.equal(result.pluginDiagnostics.some(
+    ({ code, host }) =>
+      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
+  ), false);
 });
 
 test("plugin host adapters accept an empty legacy context sink and validate returned results", async () => {

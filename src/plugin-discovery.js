@@ -1700,9 +1700,9 @@ export async function discoverPluginSkillRoots({
     };
     try {
       const discovered = await specification.discover(hostContext);
-      const result = discovered === undefined && specification.returnsResult !== true
-        ? pluginHostResult(hostContext)
-        : discovered;
+      const result = specification.returnsResult === true
+        ? discovered
+        : pluginHostResult(hostContext);
       appendPluginHostResult({
         result,
         host,

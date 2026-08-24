@@ -126,6 +126,12 @@
 
 /**
  * @typedef {PluginHostAdapterToolkit & {
+ *   discoverVersionedPluginCache: (options: PluginHostCacheOptions) => Promise<void>,
+ * }} PluginHostCacheToolkit
+ */
+
+/**
+ * @typedef {PluginHostCacheToolkit & {
  *   canonicalContained: (candidate: string, boundary: string) => Promise<boolean>,
  *   metadataFor: (metadata: PluginHostMetadata) => PluginHostMetadata,
  *   pluginEvidence: (options: {metadata: PluginHostMetadata, source: Record<string, unknown>}) => {evidence: Record<string, unknown>},
@@ -137,8 +143,7 @@
  */
 
 /**
- * @typedef {PluginHostAdapterToolkit & {
- *   discoverVersionedPluginCache: (options: PluginHostCacheOptions) => Promise<void>,
+ * @typedef {PluginHostCacheToolkit & {
  *   readFile: (target: string, encoding: "utf8") => Promise<string>,
  * }} CodexAdapterToolkit
  */
