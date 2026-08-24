@@ -338,6 +338,58 @@ test("publication CAS tracks git worktree config presence", async () => {
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
+test("publication CAS tracks bounded Git include glob directories and additions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-git-include-glob-race-"));
+  const source = path.join(root, "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const includes = path.join(root, ".git", "includes");
+  await mkdir(includes, { recursive: true });
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(root, ".git", "config"), "[include]\npath = includes/*.config\n");
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  const release = await acquireStateLock(statePath);
+  let signalNow;
+  const nowReached = new Promise((resolve) => { signalNow = resolve; });
+  const pending = bindCustomization({
+    descriptor: descriptor(), sourcePath: source, context: "global", statePath,
+    roots: [{ path: path.join(root, "skills"), scope: "global", origin: "personal" }],
+    interactive: true, confirm: async () => true,
+    now: async () => {
+      await writeFile(path.join(includes, "new.config"), "[remote \"origin\"]\nurl = changed\n");
+      signalNow();
+      return "2026-08-04T00:00:00.000Z";
+    },
+  });
+  const settled = pending.then(
+    (value) => ({ status: "fulfilled", value }),
+    (error) => ({ status: "rejected", error }),
+  );
+  let gateError;
+  try { await waitForDiscoveryGate(nowReached, "git include glob race gate"); } catch (error) { gateError = error; } finally { await release(); }
+  const result = await settled;
+  if (gateError) throw gateError;
+  assert.equal(result.status, "rejected");
+  assert.equal(result.error.code, "BINDING_SOURCE_SELECTION_INVALID");
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+});
+
+test("publication ignores oversized Git include configs without blocking", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-git-include-size-"));
+  const source = path.join(root, "skills", "review");
+  await mkdir(path.join(root, ".git"), { recursive: true });
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(root, ".git", "config"), "[include]\npath = oversized.config\n");
+  await writeFile(path.join(root, ".git", "oversized.config"), "x".repeat(300 * 1024));
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  const binding = await bindCustomization({
+    descriptor: descriptor(), sourcePath: source, context: "global",
+    statePath: path.join(root, "state", "bindings.json"),
+    roots: [{ path: path.join(root, "skills"), scope: "global", origin: "personal" }],
+    interactive: true, confirm: async () => true,
+  });
+  assert.equal(binding.source.path, source);
+});
+
 test("plugin cache recovery preserves concurrent binding changes and deletions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-continuity-"));
   const versionOne = path.join(root, "plugin", "1", "skills", "review");

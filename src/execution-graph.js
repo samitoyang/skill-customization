@@ -52,6 +52,17 @@ function effectiveFingerprint(descriptor, ownedFingerprint, sourceFingerprint) {
   );
 }
 
+function publicationPaths(...values) {
+  return [...new Set(values.flat().filter((value) => typeof value === "string"))]
+    .sort((left, right) => left.localeCompare(right, "en"));
+}
+
+function bindingPublicationPaths(binding) {
+  return binding.evidenceRevision?.filesystem?.entries
+    ?.map(({ path: evidencePath }) => evidencePath)
+    ?? [];
+}
+
 async function sourceRoot(binding) {
   const lookup = binding.source.alias ?? binding.source.path;
   const target = await realpath(lookup);
@@ -260,6 +271,7 @@ async function visit({
       }],
       advisories,
       maintenanceHandler: null,
+      publicationPaths: [root],
     };
   }
 
@@ -368,6 +380,16 @@ async function visit({
     ],
     advisories,
     maintenanceHandler: null,
+    // Binding already records the complete source, provenance, replacement,
+    // plugin, and manager filesystem evidence it accepted.  Thread those
+    // opaque paths through the graph so recovery can CAS the entire nested
+    // execution result without repeating descriptor ingestion or Discovery
+    // while holding its publication lock.
+    publicationPaths: publicationPaths(
+      root,
+      bindingPublicationPaths(binding),
+      sourceResult.publicationPaths ?? [],
+    ),
   };
 }
 

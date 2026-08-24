@@ -37,6 +37,9 @@ import { readJsonState, updateJsonAtomic } from "./state.js";
 
 const EMPTY_STORE = { version: 1, bindings: {} };
 const MAX_RECOVERY_RETRIES = 1;
+const MAX_GIT_INCLUDE_FILES = 64;
+const MAX_GIT_INCLUDE_BYTES = 256 * 1024;
+const MAX_GIT_INCLUDE_GLOB_MATCHES = 64;
 
 const EXPECTED_RECOVERY_MISMATCH_CODES = new Set([
   "BINDING_CUSTOMIZATION_SOURCE_MISMATCH",
@@ -276,16 +279,48 @@ async function sourceProvenancePaths(sourceRoot) {
   }
   const paths = [path.join(root, "SKILL.md"), path.join(root, ".skill-source.json")];
   const includePaths = new Set();
-  const visitConfig = async (configPath) => {
-    if (includePaths.has(configPath)) return;
-    includePaths.add(configPath);
-    let contents;
+  const includeDirectories = new Set();
+  const safeConfigContents = async (configPath) => {
+    let info;
     try {
-      contents = await readFile(configPath, "utf8");
+      info = await lstat(configPath);
     } catch (error) {
-      if (["ENOENT", "ENOTDIR"].includes(error.code)) return;
+      if (["ENOENT", "ENOTDIR"].includes(error.code)) return undefined;
       throw error;
     }
+    // Git accepts arbitrary paths here.  Never let provenance collection
+    // block on a FIFO/device or consume an unbounded config file.
+    if (!info.isFile() || info.size > MAX_GIT_INCLUDE_BYTES) return undefined;
+    return readFile(configPath, "utf8");
+  };
+  const includeMatches = async (value, configPath) => {
+    if (!/[?*[]/.test(value)) return [value];
+    // Expand only a single directory level.  This covers Git's common
+    // includes/*.config form while keeping the CAS enumeration bounded.
+    const directory = path.dirname(value);
+    const pattern = path.basename(value);
+    includeDirectories.add(directory);
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR"].includes(error.code)) return [];
+      throw error;
+    }
+    // Git include globs are path patterns.  Bound the local expansion and
+    // retain the containing directory token so additions remain observable.
+    const escaped = pattern.replace(/[.+^${}()|\\]/g, "\\$&")
+      .replaceAll("*", ".*").replaceAll("?", ".");
+    const matcher = new RegExp(`^${escaped}$`);
+    return entries.filter((entry) => matcher.test(entry.name))
+      .slice(0, MAX_GIT_INCLUDE_GLOB_MATCHES)
+      .map((entry) => path.join(directory, entry.name));
+  };
+  const visitConfig = async (configPath) => {
+    if (includePaths.size >= MAX_GIT_INCLUDE_FILES || includePaths.has(configPath)) return;
+    includePaths.add(configPath);
+    const contents = await safeConfigContents(configPath);
+    if (contents === undefined) return;
     let inInclude = false;
     for (const line of contents.split(/\r?\n/)) {
       const section = /^\s*\[([^\]]+)\]\s*$/.exec(line);
@@ -299,8 +334,10 @@ async function sourceProvenancePaths(sourceRoot) {
       const included = value.startsWith("~/")
         ? path.join(os.homedir(), value.slice(2))
         : path.resolve(path.dirname(configPath), value);
-      paths.push(included);
-      await visitConfig(included);
+      for (const matched of await includeMatches(included, configPath)) {
+        paths.push(matched);
+        await visitConfig(matched);
+      }
     }
   };
   let current = root;
@@ -340,7 +377,27 @@ async function sourceProvenancePaths(sourceRoot) {
     if (parent === current) break;
     current = parent;
   }
-  return [...new Set(paths)];
+  return [...new Set([...paths, ...includeDirectories])];
+}
+
+function discoveryEvidencePaths(value, paths = new Set(), seen = new Set()) {
+  if (!value || typeof value !== "object" || seen.has(value)) return paths;
+  seen.add(value);
+  for (const [key, nested] of Object.entries(value)) {
+    if (typeof nested === "string" && /(?:^|_)(?:path|file)$|^(?:path|file|manifestPath|pluginManifest)$/i.test(key)) {
+      if (path.isAbsolute(nested)) paths.add(path.resolve(nested));
+      continue;
+    }
+    discoveryEvidencePaths(nested, paths, seen);
+  }
+  return paths;
+}
+
+function bindingDiscoveryEvidencePaths(inspection, replacementEvidence) {
+  const paths = discoveryEvidencePaths(inspection?.discoveryRevision?.discovery);
+  discoveryEvidencePaths(inspection?.evidence, paths);
+  discoveryEvidencePaths(replacementEvidence, paths);
+  return [...paths];
 }
 
 function stableRevisionValue(value) {
@@ -513,6 +570,7 @@ async function fullFingerprintRevision({
   }
 
   let effectiveFingerprint = expectedEffectiveFingerprint;
+  let graphFilesystem;
   if (descriptor.source.kind === "customization" && requireEffectiveMatch) {
     if (typeof recoveryContext?.recoverCustomizationExecution !== "function") {
       throw new BindingError(
@@ -544,6 +602,13 @@ async function fullFingerprintRevision({
       || typeof execution?.effectiveFingerprint !== "string"
     ) return undefined;
     effectiveFingerprint = execution.effectiveFingerprint;
+    graphFilesystem = await filesystemEvidenceRevision({
+      sourcePath: sourceRoot,
+      targetPath: sourceRoot,
+      entrypoint,
+      optionalAdditionalPaths: execution.publicationPaths ?? [],
+    });
+    if (!graphFilesystem) return undefined;
   } else if (requireEffectiveMatch) {
     effectiveFingerprint = sourceFingerprint;
   }
@@ -601,6 +666,7 @@ async function fullFingerprintRevision({
     replacement,
     replacementDiscoveryRevision,
     replacementContextRevision: currentReplacementContextRevision,
+    ...(graphFilesystem ? { graphFilesystem } : {}),
   };
 }
 
@@ -624,6 +690,10 @@ function fullFingerprintRevisionMatches(
     && isDeepStrictEqual(current.replacement, expectedReplacement)
     && current.replacementDiscoveryRevision === replacementEvidence?.discoveryRevision
     && current.replacementContextRevision === replacementEvidence?.contextRevision
+    && (
+      expected.graphFilesystem === undefined
+      || isDeepStrictEqual(current.graphFilesystem, expected.graphFilesystem)
+    )
   );
 }
 
@@ -632,6 +702,7 @@ function bindingEvidenceAdditionalPaths(
   targetPath,
   replacementEvidence,
   statePath,
+  inspection,
 ) {
   const normalizedStatePath = typeof statePath === "string"
     ? path.resolve(statePath)
@@ -648,6 +719,7 @@ function bindingEvidenceAdditionalPaths(
       .filter(({ copy, identities }) =>
         (copy ?? identities?.[0]?.copy)?.classification === "customization")
       .map(({ path: candidatePath }) => path.join(candidatePath, "customization.json")),
+    ...bindingDiscoveryEvidencePaths(inspection, replacementEvidence),
   ].filter((candidatePath) =>
     !normalizedStatePath || path.resolve(candidatePath) !== normalizedStatePath);
 }
@@ -1589,100 +1661,29 @@ async function validateBindingReadOnlyInternal({
   descriptor,
   binding,
   requireLocalIdentityMatch = false,
+  roots,
+  customizationRoot,
+  managerRecords = [],
+  discoveryOptions = {},
+  discovery,
+  discoverySnapshot,
+  revalidateSeededDiscovery = false,
 }) {
-  assertBindingRecord(descriptor, binding);
-  const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
-  const { lookupPath, currentTarget } = await currentBindingTarget(binding);
-  let info;
-  try {
-    info = await stat(currentTarget);
-  } catch (error) {
-    throw bindingErrorWithCause(
-      `binding source is unavailable: ${currentTarget}`,
-      { code: "BINDING_SOURCE_INVALID" },
-      error,
-    );
-  }
-  if (
-    descriptor.source.kind !== "customization"
-    && !info.isDirectory()
-    && path.basename(currentTarget) !== "SKILL.md"
-  ) {
-    throw new BindingError("a file binding source must be named SKILL.md", {
-      code: "BINDING_SOURCE_INVALID",
-    });
-  }
-  const sourceRoot = info.isDirectory() ? currentTarget : path.dirname(currentTarget);
-  let sourceMetadata;
-  const entrypoint = descriptor.source.kind === "customization"
-    ? (sourceMetadata = await inspectCustomizationSource({
-        descriptor,
-        info,
-        sourceRoot,
-      })).entrypoint
-    : (info.isDirectory() ? path.join(currentTarget, "SKILL.md") : currentTarget);
-  let declaredName = sourceMetadata?.declaredName;
-  if (declaredName === undefined) {
-    try {
-      declaredName = await readSkillName(entrypoint);
-    } catch (error) {
-      throw bindingErrorWithCause(
-        `binding source metadata is unavailable: ${entrypoint}`,
-        { code: "BINDING_SOURCE_INVALID" },
-        error,
-      );
-    }
-  }
-  if (declaredName !== descriptor.source.skill_name) {
-    throw new BindingError(
-      `binding source declares ${declaredName ?? "no name"}; expected ${descriptor.source.skill_name}`,
-      { code: "BINDING_SOURCE_NAME_MISMATCH" },
-    );
-  }
-  let fingerprint;
-  let entrypointFingerprint;
-  try {
-    [fingerprint, entrypointFingerprint] = await Promise.all([
-      fingerprintPath(sourceRoot),
-      fingerprintFile(entrypoint),
-    ]);
-  } catch (error) {
-    throw bindingErrorWithCause(
-      `binding source cannot be fingerprinted: ${error.message}`,
-      { code: "BINDING_SOURCE_INVALID" },
-      error,
-    );
-  }
-  const localEvidence = localSourceIdentity({
-    skillName: descriptor.source.skill_name,
-    fingerprint: entrypointFingerprint,
-  });
-  sourcePolicy.assertInspection?.({
+  // Use the full validation seam without invoking resolution or persistence.
+  // Recursive lock-side graph checks therefore re-evaluate targeted Discovery
+  // provenance and replacement activation for every nested binding.
+  return validateBindingInternal({
     descriptor,
-    localIdentity: localEvidence.identity,
-    requireLocalIdentityMatch,
-  });
-  return {
     binding,
-    currentTarget,
-    inspection: {
-      declaredName,
-      entrypoint,
-      fingerprint,
-      entrypointFingerprint,
-      localIdentity: localEvidence.identity,
-      ...sourceMetadata,
-      provenance: cloneRevisionValue(binding.source.provenance ?? []),
-      evidence: cloneRevisionValue(binding.evidenceRevision?.evidence ?? []),
-      selection: cloneRevisionValue(binding.source.selection),
-      ...(binding.source.pluginIdentity
-        ? { pluginIdentity: binding.source.pluginIdentity }
-        : {}),
-      ...(binding.source.pluginCache
-        ? { pluginCache: cloneRevisionValue(binding.source.pluginCache) }
-        : {}),
-    },
-  };
+    roots,
+    customizationRoot,
+    managerRecords,
+    discoveryOptions,
+    discovery,
+    discoverySnapshot,
+    requireLocalIdentityMatch,
+    revalidateSeededDiscovery,
+  });
 }
 
 const BINDING_OPERATIONS = Object.freeze({
@@ -2138,6 +2139,7 @@ async function revalidateRecoveredBinding({
       validation.currentTarget,
       validation.replacementEvidence,
       statePath,
+      validation.inspection,
     ),
     optionalAdditionalPaths: await sourceProvenancePaths(validation.currentTarget),
     treePaths: bindingEvidenceTreePaths(validation.currentTarget, validation.replacementEvidence),
@@ -2692,6 +2694,7 @@ async function bindCustomizationInternal({
       finalClassified.targetPath,
       finalReplacementEvidence,
       statePath,
+      finalInspection,
     ),
     optionalAdditionalPaths: await sourceProvenancePaths(finalClassified.targetPath),
     treePaths: bindingEvidenceTreePaths(finalClassified.targetPath, finalReplacementEvidence),
@@ -3136,29 +3139,24 @@ async function resolveBindingInternal({
               });
             }
             if (descriptor.source.kind === "customization") {
-              // The effective fingerprint is a recursive execution result,
-              // not a stat of the outer source. Re-run that graph check while
-              // holding the publication lock so a nested binding/source cannot
-              // change while this candidate is waiting. The adapter enforces
-              // read-only Binding operations and receives the already scoped
-              // discovery snapshot.
-              const currentFingerprintRevision = await fullFingerprintRevision({
-                descriptor,
-                sourceRoot: validatedForPublication.evidenceRevision?.canonicalSource
-                  ?? path.resolve(validatedForPublication.source.path),
+              // The full graph was checked immediately before the lock. Its
+              // publication paths cover every nested payload plus Binding's
+              // provenance, replacement, plugin, manager, and bounded Git
+              // evidence. Re-stat that fixed token here: it is read-only and
+              // atomic with persistence, but avoids recursive descriptor
+              // ingestion or Discovery inside the state lock.
+              const currentGraphFilesystem = await filesystemEvidenceRevision({
+                sourcePath: validatedForPublication.evidenceRevision?.canonicalSource
+                  ?? validatedForPublication.source.target,
+                targetPath: validatedForPublication.evidenceRevision?.canonicalTarget
+                  ?? validatedForPublication.source.target,
                 entrypoint: validatedForPublication.evidenceRevision?.entrypoint,
-                expectedEffectiveFingerprint:
-                  validatedForPublication.evidenceRevision?.effectiveFingerprint,
-                replacementEvidence: validatedForPublication.evidenceRevision?.replacement,
-                recoveryContext,
-                discoverySnapshot: recoveryContext.publicationDiscoverySnapshot,
-                requireEffectiveMatch: true,
-                readOnlyExecution: true,
+                optionalAdditionalPaths: finalFullFingerprintRevision
+                  ?.graphFilesystem?.entries.map(({ path: tokenPath }) => tokenPath) ?? [],
               });
-              if (!fullFingerprintRevisionMatches(
-                validatedForPublication.evidenceRevision,
-                currentFingerprintRevision,
-                validatedForPublication.evidenceRevision?.replacement,
+              if (!isDeepStrictEqual(
+                currentGraphFilesystem?.entries,
+                finalFullFingerprintRevision?.graphFilesystem?.entries,
               )) {
                 throw new BindingError("binding recovery fingerprint changed before publication", {
                   code: "BINDING_SOURCE_SELECTION_INVALID",
@@ -3166,7 +3164,7 @@ async function resolveBindingInternal({
                     expected: validatedForPublication.evidenceRevision,
                     current: {
                       ...validatedForPublication.evidenceRevision,
-                      ...currentFingerprintRevision,
+                      graphFilesystem: currentGraphFilesystem,
                     },
                   },
                 });
