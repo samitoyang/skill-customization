@@ -1,10 +1,12 @@
+/** @typedef {import("../provenance.js").PluginProvenanceObservation} PluginProvenanceObservation */
+
 /**
  * @typedef {object} PluginHostRootObservation
  * @property {string} path
  * @property {string} owner
  * @property {string} scope
  * @property {string} origin
- * @property {"plugin"} [kind]
+ * @property {"explicit" | "manager" | "plugin"} kind
  * @property {readonly string[]} [owners]
  * @property {string} [host]
  * @property {Record<string, unknown>} [plugin]
@@ -13,7 +15,7 @@
  * @property {string} [pluginRoot]
  * @property {string} [pluginIdentity]
  * @property {readonly string[]} [pluginIdentities]
- * @property {readonly Record<string, unknown>[]} [pluginEvidence]
+ * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
  * @property {boolean} [active]
  * @property {boolean} [singleSkill]
  * @property {boolean} [includeRootSkill]
@@ -35,11 +37,9 @@
  * @property {string} cwd
  * @property {Record<string, string | undefined>} env
  * @property {readonly string[]} workspaceDirectories
- * @property {Map<string, Set<string>>} marketplaceOwnedRootsByHost
  * @property {PluginHostRootObservation[]} roots
  * @property {PluginHostDiagnostic[]} diagnostics
  * @property {string} [host]
- * @property {string} [claudeHome]
  */
 
 /**
@@ -55,23 +55,80 @@
  */
 
 /**
+ * @typedef {object} PluginHostDiagnosticInput
+ * @property {string} host
+ * @property {string} path
+ * @property {string} code
+ * @property {string} message
+ * @property {Record<string, unknown>} [metadata]
+ */
+
+/**
+ * @typedef {object} PluginHostInstallOptions
+ * @property {string} installRoot
+ * @property {string} boundary
+ * @property {string} host
+ * @property {string} marketplace
+ * @property {string} name
+ * @property {string} scope
+ * @property {Record<string, unknown>} source
+ * @property {PluginHostDiscoveryContext} context
+ * @property {string} [version]
+ * @property {Record<string, unknown>} [cache]
+ * @property {boolean} [active]
+ * @property {Record<string, unknown>} [declaration]
+ * @property {string} [defaultSkillDirectory]
+ * @property {boolean} [includeDefaultSkillDirectory]
+ * @property {Record<string, unknown>} [manifestPolicy]
+ * @property {(metadata: Record<string, unknown>) => string} [localPluginIdentity]
+ */
+
+/**
+ * @typedef {object} PluginHostMarketplaceOptions
+ * @property {string} base
+ * @property {string} boundary
+ * @property {PluginHostDiscoveryContext} context
+ * @property {string} host
+ * @property {string} scope
+ * @property {string} [marketplaceName]
+ * @property {boolean} [active]
+ * @property {Record<string, unknown>} [manifestPolicy]
+ * @property {readonly string[]} [manifestFiles]
+ * @property {readonly string[]} [marketplaceRootDirectories]
+ * @property {(metadata: Record<string, unknown>) => string} [localPluginIdentity]
+ */
+
+/**
+ * @typedef {object} PluginHostCacheOptions
+ * @property {string} cacheRoot
+ * @property {string} boundary
+ * @property {PluginHostDiscoveryContext} context
+ * @property {string} host
+ * @property {string} scope
+ * @property {Record<string, unknown>} [manifestPolicy]
+ * @property {(metadata: Record<string, unknown>) => string} [localPluginIdentity]
+ */
+
+/** @typedef {Record<string, unknown>} PluginHostMetadata */
+
+/**
  * @typedef {object} PluginHostAdapterToolkit
- * @property {(options: Record<string, unknown>) => Promise<boolean>} addPluginInstall
- * @property {(options: Record<string, unknown>) => PluginHostDiagnostic} diagnostic
- * @property {(options: Record<string, unknown>) => Promise<boolean>} discoverMarketplaceManifests
- * @property {(options: Record<string, unknown>) => Promise<void>} discoverVersionedPluginCache
- * @property {(root: string, context: PluginHostDiscoveryContext, metadata: Record<string, unknown>, filter?: (entry: {name: string}) => boolean) => Promise<readonly PluginHostDirectoryEntry[]>} pluginDirectories
- * @property {(target: string, boundary: string, context: PluginHostDiscoveryContext, metadata: Record<string, unknown>, options?: {declared?: boolean}) => Promise<string | undefined>} safeDirectory
+ * @property {(options: PluginHostInstallOptions) => Promise<boolean>} addPluginInstall
+ * @property {(options: PluginHostDiagnosticInput) => PluginHostDiagnostic} diagnostic
+ * @property {(options: PluginHostMarketplaceOptions) => Promise<boolean>} discoverMarketplaceManifests
+ * @property {(options: PluginHostCacheOptions) => Promise<void>} discoverVersionedPluginCache
+ * @property {(root: string, context: PluginHostDiscoveryContext, metadata: PluginHostMetadata, filter?: (entry: {name: string}) => boolean) => Promise<readonly PluginHostDirectoryEntry[]>} pluginDirectories
+ * @property {(target: string, boundary: string, context: PluginHostDiscoveryContext, metadata: PluginHostMetadata, options?: {declared?: boolean}) => Promise<string | undefined>} safeDirectory
  * @property {(target: string, encoding: "utf8") => Promise<string>} readFile
  */
 
 /**
  * @typedef {PluginHostAdapterToolkit & {
  *   canonicalContained: (candidate: string, boundary: string) => Promise<boolean>,
- *   metadataFor: (metadata: Record<string, unknown>) => Record<string, unknown>,
- *   pluginEvidence: (options: Record<string, unknown>) => {evidence: Record<string, unknown>},
- *   pluginIdentity: (metadata: Record<string, unknown>) => string,
- *   readJsonObject: (file: string, context: PluginHostDiscoveryContext, options: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>,
+ *   metadataFor: (metadata: PluginHostMetadata) => PluginHostMetadata,
+ *   pluginEvidence: (options: {metadata: PluginHostMetadata, source: Record<string, unknown>}) => {evidence: Record<string, unknown>},
+ *   pluginIdentity: (metadata: PluginHostMetadata) => string,
+ *   readJsonObject: (file: string, context: PluginHostDiscoveryContext, options: PluginHostMetadata) => Promise<Record<string, unknown> | undefined>,
  *   realpath: (target: string) => Promise<string>,
  *   stat: (target: string) => Promise<{isDirectory: () => boolean}>,
  * }} ClaudeCodeAdapterToolkit
@@ -91,8 +148,30 @@
  * @returns {PluginHostDiscoveryResult}
  */
 export function pluginHostResult(context) {
+  const roots = context.roots.map((root) => freezeDeep(root));
+  const diagnostics = context.diagnostics.map((entry) => freezeDeep(entry));
   return Object.freeze({
-    roots: Object.freeze([...context.roots]),
-    diagnostics: Object.freeze([...context.diagnostics]),
+    roots: Object.freeze(roots),
+    diagnostics: Object.freeze(diagnostics),
   });
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is PluginHostDiscoveryResult}
+ */
+export function isPluginHostResult(value) {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && Array.isArray(value.roots)
+    && Array.isArray(value.diagnostics),
+  );
+}
+
+function freezeDeep(value, seen = new Set()) {
+  if (!value || typeof value !== "object" || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) freezeDeep(child, seen);
+  return Object.freeze(value);
 }

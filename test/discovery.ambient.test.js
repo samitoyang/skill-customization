@@ -1554,7 +1554,7 @@ test("Codex personal marketplaces discover .codex-plugin custom skill directorie
       name: "personal",
       plugins: [{
         name: "personal-plugin",
-        source: { source: "local", path: "./plugins/personal-plugin" },
+        source: { source: "local", path: "~/plugins/personal-plugin" },
       }],
     }),
   );
@@ -1927,6 +1927,79 @@ test("Codex cache versions and synced or bundled marketplace copies remain audit
 });
 
 
+test("Codex snapshot marketplace roots require canonical .tmp containment", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-codex-snapshot-escape-"));
+  const home = path.join(root, "home");
+  const codexHome = path.join(home, ".codex");
+  const outsideSyncedRoot = path.join(root, "outside-synced");
+  const outsideSyncedPlugin = await writeSkill(
+    path.join(outsideSyncedRoot, "plugins", "escaped-synced"),
+    "skills",
+    "escaped-snapshot",
+  );
+  await mkdir(path.join(outsideSyncedPlugin, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(outsideSyncedPlugin, ".codex-plugin", "plugin.json"),
+    JSON.stringify({ name: "escaped-synced" }),
+  );
+  await mkdir(path.join(outsideSyncedRoot, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(outsideSyncedRoot, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "escaped-synced-marketplace",
+      plugins: [{
+        name: "escaped-synced",
+        source: { source: "local", path: "./plugins/escaped-synced" },
+      }],
+    }),
+  );
+
+  const outsideBundledRoot = path.join(root, "outside-bundled");
+  const outsideBundledMarketplace = path.join(outsideBundledRoot, "official-bundled");
+  const outsideBundledPlugin = await writeSkill(
+    path.join(outsideBundledMarketplace, "plugins", "escaped-bundled"),
+    "skills",
+    "escaped-snapshot",
+  );
+  await mkdir(path.join(outsideBundledPlugin, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    path.join(outsideBundledPlugin, ".codex-plugin", "plugin.json"),
+    JSON.stringify({ name: "escaped-bundled" }),
+  );
+  await mkdir(path.join(outsideBundledMarketplace, ".agents", "plugins"), { recursive: true });
+  await writeFile(
+    path.join(outsideBundledMarketplace, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({
+      name: "escaped-bundled-marketplace",
+      plugins: [{
+        name: "escaped-bundled",
+        source: { source: "local", path: "./plugins/escaped-bundled" },
+      }],
+    }),
+  );
+
+  await mkdir(path.join(codexHome, ".tmp"), { recursive: true });
+  await symlink(outsideSyncedRoot, path.join(codexHome, ".tmp", "plugins"), "dir");
+  await symlink(
+    outsideBundledRoot,
+    path.join(codexHome, ".tmp", "bundled-marketplaces"),
+    "dir",
+  );
+
+  const result = await discoverAmbientSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: { CODEX_HOME: codexHome },
+    managerRecords: [],
+  });
+
+  assert.deepEqual(result.groups, []);
+  assert.ok(
+    result.pluginDiagnostics.filter(({ code }) => code === "PLUGIN_ROOT_ESCAPE").length >= 2,
+  );
+});
+
+
 
 
 
@@ -2022,6 +2095,33 @@ test("plugin host specifications extend discovery without changing candidate pol
   assert.equal(result.groups[0].copies[0].path, skill);
   assert.equal(result.groups[0].copies[0].plugin.host, "future-host");
   assert.deepEqual(result.groups[0].provenance, [identity]);
+});
+
+
+test("malformed plugin host results become diagnostics at the discovery seam", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-invalid-result-"));
+  const home = path.join(root, "home");
+  const result = await discoverAmbientSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+    pluginOptions: {
+      hostSpecifications: [{
+        host: "future-host",
+        discover: async () => ({
+          roots: [{ owner: "plugin:future-host" }],
+          diagnostics: [],
+        }),
+      }],
+    },
+  });
+
+  assert.deepEqual(result.groups, []);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, host }) =>
+      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
+  ));
 });
 
 

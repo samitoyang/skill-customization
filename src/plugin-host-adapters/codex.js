@@ -377,34 +377,56 @@ export function createCodexAdapter({
       manifestPolicy: CODEX_MANIFEST_POLICY,
       localPluginIdentity: codexPluginIdentity,
     });
-    const syncedMarketplaceRoot = path.join(codexHome, ".tmp", "plugins");
-    await discoverMarketplaceManifests({
-      base: path.join(syncedMarketplaceRoot, ".agents", "plugins"),
-      boundary: syncedMarketplaceRoot,
+    const safeCodexTmpRoot = await safeDirectory(
+      path.join(codexHome, ".tmp"),
+      codexHome,
       context,
-      host: "codex",
-      scope: "global",
-      active: false,
-      manifestPolicy: CODEX_MANIFEST_POLICY,
-      localPluginIdentity: codexPluginIdentity,
-    });
-    const bundledMarketplacesRoot = path.join(codexHome, ".tmp", "bundled-marketplaces");
-    for (const marketplace of await pluginDirectories(
-      bundledMarketplacesRoot,
-      context,
-      { host: "codex", source: "bundled-marketplace" },
-    )) {
-      await discoverMarketplaceManifests({
-        base: path.join(marketplace.path, ".agents", "plugins"),
-        boundary: marketplace.path,
+      { host: "codex", source: "tmp" },
+    );
+    if (safeCodexTmpRoot) {
+      const syncedMarketplaceRoot = await safeDirectory(
+        path.join(safeCodexTmpRoot, "plugins"),
+        safeCodexTmpRoot,
         context,
-        host: "codex",
-        scope: "global",
-        marketplaceName: marketplace.entry.name,
-        active: false,
-        manifestPolicy: CODEX_MANIFEST_POLICY,
-        localPluginIdentity: codexPluginIdentity,
-      });
+        { host: "codex", source: "synced-marketplace" },
+      );
+      if (syncedMarketplaceRoot) {
+        await discoverMarketplaceManifests({
+          base: path.join(syncedMarketplaceRoot, ".agents", "plugins"),
+          boundary: syncedMarketplaceRoot,
+          context,
+          host: "codex",
+          scope: "global",
+          active: false,
+          manifestPolicy: CODEX_MANIFEST_POLICY,
+          localPluginIdentity: codexPluginIdentity,
+        });
+      }
+      const bundledMarketplacesRoot = await safeDirectory(
+        path.join(safeCodexTmpRoot, "bundled-marketplaces"),
+        safeCodexTmpRoot,
+        context,
+        { host: "codex", source: "bundled-marketplaces" },
+      );
+      for (const marketplace of bundledMarketplacesRoot
+        ? await pluginDirectories(
+          bundledMarketplacesRoot,
+          context,
+          { host: "codex", source: "bundled-marketplace" },
+        )
+        : []) {
+        await discoverMarketplaceManifests({
+          base: path.join(marketplace.path, ".agents", "plugins"),
+          boundary: marketplace.path,
+          context,
+          host: "codex",
+          scope: "global",
+          marketplaceName: marketplace.entry.name,
+          active: false,
+          manifestPolicy: CODEX_MANIFEST_POLICY,
+          localPluginIdentity: codexPluginIdentity,
+        });
+      }
     }
     for (const workspace of context.workspaceDirectories) {
       await discoverMarketplaceManifests({

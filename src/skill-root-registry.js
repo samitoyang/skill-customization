@@ -9,6 +9,7 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
 });
 
 /** @typedef {import("./provenance.js").PluginProvenanceObservation} PluginProvenanceObservation */
+/** @typedef {import("./plugin-host-adapters/interface.js").PluginHostRootObservation} PluginHostRootObservation */
 /** @typedef {Record<string, unknown>} PluginRootMetadata */
 
 /**
@@ -41,30 +42,7 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  */
 
 /**
- * @typedef {object} LaterSkillRootObservation
- * @property {"explicit" | "manager" | "plugin"} kind
- * @property {string} path
- * @property {string} owner
- * @property {readonly string[]} [aliases]
- * @property {readonly string[]} [owners]
- * @property {string} scope
- * @property {string} origin
- * @property {boolean} [active]
- * @property {boolean} [singleSkill]
- * @property {boolean} [includeRootSkill]
- * @property {string} [host]
- * @property {PluginRootMetadata} [plugin]
- * @property {PluginRootMetadata} [pluginMetadata]
- * @property {string} [pluginManifest]
- * @property {string} [pluginRoot]
- * @property {readonly string[]} [pluginRoots]
- * @property {string} [pluginIdentity]
- * @property {readonly string[]} [pluginIdentities]
- * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
- */
-
-/**
- * @typedef {StandardSkillRootObservation | ConfiguredSkillRootObservation | LaterSkillRootObservation} SkillRootObservation
+ * @typedef {StandardSkillRootObservation | ConfiguredSkillRootObservation | PluginHostRootObservation} SkillRootObservation
  */
 
 /**

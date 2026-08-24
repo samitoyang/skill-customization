@@ -42,7 +42,7 @@ export function createClaudeCodeAdapter({
   safeDirectory,
   stat,
 }) {
-  async function addSyncedRoot({ root: syncedRoot, context }) {
+  async function addSyncedRoot({ root: syncedRoot, boundary, context }) {
     const metadata = metadataFor({
       host: "claude-code",
       marketplace: "synced",
@@ -52,7 +52,7 @@ export function createClaudeCodeAdapter({
     });
     const safeRoot = await safeDirectory(
       syncedRoot,
-      context.claudeHome,
+      boundary,
       context,
       metadata,
     );
@@ -194,7 +194,6 @@ export function createClaudeCodeAdapter({
     const claudeHome = path.resolve(
       stringValue(env.CLAUDE_CONFIG_DIR) ?? path.join(home, ".claude"),
     );
-    context.claudeHome = claudeHome;
     const pluginsRoot = path.join(claudeHome, "plugins");
     const safePluginsRoot = await safeDirectory(
       pluginsRoot,
@@ -206,6 +205,7 @@ export function createClaudeCodeAdapter({
       if (env.CLAUDE_CODE_SYNC_SKILLS === "1") {
         await addSyncedRoot({
           root: path.join(claudeHome, "skills", "synced"),
+          boundary: claudeHome,
           context,
         });
       }
@@ -326,6 +326,7 @@ export function createClaudeCodeAdapter({
     if (env.CLAUDE_CODE_SYNC_SKILLS === "1") {
       await addSyncedRoot({
         root: path.join(claudeHome, "skills", "synced"),
+        boundary: claudeHome,
         context,
       });
     }

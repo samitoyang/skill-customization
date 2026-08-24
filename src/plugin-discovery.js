@@ -15,7 +15,10 @@ import {
 import { isPathContained } from "./paths.js";
 import { createClaudeCodeAdapter } from "./plugin-host-adapters/claude-code.js";
 import { createCodexAdapter } from "./plugin-host-adapters/codex.js";
-import { pluginHostResult } from "./plugin-host-adapters/interface.js";
+import {
+  isPluginHostResult,
+  pluginHostResult,
+} from "./plugin-host-adapters/interface.js";
 import {
   GENERIC_MANIFEST_FILES,
   GENERIC_MARKETPLACE_MANIFEST_FILES,
@@ -852,20 +855,12 @@ async function cursorMarketplaceManifestStatus(root) {
   }
 }
 
-function marketplaceOwnedRoots(context, host) {
-  let roots = context.marketplaceOwnedRootsByHost.get(host);
-  if (!roots) {
-    roots = new Set();
-    context.marketplaceOwnedRootsByHost.set(host, roots);
-  }
-  return roots;
-}
-
 async function discoverCursorLocalPluginRoots({
   root,
   boundary = root,
   scope,
   context,
+  ownedRoots = new Set(),
 }) {
   const safeRoot = await safeDirectory(
     root,
@@ -874,7 +869,6 @@ async function discoverCursorLocalPluginRoots({
     { host: "cursor", source: "extension" },
   );
   if (!safeRoot) return;
-  const ownedRoots = marketplaceOwnedRoots(context, "cursor");
   for (const extension of await pluginDirectories(
     safeRoot,
     context,
@@ -894,6 +888,7 @@ async function discoverCursorLocalPluginRoots({
         marketplaceName: "local",
         manifestPolicy: CURSOR_MANIFEST_POLICY,
         marketplaceRootDirectories: [".cursor-plugin"],
+        ownedRoots,
       });
       if (marketplaceManifest.contained && discoveredMarketplace) continue;
     }
@@ -1027,6 +1022,7 @@ async function discoverGemini(context) {
 
 async function discoverCursor(context) {
   const { home, env } = context;
+  const ownedRoots = new Set();
   const cursorHome = path.resolve(
     stringValue(env.CURSOR_HOME) ?? path.join(home, ".cursor"),
   );
@@ -1041,12 +1037,14 @@ async function discoverCursor(context) {
     marketplaceName: "local",
     manifestPolicy: CURSOR_MANIFEST_POLICY,
     marketplaceRootDirectories: [".cursor-plugin"],
+    ownedRoots,
   });
   await discoverCursorLocalPluginRoots({
     root: globalRoot,
     boundary: cursorHome,
     scope: "global",
     context,
+    ownedRoots,
   });
   for (const workspace of context.workspaceDirectories) {
     const workspaceRoot = path.join(workspace, ".cursor", "plugins", "local");
@@ -1059,12 +1057,14 @@ async function discoverCursor(context) {
       marketplaceName: "local",
       manifestPolicy: CURSOR_MANIFEST_POLICY,
       marketplaceRootDirectories: [".cursor-plugin"],
+      ownedRoots,
     });
     await discoverCursorLocalPluginRoots({
       root: workspaceRoot,
       boundary: workspace,
       scope: "workspace",
       context,
+      ownedRoots,
     });
   }
 }
@@ -1089,24 +1089,30 @@ function marketplacePluginLocation(
   safeBase,
   declaredPluginRoot,
   marketplaceRootDirectories,
+  home,
 ) {
+  const expandedPath = configuredPath === "~"
+    ? home
+    : configuredPath.startsWith("~/")
+      ? path.join(home, configuredPath.slice(2))
+      : configuredPath;
   const sourceBase = marketplaceSourceBase(file, safeBase, marketplaceRootDirectories);
-  const normalized = configuredPath.replaceAll("\\", "/");
+  const normalized = expandedPath.replaceAll("\\", "/");
   const usesMarketplaceRoot = !declaredPluginRoot && sourceBase !== safeBase && (
     normalized === "."
     || normalized === "./"
     || normalized === "./plugins"
     || normalized.startsWith("./plugins/")
   );
-  const installRoot = path.isAbsolute(configuredPath)
-    ? configuredPath
+  const installRoot = path.isAbsolute(expandedPath)
+    ? expandedPath
     : path.resolve(
       declaredPluginRoot
         ? declaredPluginRoot
         : usesMarketplaceRoot
           ? sourceBase
           : safeBase,
-      configuredPath,
+      expandedPath,
     );
   return {
     installRoot,
@@ -1126,6 +1132,7 @@ async function discoverMarketplaceManifests({
   manifestFiles,
   marketplaceRootDirectories = [],
   localPluginIdentity,
+  ownedRoots,
 }) {
   const safeBase = await safeDirectory(
     base,
@@ -1335,6 +1342,7 @@ async function discoverMarketplaceManifests({
       safeBase,
       declaredPluginRoot,
       marketplaceRootDirectories,
+      context.home,
     );
     declaredPlugin = true;
     if (
@@ -1342,7 +1350,7 @@ async function discoverMarketplaceManifests({
       && await canonicalContained(location.installRoot, location.boundary)
     ) {
       const canonicalRoot = await realpath(location.installRoot).catch(() => undefined);
-      if (canonicalRoot) marketplaceOwnedRoots(context, host).add(canonicalRoot);
+      if (canonicalRoot) ownedRoots?.add(canonicalRoot);
     }
     await addPluginInstall({
       ...location,
@@ -1384,6 +1392,65 @@ function createPluginHostSpecification(host, discover) {
       return pluginHostResult(context);
     },
   });
+}
+
+function invalidPluginHostResultDiagnostic(host, targetPath, message) {
+  return diagnostic({
+    host,
+    path: targetPath,
+    code: "PLUGIN_HOST_DISCOVERY_INVALID_RESULT",
+    message,
+  });
+}
+
+function appendPluginHostResult({
+  result,
+  host,
+  targetPath,
+  roots,
+  diagnostics,
+}) {
+  if (!isPluginHostResult(result)) {
+    diagnostics.push(invalidPluginHostResultDiagnostic(
+      host,
+      targetPath,
+      `plugin discovery returned an invalid result for ${host}`,
+    ));
+    return;
+  }
+  for (const root of result.roots) {
+    if (
+      !root
+      || typeof root !== "object"
+      || typeof root.path !== "string"
+      || !root.path
+    ) {
+      diagnostics.push(invalidPluginHostResultDiagnostic(
+        host,
+        targetPath,
+        `plugin discovery returned an invalid root for ${host}`,
+      ));
+      continue;
+    }
+    roots.push(root);
+  }
+  for (const entry of result.diagnostics) {
+    if (
+      !entry
+      || typeof entry !== "object"
+      || typeof entry.path !== "string"
+      || typeof entry.code !== "string"
+      || typeof entry.message !== "string"
+    ) {
+      diagnostics.push(invalidPluginHostResultDiagnostic(
+        host,
+        targetPath,
+        `plugin discovery returned an invalid diagnostic for ${host}`,
+      ));
+      continue;
+    }
+    diagnostics.push(entry);
+  }
 }
 
 export const CLAUDE_CODE_HOST_ADAPTER = createClaudeCodeAdapter({
@@ -1435,7 +1502,6 @@ export async function discoverPluginSkillRoots({
       home,
       workspaceDirectories,
     }),
-    marketplaceOwnedRootsByHost: new Map(),
   };
   const roots = [];
   const diagnostics = [];
@@ -1451,8 +1517,13 @@ export async function discoverPluginSkillRoots({
     try {
       const result = await specification.discover(hostContext);
       const emitted = result ?? pluginHostResult(hostContext);
-      roots.push(...emitted.roots);
-      diagnostics.push(...emitted.diagnostics);
+      appendPluginHostResult({
+        result: emitted,
+        host,
+        targetPath: context.cwd,
+        roots,
+        diagnostics,
+      });
     } catch (error) {
       diagnostics.push(
         diagnostic({
