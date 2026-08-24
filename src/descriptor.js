@@ -5,6 +5,7 @@ import {
   DESCRIPTOR_INVARIANTS,
   freezeDescriptorValue,
 } from "./descriptor-invariants.js";
+import { getActivationNameConflict } from "./descriptor-activation.js";
 import { DescriptorError } from "./errors.js";
 import { normalizeRepositoryUrl } from "./normalization.js";
 import { isOwnedPayloadExcludedPath } from "./owned-payload.js";
@@ -316,18 +317,12 @@ function validateActivation(descriptor, errors) {
     if (relationships.activation.coexist.precedence === "forbidden" && "precedence" in descriptor.activation) {
       issue(errors, "/activation/precedence", "is only valid for replace mode");
     }
-    if (
-      relationships.activation.coexist.nameRule === "different-from-source"
-      && descriptor.name === descriptor.source?.skill_name
-    ) {
+    if (getActivationNameConflict(mode, descriptor.name, descriptor.source?.skill_name) === mode) {
       issue(errors, "/name", "coexist mode requires a name different from the source skill");
     }
   }
   if (mode === relationships.activation.replace.mode) {
-    if (
-      relationships.activation.replace.nameRule === "same-as-source"
-      && descriptor.name !== descriptor.source?.skill_name
-    ) {
+    if (getActivationNameConflict(mode, descriptor.name, descriptor.source?.skill_name) === mode) {
       issue(errors, "/name", "replace mode requires the same name as the source skill");
     }
     if (descriptor.activation.precedence !== relationships.activation.replace.precedence) {
