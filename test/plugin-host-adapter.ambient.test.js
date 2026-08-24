@@ -75,6 +75,10 @@ test("Claude Code adapter emits registry and provenance compatible observations"
         },
       }),
     );
+    await writeFile(
+      path.join(claudeHome, "plugins", "known_marketplaces.json"),
+      "{malformed\n",
+    );
     await writeSkill(path.join(marketplace, "plugins", "audit", "skills"), "audit");
     await mkdir(path.join(marketplace, ".claude-plugin"), { recursive: true });
     await writeFile(
@@ -110,7 +114,10 @@ test("Claude Code adapter emits registry and provenance compatible observations"
       checkProvenance({ observations: marketplaceRoot.pluginEvidence }).provenance,
       ["repository:https://github.com/example/audit"],
     );
-    assert.equal(context.diagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_METADATA"), false);
+    const malformed = context.diagnostics.find(
+      ({ code }) => code === "MALFORMED_PLUGIN_METADATA",
+    );
+    assert.equal(malformed?.host, "claude-code");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

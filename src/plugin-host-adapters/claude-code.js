@@ -34,6 +34,7 @@ function stringValue(value) {
  * @property {string} cwd
  * @property {Record<string, string | undefined>} env
  * @property {readonly string[]} workspaceDirectories
+ * @property {string} [host]
  * @property {object[]} roots
  * @property {object[]} diagnostics
  */
@@ -206,6 +207,7 @@ export function createClaudeCodeAdapter({
   }
 
   async function discoverClaude(context) {
+    context.host = "claude-code";
     const { home, env } = context;
     const claudeHome = path.resolve(
       stringValue(env.CLAUDE_CONFIG_DIR) ?? path.join(home, ".claude"),
