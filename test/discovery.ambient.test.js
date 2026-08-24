@@ -2109,6 +2109,8 @@ test("plugin host specifications extend discovery without changing candidate pol
 test("malformed plugin host results become diagnostics at the discovery seam", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-invalid-result-"));
   const home = path.join(root, "home");
+  const cyclicMetadata = {};
+  cyclicMetadata.self = cyclicMetadata;
   const result = await discoverAmbientSkills({
     home,
     cwd: path.join(root, "workspace"),
@@ -2163,6 +2165,33 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
               host: "future-host",
               pluginMetadata: new Set(["future"]),
             },
+            {
+              kind: "plugin",
+              path: path.join(root, "owner-mismatch"),
+              owner: "plugin:other-host",
+              owners: ["plugin:other-host"],
+              scope: "global",
+              origin: "plugin",
+              host: "future-host",
+            },
+            {
+              kind: "plugin",
+              path: path.join(root, "bigint-metadata"),
+              owner: "plugin:future-host",
+              scope: "global",
+              origin: "plugin",
+              host: "future-host",
+              plugin: { version: 1n },
+            },
+            {
+              kind: "plugin",
+              path: path.join(root, "cyclic-metadata"),
+              owner: "plugin:future-host",
+              scope: "global",
+              origin: "plugin",
+              host: "future-host",
+              pluginMetadata: cyclicMetadata,
+            },
           ],
           diagnostics: [{
             kind: "plugin",
@@ -2172,6 +2201,9 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
             message: "wrong host",
           }],
         }),
+      }, {
+        host: 42,
+        discover: async () => ({ roots: [], diagnostics: [] }),
       }],
     },
   });
@@ -2180,7 +2212,11 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
   assert.ok(result.pluginDiagnostics.filter(
     ({ code, host }) =>
       code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
-  ).length >= 7);
+  ).length >= 10);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, host }) =>
+      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "unknown",
+  ));
 });
 
 

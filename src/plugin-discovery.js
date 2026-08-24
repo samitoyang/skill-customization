@@ -1449,14 +1449,18 @@ function isPlainRecord(value) {
 }
 
 function isDataValue(value, seen = new Set()) {
-  if (value === null || value === undefined) return true;
-  if (["string", "number", "boolean", "bigint"].includes(typeof value)) return true;
+  if (value === null) return true;
+  if (typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
   if (typeof value !== "object") return false;
-  if (seen.has(value)) return true;
+  if (seen.has(value)) return false;
   seen.add(value);
-  if (Array.isArray(value)) return value.every((entry) => isDataValue(entry, seen));
-  return isPlainRecord(value)
-    && Object.values(value).every((entry) => isDataValue(entry, seen));
+  const valid = Array.isArray(value)
+    ? value.every((entry) => isDataValue(entry, seen))
+    : isPlainRecord(value)
+      && Object.values(value).every((entry) => isDataValue(entry, seen));
+  seen.delete(value);
+  return valid;
 }
 
 function isDataRecord(value) {
@@ -1518,12 +1522,13 @@ function isValidPluginHostRoot(root, host) {
       && root.kind === "plugin"
       && isNonEmptyString(root.path)
       && isNonEmptyString(root.owner)
-      && root.owner.startsWith("plugin:")
+      && root.owner === `plugin:${host}`
       && isNonEmptyString(root.scope)
       && root.origin === "plugin"
       && root.host === host
       && isOptionalStringArray(root.aliases)
       && isOptionalStringArray(root.owners)
+      && (root.owners === undefined || root.owners.includes(root.owner))
       && isOptionalRecord(root.plugin)
       && isOptionalRecord(root.pluginMetadata)
       && isOptionalString(root.pluginManifest)
@@ -1674,7 +1679,15 @@ export async function discoverPluginSkillRoots({
   const diagnostics = [];
   for (const specification of hostSpecifications) {
     if (!specification || typeof specification.discover !== "function") continue;
-    const host = specification.host ?? "unknown";
+    if (!isNonEmptyString(specification.host)) {
+      diagnostics.push(invalidPluginHostResultDiagnostic(
+        "unknown",
+        context.cwd,
+        "plugin host specification requires a non-empty string host",
+      ));
+      continue;
+    }
+    const host = specification.host;
     const hostContext = {
       ...context,
       host,

@@ -42,7 +42,60 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  */
 
 /**
- * @typedef {StandardSkillRootObservation | ConfiguredSkillRootObservation | PluginHostRootObservation} SkillRootObservation
+ * @typedef {object} LaterSkillRootObservation
+ * @property {"explicit" | "manager" | "plugin"} kind
+ * @property {string} path
+ * @property {string} owner
+ * @property {readonly string[]} [aliases]
+ * @property {readonly string[]} [owners]
+ * @property {string} scope
+ * @property {string} origin
+ * @property {string} [manager]
+ * @property {boolean} [active]
+ * @property {boolean} [singleSkill]
+ * @property {boolean} [includeRootSkill]
+ * @property {string} [host]
+ * @property {PluginRootMetadata} [plugin]
+ * @property {PluginRootMetadata} [pluginMetadata]
+ * @property {string} [pluginManifest]
+ * @property {string} [pluginRoot]
+ * @property {readonly string[]} [pluginRoots]
+ * @property {string} [pluginIdentity]
+ * @property {readonly string[]} [pluginIdentities]
+ * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
+ */
+
+/**
+ * @typedef {object} ExplicitSkillRootObservation
+ * @property {"explicit"} kind
+ * @property {string} path
+ * @property {string} owner
+ * @property {string} scope
+ * @property {string} origin
+ * @property {readonly string[]} [aliases]
+ * @property {readonly string[]} [owners]
+ * @property {boolean} [active]
+ * @property {boolean} [singleSkill]
+ * @property {boolean} [includeRootSkill]
+ */
+
+/**
+ * @typedef {object} ManagerSkillRootObservation
+ * @property {"manager"} kind
+ * @property {string} path
+ * @property {string} owner
+ * @property {string} scope
+ * @property {string} origin
+ * @property {string} [manager]
+ * @property {readonly string[]} [aliases]
+ * @property {readonly string[]} [owners]
+ * @property {boolean} [active]
+ * @property {boolean} [singleSkill]
+ * @property {boolean} [includeRootSkill]
+ */
+
+/**
+ * @typedef {StandardSkillRootObservation | ConfiguredSkillRootObservation | ExplicitSkillRootObservation | ManagerSkillRootObservation | LaterSkillRootObservation | PluginHostRootObservation} SkillRootObservation
  */
 
 /**
