@@ -1,12 +1,11 @@
 import path from "node:path";
 
 import { isPathContained } from "../paths.js";
-
-const GENERIC_MANIFEST_FILES = [
-  "plugin.json",
-  "manifest.json",
-  "package.json",
-];
+import {
+  GENERIC_MANIFEST_FILES,
+  GENERIC_MARKETPLACE_MANIFEST_FILES,
+  stringValue,
+} from "./metadata.js";
 
 const CLAUDE_MANIFEST_POLICY = Object.freeze({
   files: [".claude-plugin/plugin.json", ...GENERIC_MANIFEST_FILES],
@@ -14,18 +13,8 @@ const CLAUDE_MANIFEST_POLICY = Object.freeze({
 
 const CLAUDE_MARKETPLACE_MANIFEST_FILES = [
   ".claude-plugin/marketplace.json",
-  "marketplace.json",
-  "plugins.json",
-  "manifest.json",
+  ...GENERIC_MARKETPLACE_MANIFEST_FILES,
 ];
-
-function unique(values) {
-  return [...new Set(values.filter((value) => value !== undefined && value !== null))];
-}
-
-function stringValue(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
 
 /**
  * @typedef {object} ClaudeCodeAdapterContext

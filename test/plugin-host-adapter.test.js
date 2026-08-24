@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createClaudeCodeAdapter } from "../src/plugin-host-adapters/claude-code.js";
+import { createCodexAdapter } from "../src/plugin-host-adapters/codex.js";
 
 test("Claude Code adapter interface uses injected local filesystem helpers", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "claude-code-adapter-interface-"));
@@ -74,6 +75,115 @@ test("Claude Code adapter interface uses injected local filesystem helpers", asy
     assert.equal(installCalls.length, 1);
     assert.equal(installCalls[0].host, "claude-code");
     assert.equal(installCalls[0].scope, "global");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex adapter interface owns bounded locations, catalogs, and configuration policy", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-adapter-interface-"));
+  try {
+    const home = path.join(root, "home");
+    const cwd = path.join(root, "workspace");
+    const codexHome = path.join(home, ".codex");
+    const pluginsRoot = path.join(codexHome, "plugins");
+    const bundledMarketplacesRoot = path.join(codexHome, ".tmp", "bundled-marketplaces");
+    const configuredRoot = path.join(codexHome, "configured");
+    await mkdir(cwd, { recursive: true });
+
+    const cacheCalls = [];
+    const marketplaceCalls = [];
+    const installCalls = [];
+    const readCalls = [];
+    const diagnostics = [];
+    const localPluginIdentity = ({ host, marketplace, name }) =>
+      `local:plugin:${host}:${marketplace}:${name}`;
+    const adapter = createCodexAdapter({
+      addPluginInstall: async (options) => installCalls.push(options),
+      diagnostic: (value) => value,
+      discoverMarketplaceManifests: async (options) => marketplaceCalls.push(options),
+      discoverVersionedPluginCache: async (options) => cacheCalls.push(options),
+      localPluginIdentity,
+      pluginDirectories: async (target) => {
+        if (target === pluginsRoot) {
+          return [{
+            entry: { name: "direct" },
+            path: path.join(pluginsRoot, "direct"),
+          }];
+        }
+        if (target === bundledMarketplacesRoot) {
+          return [{
+            entry: { name: "bundled" },
+            path: path.join(bundledMarketplacesRoot, "bundled"),
+          }];
+        }
+        return [];
+      },
+      readFile: async (file, encoding) => {
+        readCalls.push({ file, encoding });
+        return `[marketplaces.team]\nsource_type = "local"\nsource = "configured"\n\n[marketplaces.broken]\nsource_type = local\nsource = "configured"\n`;
+      },
+      safeDirectory: async (target) => target,
+    });
+    const context = {
+      home,
+      cwd,
+      env: { CODEX_HOME: codexHome },
+      workspaceDirectories: [cwd],
+      roots: [],
+      diagnostics,
+    };
+
+    await adapter.discover(context);
+
+    assert.equal(context.host, "codex");
+    assert.deepEqual(readCalls, [{
+      file: path.join(codexHome, "config.toml"),
+      encoding: "utf8",
+    }]);
+    assert.equal(cacheCalls.length, 1);
+    assert.equal(cacheCalls[0].host, "codex");
+    assert.equal(cacheCalls[0].scope, "global");
+    assert.equal(cacheCalls[0].manifestPolicy.files[0], ".codex-plugin/plugin.json");
+    assert.equal(cacheCalls[0].localPluginIdentity, localPluginIdentity);
+    assert.equal(installCalls.length, 1);
+    assert.deepEqual(installCalls[0], {
+      installRoot: path.join(pluginsRoot, "direct"),
+      boundary: pluginsRoot,
+      host: "codex",
+      marketplace: "local",
+      name: "direct",
+      scope: "global",
+      source: {},
+      context,
+      manifestPolicy: {
+        files: [".codex-plugin/plugin.json", "plugin.json", "manifest.json", "package.json"],
+      },
+      localPluginIdentity,
+    });
+    assert.deepEqual(
+      marketplaceCalls.map(({ marketplaceName, scope, active }) => ({
+        marketplaceName,
+        scope,
+        active,
+      })),
+      [
+        { marketplaceName: "personal", scope: "global", active: true },
+        { marketplaceName: undefined, scope: "global", active: true },
+        { marketplaceName: "bundled", scope: "global", active: false },
+        { marketplaceName: undefined, scope: "workspace", active: true },
+        { marketplaceName: "team", scope: "global", active: true },
+      ],
+    );
+    assert.ok(marketplaceCalls.every(({ localPluginIdentity: identity }) =>
+      identity === localPluginIdentity));
+    assert.ok(marketplaceCalls.every(({ manifestPolicy }) =>
+      manifestPolicy.files[0] === ".codex-plugin/plugin.json"));
+    assert.ok(diagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_CONFIGURATION"));
+    assert.equal(
+      marketplaceCalls.at(-1).base,
+      path.join(configuredRoot, ".agents", "plugins"),
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

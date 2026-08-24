@@ -83,11 +83,11 @@ test("Claude Code adapter emits registry and provenance compatible observations"
         }],
       }),
     );
-    await writeSkill(path.join(codexPluginRoot, "skills"), "codex-review");
+    await writeSkill(path.join(codexPluginRoot, "custom"), "codex-review");
     await mkdir(path.join(codexPluginRoot, ".codex-plugin"), { recursive: true });
     await writeFile(
       path.join(codexPluginRoot, ".codex-plugin", "plugin.json"),
-      JSON.stringify({ name: "codex-reviewer", version: "1.0.0" }),
+      JSON.stringify({ name: "codex-reviewer", version: "1.0.0", skills: "custom" }),
     );
 
     const codexAdapter = PLUGIN_HOST_SPECIFICATIONS.find(({ host }) => host === "codex");
@@ -138,6 +138,10 @@ test("Claude Code adapter emits registry and provenance compatible observations"
       pluginOptions: { hostSpecifications },
     });
     assert.equal(codexResult.groups[0].copies[0].plugin.host, "codex");
+    assert.equal(
+      codexResult.groups[0].copies[0].pluginIdentity,
+      "local:plugin:codex:local:codex-reviewer",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
