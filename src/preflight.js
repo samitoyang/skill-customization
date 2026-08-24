@@ -23,6 +23,7 @@ export async function preflightCustomization({
       managerRecords,
       discoveryOptions,
     },
+    inspectExecution: inspectCustomizationExecution,
   });
   return inspectCustomizationExecution({
     descriptorPath,

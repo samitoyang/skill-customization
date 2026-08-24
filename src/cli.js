@@ -20,6 +20,7 @@ import { collectManagerRecords } from "./manager-collector.js";
 import { reconcileCustomization } from "./reconcile.js";
 import { preflightCustomization } from "./preflight.js";
 import { acceptMaintenanceUpdate } from "./maintenance.js";
+import { inspectCustomizationExecution } from "./execution-graph.js";
 
 function usage() {
   return `Usage:
@@ -293,6 +294,7 @@ function createContextBindingOperation(context) {
       ...context,
       discoveryOptions: discoveryOptions(context),
     },
+    inspectExecution: inspectCustomizationExecution,
   });
 }
 

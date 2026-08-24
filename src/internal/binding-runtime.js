@@ -11,6 +11,7 @@ export function createBindingRuntime({
   discovery,
   discoverySnapshot,
   selectSource,
+  inspectExecution,
 } = {}) {
   const runtime = Object.freeze({
     discovery,
@@ -27,5 +28,6 @@ export function createBindingRuntime({
     runtime,
     selectSource,
     createOperation: createBindingOperation,
+    inspectExecution,
   });
 }

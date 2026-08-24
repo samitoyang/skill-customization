@@ -31,6 +31,7 @@ import {
 } from "../src/fingerprint.js";
 import { generateLocalIdentity } from "../src/normalization.js";
 import { preflightCustomization } from "../src/preflight.js";
+import { inspectCustomizationExecution } from "../src/execution-graph.js";
 import { confirmDiscoverySelection } from "../src/discovery.js";
 import { discoverFixtureSkills } from "./support/discovery-modes.js";
 import { acquireStateLock } from "../src/state.js";
@@ -64,6 +65,24 @@ function descriptor(activation = { mode: "coexist" }) {
     },
     activation,
   };
+}
+
+const DISCOVERY_GATE_TIMEOUT_MS = 5_000;
+
+async function waitForDiscoveryGate(gate, label) {
+  let timer;
+  try {
+    await Promise.race([
+      gate,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} was not reached`));
+        }, DISCOVERY_GATE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 test("binding state uses XDG then the agents fallback", () => {
@@ -294,13 +313,23 @@ test("plugin cache recovery preserves concurrent binding changes and deletions",
     roots: [rootRecord(versionThree, "3")],
     discover: gatedDiscover,
   });
+  let targetedGateError;
   try {
-    await targetedDiscoveryReady;
+    await waitForDiscoveryGate(
+      targetedDiscoveryReady,
+      "targeted recovery discovery gate",
+    );
     store.bindings[key] = concurrentBinding;
     await writeFile(statePath, `${JSON.stringify(store, null, 2)}\n`);
+  } catch (error) {
+    targetedGateError = error;
   } finally {
     await release();
     releaseTargetedDiscovery();
+  }
+  if (targetedGateError) {
+    await pendingRecovery.catch(() => {});
+    throw targetedGateError;
   }
 
   const afterRace = await pendingRecovery;
@@ -337,14 +366,24 @@ test("plugin cache recovery preserves concurrent binding changes and deletions",
     roots: [rootRecord(versionFour, "4")],
     discover: gatedDeletionDiscover,
   });
+  let deletionGateError;
   try {
-    await deletionDiscoveryReady;
+    await waitForDiscoveryGate(
+      deletionDiscoveryReady,
+      "deletion recovery discovery gate",
+    );
     const deletedStore = await readBindingStore(statePath);
     delete deletedStore.bindings[key];
     await writeFile(statePath, `${JSON.stringify(deletedStore, null, 2)}\n`);
+  } catch (error) {
+    deletionGateError = error;
   } finally {
     await releaseDeletion();
     releaseDeletionDiscovery();
+  }
+  if (deletionGateError) {
+    await pendingDeletion.catch(() => {});
+    throw deletionGateError;
   }
 
   await assert.rejects(
@@ -597,10 +636,17 @@ test("plugin cache recovery returns a bounded failure when fresh validation reje
     roots: [rootRecord(sourceTwo, "2")],
     discover: gatedDiscover,
   });
+  let secondTargetGateError;
   try {
-    await secondTargetReady;
+    await waitForDiscoveryGate(secondTargetReady, "second targeted recovery gate");
+  } catch (error) {
+    secondTargetGateError = error;
   } finally {
     releaseSecondTarget();
+  }
+  if (secondTargetGateError) {
+    await pending.catch(() => {});
+    throw secondTargetGateError;
   }
 
   await assert.rejects(
@@ -940,6 +986,7 @@ test("versioned cache recovery checks a customization execution graph", async ()
     context,
     statePath,
     roots: [rootRecord(versionTwo, "2")],
+    inspectExecution: inspectCustomizationExecution,
   });
   assert.equal(recovered.source.path, path.resolve(versionTwo));
   assert.equal(recovered.source.pluginIdentity, identity);
