@@ -228,6 +228,10 @@ test("first-use publication rechecks full fingerprints in its atomic decision", 
       return "2026-08-04T00:00:00.000Z";
     },
   });
+  const settled = pending.then(
+    (value) => ({ status: "fulfilled", value }),
+    (error) => ({ status: "rejected", error }),
+  );
   let gateError;
   try {
     await waitForDiscoveryGate(nowReached, "atomic fingerprint race gate");
@@ -236,14 +240,12 @@ test("first-use publication rechecks full fingerprints in its atomic decision", 
   } finally {
     await release();
   }
+  const result = await settled;
   if (gateError) {
-    await pending.catch(() => {});
     throw gateError;
   }
-  await assert.rejects(
-    pending,
-    (error) => error.code === "BINDING_SOURCE_SELECTION_INVALID",
-  );
+  assert.equal(result.status, "rejected");
+  assert.equal(result.error.code, "BINDING_SOURCE_SELECTION_INVALID");
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
@@ -1246,11 +1248,14 @@ test("persisted replacement validation owns the current active inventory", async
     confirmReplace: async () => true,
   });
 
-  const persistedCandidate =
-    (await readBindingStore(statePath))
-      .bindings[bindingKey(replacement.id, "global")]
-      .evidenceRevision.replacement.candidates[0];
+  const persistedRecord =
+    (await readBindingStore(statePath)).bindings[bindingKey(replacement.id, "global")];
+  const persistedCandidate = persistedRecord.evidenceRevision.replacement.candidates[0];
+  const persistedReplacement = persistedRecord.evidenceRevision.replacement;
   assert.equal(persistedCandidate.fingerprint, await fingerprintPath(source));
+  assert.equal(typeof persistedCandidate.metadataRevision, "string");
+  assert.equal(typeof persistedReplacement.contextRevision, "string");
+  assert.equal(typeof persistedReplacement.discoveryRevision, "string");
   assert.ok(Array.isArray(persistedCandidate.provenance));
   assert.ok(Array.isArray(persistedCandidate.evidence));
   assert.equal(persistedCandidate.group.fingerprint, persistedCandidate.fingerprint);
@@ -1314,6 +1319,81 @@ test("replacement binding rechecks active inventory before atomic persistence", 
     }),
     (error) => error.code === "AMBIGUOUS_REPLACEMENT",
   );
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+});
+
+test("replacement publication rejects changed customization metadata", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "replace-customization-race-"));
+  const source = path.join(root, "source");
+  const replacement = path.join(root, "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  await mkdir(replacement, { recursive: true });
+  await writeFile(path.join(replacement, "SKILL.md"), "---\nname: review\n---\nreplacement\n");
+  await writeFile(path.join(replacement, "CUSTOMIZATION.md"), "Replacement.\n");
+  const replacementMetadata = {
+    ...descriptor({ mode: "replace", precedence: "customization-first" }),
+    id: "urn:skill-customization:fixture:replacement-metadata",
+    owned_payload: { reviewed_fingerprint: "placeholder" },
+  };
+  await writeFile(
+    path.join(replacement, "customization.json"),
+    `${JSON.stringify(replacementMetadata, null, 2)}\n`,
+  );
+  replacementMetadata.owned_payload.reviewed_fingerprint =
+    await payloadFingerprint(replacement);
+  await writeFile(
+    path.join(replacement, "customization.json"),
+    `${JSON.stringify(replacementMetadata, null, 2)}\n`,
+  );
+
+  const release = await acquireStateLock(statePath);
+  let signalNow;
+  const nowReached = new Promise((resolve) => {
+    signalNow = resolve;
+  });
+  const pending = bindCustomization({
+    descriptor: descriptor({ mode: "replace", precedence: "customization-first" }),
+    sourcePath: source,
+    customizationRoot: source,
+    context: "global",
+    statePath,
+    roots,
+    managerRecords: [],
+    discover: discoverFixtureSkills,
+    interactive: true,
+    confirm: async () => true,
+    confirmReplace: async () => true,
+    now: async () => {
+      const metadataPath = path.join(replacement, "customization.json");
+      const current = JSON.parse(await readFile(metadataPath, "utf8"));
+      current.source.review.revision = "changed-after-evidence";
+      await writeFile(
+        metadataPath,
+        `${JSON.stringify(current, null, 2)}\n`,
+      );
+      signalNow();
+      return "2026-08-04T00:00:00.000Z";
+    },
+  });
+  const settled = pending.then(
+    (value) => ({ status: "fulfilled", value }),
+    (error) => ({ status: "rejected", error }),
+  );
+  let gateError;
+  try {
+    await waitForDiscoveryGate(nowReached, "replacement metadata race gate");
+  } catch (error) {
+    gateError = error;
+  } finally {
+    await release();
+  }
+  const result = await settled;
+  if (gateError) throw gateError;
+  assert.equal(result.status, "rejected");
+  assert.equal(result.error.code, "BINDING_SOURCE_SELECTION_INVALID");
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
@@ -1564,6 +1644,54 @@ test("persisted binding does not trust stale seeded source provenance", async ()
       roots,
       managerRecords: currentRecords,
       discovery: seeded,
+    }),
+    (error) => error.code === "BINDING_SOURCE_PROVENANCE_MISMATCH",
+  );
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+});
+
+test("first use revalidates seeded source provenance without a selection", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-first-use-stale-seed-"));
+  const source = path.join(root, "skills", "review");
+  const statePath = path.join(root, "bindings.json");
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  const roots = [{ path: path.dirname(source), scope: "global", origin: "personal" }];
+  const originalRecords = [{
+    manager: "asm",
+    name: "review",
+    path: source,
+    source: {
+      kind: "repository",
+      repository: "https://github.com/example/skills",
+      upstreamPath: "skills/review/SKILL.md",
+    },
+  }];
+  const currentRecords = [{
+    ...originalRecords[0],
+    source: {
+      ...originalRecords[0].source,
+      repository: "https://github.com/other/skills",
+    },
+  }];
+  const seeded = await discoverFixtureSkills({
+    input: source,
+    roots,
+    managerRecords: originalRecords,
+  });
+
+  await assert.rejects(
+    bindCustomization({
+      descriptor: descriptor(),
+      sourcePath: source,
+      context: "global",
+      statePath,
+      roots,
+      managerRecords: currentRecords,
+      discovery: seeded,
+      discover: discoverFixtureSkills,
+      interactive: true,
+      confirm: async () => true,
     }),
     (error) => error.code === "BINDING_SOURCE_PROVENANCE_MISMATCH",
   );

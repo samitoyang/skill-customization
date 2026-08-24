@@ -1,7 +1,14 @@
 import { BindingError } from "../errors.js";
 
-function createReadOnlyBindingOperation(operation, statePath) {
+function createReadOnlyBindingOperation(operation, statePath, { graphReadOnly = false } = {}) {
   const readStore = () => operation.readBindingStore(statePath);
+  const validate = (intent) => {
+    if (!graphReadOnly) return operation.validateBinding(intent);
+    if (typeof operation.validateBindingReadOnly !== "function") {
+      throw new TypeError("read-only Binding validation is required for graph rechecks");
+    }
+    return operation.validateBindingReadOnly(intent);
+  };
   return Object.freeze({
     bindingKey: operation.bindingKey,
     readBindingStore: readStore,
@@ -15,10 +22,10 @@ function createReadOnlyBindingOperation(operation, statePath) {
         });
       }
       return (
-        await operation.validateBinding({ descriptor, binding, customizationRoot })
+        await validate({ descriptor, binding, customizationRoot })
       ).binding;
     },
-    validateBinding: (intent) => operation.validateBinding(intent),
+    validateBinding: (intent) => validate(intent),
   });
 }
 
@@ -46,6 +53,7 @@ export function createCustomizationRecoveryAdapter({
         statePath,
         discoverySnapshot,
         bindings,
+        readOnly = false,
       }) => inspectExecution({
         descriptorPath,
         context,
@@ -55,7 +63,9 @@ export function createCustomizationRecoveryAdapter({
         discoverySnapshot,
         // Candidate inspection must not create nested bindings before the outer
         // candidate itself has passed the persistence CAS.
-        bindings: createReadOnlyBindingOperation(bindings, statePath),
+        bindings: createReadOnlyBindingOperation(bindings, statePath, {
+          graphReadOnly: readOnly,
+        }),
       })
     : undefined;
   return createOperation({

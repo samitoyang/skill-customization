@@ -28,6 +28,7 @@ import { discoverPluginSkillRoots } from "./plugin-discovery.js";
 import {
   checkProvenance,
   confirmProvenanceDecision,
+  stableProvenanceKey,
 } from "./provenance.js";
 import { isPathContained } from "./paths.js";
 import {
@@ -862,7 +863,22 @@ export function createDiscoverySnapshot({
     return targeted.get(key);
   }
 
-  return Object.freeze({ inventory, discover: discoverTarget });
+  async function revision() {
+    // Read only promises already memoized by this request; never start a new
+    // inventory or targeted Discovery operation while comparing evidence.
+    const targetedResults = await Promise.all(
+      [...targeted.entries()]
+        .sort(([left], [right]) => left.localeCompare(right, "en"))
+        .map(async ([key, promise]) => [key, await promise]),
+    );
+    return stableProvenanceKey({
+      defaults,
+      ...(inventoryPromise ? { inventory: await inventoryPromise } : {}),
+      targeted: targetedResults,
+    });
+  }
+
+  return Object.freeze({ inventory, discover: discoverTarget, revision });
 }
 
 export function confirmDiscoverySelection({
