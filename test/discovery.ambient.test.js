@@ -2263,7 +2263,7 @@ test("plugin host adapters preserve legacy context-sink observations", async () 
   ));
 });
 
-test("plugin host adapters reject an empty undefined result", async () => {
+test("plugin host adapters accept an empty legacy context sink and validate returned results", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-empty-result-"));
   const result = await discoverAmbientSkills({
     home: path.join(root, "home"),
@@ -2274,14 +2274,22 @@ test("plugin host adapters reject an empty undefined result", async () => {
       hostSpecifications: [{
         host: "future-host",
         discover: async () => undefined,
+      }, {
+        host: "returned-result-host",
+        returnsResult: true,
+        discover: async () => undefined,
       }],
     },
   });
 
   assert.deepEqual(result.groups, []);
-  assert.ok(result.pluginDiagnostics.some(
+  assert.equal(result.pluginDiagnostics.some(
     ({ code, host }) =>
       code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
+  ), false);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, host }) =>
+      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "returned-result-host",
   ));
 });
 

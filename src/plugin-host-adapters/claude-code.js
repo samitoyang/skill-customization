@@ -334,6 +334,7 @@ export function createClaudeCodeAdapter({
 
   return Object.freeze({
     host: "claude-code",
+    returnsResult: true,
     discover: async (context) => {
       await discoverClaude(context);
       return pluginHostResult(context);

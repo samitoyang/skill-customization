@@ -1390,6 +1390,7 @@ function normalizeWorkspaceDirectories({ cwd, home, workspaceDirectories }) {
 function createPluginHostSpecification(host, discover) {
   return Object.freeze({
     host,
+    returnsResult: true,
     discover: async (context) => {
       await discover(context);
       return pluginHostResult(context);
@@ -1699,8 +1700,7 @@ export async function discoverPluginSkillRoots({
     };
     try {
       const discovered = await specification.discover(hostContext);
-      const result = discovered === undefined
-        && (hostContext.roots.length > 0 || hostContext.diagnostics.length > 0)
+      const result = discovered === undefined && specification.returnsResult !== true
         ? pluginHostResult(hostContext)
         : discovered;
       appendPluginHostResult({

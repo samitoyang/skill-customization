@@ -146,6 +146,7 @@
 /**
  * @typedef {object} PluginHostAdapter
  * @property {string} host
+ * @property {true} returnsResult
  * @property {(context: PluginHostDiscoveryContext) => Promise<PluginHostDiscoveryResult>} discover
  */
 
