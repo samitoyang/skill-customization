@@ -5,7 +5,10 @@ import path from "node:path";
 import test from "node:test";
 
 import { discoverAmbientSkills } from "./support/discovery-modes.js";
-import { CLAUDE_CODE_HOST_ADAPTER } from "../src/plugin-discovery.js";
+import {
+  CLAUDE_CODE_HOST_ADAPTER,
+  PLUGIN_HOST_SPECIFICATIONS,
+} from "../src/plugin-discovery.js";
 import { checkProvenance } from "../src/provenance.js";
 
 async function writeSkill(root, name, body = "fixture\n") {
@@ -38,6 +41,8 @@ test("Claude Code adapter emits registry and provenance compatible observations"
       "marketplaces",
       "team",
     );
+    const codexHome = path.join(home, ".codex");
+    const codexPluginRoot = path.join(codexHome, "plugins", "codex-reviewer");
     await mkdir(cwd, { recursive: true });
     await writeSkill(path.join(pluginRoot, "skills"), "review");
     await mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
@@ -78,6 +83,16 @@ test("Claude Code adapter emits registry and provenance compatible observations"
         }],
       }),
     );
+    await writeSkill(path.join(codexPluginRoot, "skills"), "codex-review");
+    await mkdir(path.join(codexPluginRoot, ".codex-plugin"), { recursive: true });
+    await writeFile(
+      path.join(codexPluginRoot, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "codex-reviewer", version: "1.0.0" }),
+    );
+
+    const codexAdapter = PLUGIN_HOST_SPECIFICATIONS.find(({ host }) => host === "codex");
+    assert.ok(codexAdapter);
+    const hostSpecifications = [CLAUDE_CODE_HOST_ADAPTER, codexAdapter];
 
     const result = await discoverAmbientSkills({
       input: "review",
@@ -85,11 +100,12 @@ test("Claude Code adapter emits registry and provenance compatible observations"
       cwd,
       env: {
         CLAUDE_CONFIG_DIR: claudeHome,
+        CODEX_HOME: codexHome,
         CLAUDE_CODE_SYNC_SKILLS: "0",
       },
       managerRecords: [],
       pluginOptions: {
-        hostSpecifications: [CLAUDE_CODE_HOST_ADAPTER],
+        hostSpecifications,
       },
     });
 
@@ -108,6 +124,20 @@ test("Claude Code adapter emits registry and provenance compatible observations"
       ({ code }) => code === "MALFORMED_PLUGIN_METADATA",
     );
     assert.equal(malformed?.host, "claude-code");
+
+    const codexResult = await discoverAmbientSkills({
+      input: "codex-review",
+      home,
+      cwd,
+      env: {
+        CLAUDE_CONFIG_DIR: claudeHome,
+        CODEX_HOME: codexHome,
+        CLAUDE_CODE_SYNC_SKILLS: "0",
+      },
+      managerRecords: [],
+      pluginOptions: { hostSpecifications },
+    });
+    assert.equal(codexResult.groups[0].copies[0].plugin.host, "codex");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

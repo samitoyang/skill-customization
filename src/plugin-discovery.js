@@ -1797,7 +1797,9 @@ export const CLAUDE_CODE_HOST_ADAPTER = createClaudeCodeAdapter({
   pluginEvidence,
   pluginIdentity,
   readJsonObject,
+  realpath,
   safeDirectory,
+  stat,
 });
 
 export const PLUGIN_HOST_SPECIFICATIONS = Object.freeze([

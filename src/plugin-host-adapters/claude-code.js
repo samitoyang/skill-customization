@@ -1,4 +1,3 @@
-import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { isPathContained } from "../paths.js";
@@ -58,7 +57,9 @@ export function createClaudeCodeAdapter({
   pluginEvidence,
   pluginIdentity,
   readJsonObject,
+  realpath,
   safeDirectory,
+  stat,
 }) {
   async function addSyncedRoot({ root: syncedRoot, context }) {
     const metadata = metadataFor({
