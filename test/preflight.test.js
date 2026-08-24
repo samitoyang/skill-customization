@@ -210,6 +210,8 @@ test("preflight flattens recursive overlays from base workflow through inner and
     ],
   );
   assert.equal(result.maintenanceHandler, null);
+  assert.equal(Object.hasOwn(result, "publicationPaths"), false);
+  assert.equal(JSON.stringify(result).includes("publicationToken"), false);
 });
 
 test("preflight reuses one discovery snapshot and refreshes it for the next operation", async () => {

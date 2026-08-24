@@ -390,6 +390,27 @@ test("publication ignores oversized Git include configs without blocking", async
   assert.equal(binding.source.path, source);
 });
 
+test("publication rejects Git include globs whose untracked tail exceeds the bound", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-git-include-glob-limit-"));
+  const source = path.join(root, "skills", "review");
+  const includes = path.join(root, ".git", "includes");
+  await mkdir(includes, { recursive: true });
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(root, ".git", "config"), "[include]\npath = includes/*.config\n");
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  await Promise.all([...Array(65)].map((_, index) =>
+    writeFile(path.join(includes, `${index}.config`), "[remote \"origin\"]\nurl = fixture\n")));
+  await assert.rejects(
+    bindCustomization({
+      descriptor: descriptor(), sourcePath: source, context: "global",
+      statePath: path.join(root, "state", "bindings.json"),
+      roots: [{ path: path.join(root, "skills"), scope: "global", origin: "personal" }],
+      interactive: true, confirm: async () => true,
+    }),
+    (error) => error.code === "BINDING_SOURCE_SELECTION_INVALID",
+  );
+});
+
 test("plugin cache recovery preserves concurrent binding changes and deletions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-continuity-"));
   const versionOne = path.join(root, "plugin", "1", "skills", "review");

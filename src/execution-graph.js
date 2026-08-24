@@ -57,6 +57,20 @@ function publicationPaths(...values) {
     .sort((left, right) => left.localeCompare(right, "en"));
 }
 
+// Publication evidence is an internal hand-off between Preflight and Binding
+// recovery.  Keep it off the result interface: callers receive an execution
+// plan, not the implementation details of the CAS that made it safe.
+function withPublicationToken(result, { paths = [], bindings = [] } = {}) {
+  Object.defineProperty(result, "publicationToken", {
+    value: Object.freeze({
+      paths: Object.freeze(publicationPaths(paths)),
+      bindings: Object.freeze(bindings.map(({ key, binding }) => Object.freeze({ key, binding }))),
+    }),
+    enumerable: false,
+  });
+  return result;
+}
+
 function bindingPublicationPaths(binding) {
   return binding.evidenceRevision?.filesystem?.entries
     ?.map(({ path: evidencePath }) => evidencePath)
@@ -260,7 +274,7 @@ async function visit({
       bindings,
     });
     const advisories = advisory ? [advisory] : [];
-    return {
+    return withPublicationToken({
       status: advisories.length > 0 ? "ready-with-advisory" : "ready",
       effectiveFingerprint: effectiveFingerprint(descriptor, ownedFingerprint),
       steps: [{
@@ -271,8 +285,7 @@ async function visit({
       }],
       advisories,
       maintenanceHandler: null,
-      publicationPaths: [root],
-    };
+    }, { paths: [root] });
   }
 
   let binding;
@@ -366,7 +379,7 @@ async function visit({
     sourceResult.effectiveFingerprint,
   );
   const advisories = [...sourceResult.advisories];
-  return {
+  return withPublicationToken({
     status: advisories.length > 0 ? "ready-with-advisory" : "ready",
     effectiveFingerprint: currentEffective,
     steps: [
@@ -380,17 +393,20 @@ async function visit({
     ],
     advisories,
     maintenanceHandler: null,
-    // Binding already records the complete source, provenance, replacement,
-    // plugin, and manager filesystem evidence it accepted.  Thread those
-    // opaque paths through the graph so recovery can CAS the entire nested
-    // execution result without repeating descriptor ingestion or Discovery
-    // while holding its publication lock.
-    publicationPaths: publicationPaths(
+  }, {
+    // Binding already records the source, provenance, replacement, plugin,
+    // and manager evidence it accepted.  Thread only this private token into
+    // recovery; public Preflight results keep their established shape.
+    paths: publicationPaths(
       root,
       bindingPublicationPaths(binding),
-      sourceResult.publicationPaths ?? [],
+      sourceResult.publicationToken?.paths ?? [],
     ),
-  };
+    bindings: [
+      { key: bindings.bindingKey(descriptor.id, context), binding },
+      ...(sourceResult.publicationToken?.bindings ?? []),
+    ],
+  });
 }
 
 export async function inspectCustomizationExecution({
