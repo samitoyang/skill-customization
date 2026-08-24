@@ -1,0 +1,117 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import { CLAUDE_CODE_HOST_ADAPTER } from "../src/plugin-discovery.js";
+import { checkProvenance } from "../src/provenance.js";
+import { normalizeSkillRootObservations } from "../src/skill-root-registry.js";
+
+async function writeSkill(root, name, body = "fixture\n") {
+  const skill = path.join(root, name);
+  await mkdir(skill, { recursive: true });
+  await writeFile(
+    path.join(skill, "SKILL.md"),
+    `---\nname: ${name}\ndescription: Fixture\n---\n${body}`,
+  );
+  return skill;
+}
+
+function adapterContext({ home, cwd, claudeHome, workspaceDirectories }) {
+  return {
+    home,
+    cwd,
+    env: {
+      CLAUDE_CONFIG_DIR: claudeHome,
+      CLAUDE_CODE_SYNC_SKILLS: "0",
+    },
+    workspaceDirectories,
+    roots: [],
+    diagnostics: [],
+  };
+}
+
+test("Claude Code adapter emits registry and provenance compatible observations", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-code-adapter-"));
+  try {
+    const home = path.join(root, "home");
+    const cwd = path.join(root, "workspace");
+    const claudeHome = path.join(home, ".claude");
+    const pluginRoot = path.join(
+      claudeHome,
+      "plugins",
+      "cache",
+      "official",
+      "reviewer",
+      "1.0.0",
+    );
+    const marketplace = path.join(
+      claudeHome,
+      "plugins",
+      "marketplaces",
+      "team",
+    );
+    await mkdir(cwd, { recursive: true });
+    await writeSkill(path.join(pluginRoot, "skills"), "review");
+    await mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
+    await writeFile(
+      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+      JSON.stringify({
+        name: "reviewer",
+        version: "1.0.0",
+        repository: "https://github.com/example/reviewer",
+      }),
+    );
+    await writeFile(
+      path.join(claudeHome, "plugins", "installed_plugins.json"),
+      JSON.stringify({
+        plugins: {
+          "reviewer@official": [{
+            scope: "user",
+            installPath: pluginRoot,
+            version: "1.0.0",
+          }],
+        },
+      }),
+    );
+    await writeSkill(path.join(marketplace, "plugins", "audit", "skills"), "audit");
+    await mkdir(path.join(marketplace, ".claude-plugin"), { recursive: true });
+    await writeFile(
+      path.join(marketplace, ".claude-plugin", "marketplace.json"),
+      JSON.stringify({
+        name: "team",
+        plugins: [{
+          name: "audit",
+          source: "./plugins/audit",
+          repository: "https://github.com/example/audit",
+        }],
+      }),
+    );
+
+    const context = adapterContext({
+      home,
+      cwd,
+      claudeHome,
+      workspaceDirectories: [cwd],
+    });
+    await CLAUDE_CODE_HOST_ADAPTER.discover(context);
+
+    assert.ok(context.roots.length >= 2);
+    const normalized = normalizeSkillRootObservations(context.roots);
+    assert.deepEqual(normalized.diagnostics, []);
+    assert.ok(normalized.roots.some(({ pluginIdentity }) =>
+      pluginIdentity === "local:plugin:claude-code:official:reviewer"));
+    const marketplaceRoot = normalized.roots.find(({ pluginIdentity }) =>
+      pluginIdentity === "local:plugin:claude-code:team:audit");
+    assert.ok(marketplaceRoot);
+    assert.equal(marketplaceRoot.active, false);
+    assert.deepEqual(
+      checkProvenance({ observations: marketplaceRoot.pluginEvidence }).provenance,
+      ["repository:https://github.com/example/audit"],
+    );
+    assert.equal(context.diagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_METADATA"), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
