@@ -138,15 +138,16 @@ function selectBindingSource(
 }
 
 /**
- * Internal operation seam for callers that already own one Discovery pass.
- * The returned methods keep the caller-facing Binding intent free of the
- * request-scoped snapshot and other lifecycle state.
+ * Internal operation seam for callers that need to share one request-scoped
+ * Discovery snapshot. The returned methods keep caller intent free of the
+ * snapshot and other lifecycle state.
  */
 export function createBindingOperation({
   discovery,
   discoverySnapshot,
   roots,
   managerRecords = [],
+  discoveryOptions: operationDiscoveryOptions = {},
   discover,
   selectSource,
 } = {}) {
@@ -154,6 +155,7 @@ export function createBindingOperation({
     discovery,
     roots,
     managerRecords,
+    options: operationDiscoveryOptions,
     ...(discover ? { discover } : {}),
   });
   const withOperationContext = (options = {}) => ({
@@ -168,12 +170,6 @@ export function createBindingOperation({
   const operation = {
     bindingKey,
     readBindingStore,
-    inspectCustomizationExecution: (options) =>
-      inspectCustomizationExecution({
-        ...options,
-        discoverySnapshot: operationDiscovery,
-        bindings: operation,
-      }),
     bindCustomization: (options) =>
       bindCustomizationInternal(withOperationContext(options)),
     resolveBinding: (options) =>
@@ -182,6 +178,15 @@ export function createBindingOperation({
       validateBindingInternal(withOperationContext(options)),
   };
   return Object.freeze(operation);
+}
+
+function bindingExecutionAdapter(operation) {
+  return Object.freeze({
+    bindingKey: operation.bindingKey,
+    readBindingStore: operation.readBindingStore,
+    resolveBinding: operation.resolveBinding,
+    validateBinding: operation.validateBinding,
+  });
 }
 
 function matchingRoot(targetPath, roots) {
@@ -837,22 +842,15 @@ async function recoverMissingPluginBinding({
   ) return undefined;
   // A cache path is replaceable local state; continuity is safe only for one
   // stable plugin identity and one already reviewed effective fingerprint.
-  let discovery;
+  let inventory;
   try {
-    if (discoverySnapshot) {
-      const inventory = await discoverySnapshot.inventory();
-      discovery = inventory.groups.some(
-        ({ name }) => name === descriptor.source.skill_name,
-      )
-        ? inventory
-        : await discoverySnapshot.discover({ input: descriptor.source.skill_name });
-    } else {
-      discovery = await discoverSkills({
-        input: descriptor.source.skill_name,
-        roots,
-        managerRecords,
-      });
-    }
+    inventory = discoverySnapshot
+      ? await discoverySnapshot.inventory()
+      : await discoverSkills({
+          input: descriptor.source.skill_name,
+          roots,
+          managerRecords,
+        });
   } catch (error) {
     if (error.code === "NO_LOCAL_COPY") return undefined;
     throw error;
@@ -860,39 +858,53 @@ async function recoverMissingPluginBinding({
   const excludedRoot = descriptor.activation.mode === "replace" && customizationRoot
     ? await realpath(customizationRoot).catch(() => path.resolve(customizationRoot))
     : undefined;
-  const matches = [];
-  for (const group of discovery.groups) {
-    if (group.name !== descriptor.source.skill_name) continue;
-    for (const copy of group.copies) {
-      if (copy.active === false) continue;
-      if (
-        excludedRoot
-        && path.resolve(copy.realPath ?? copy.path) === excludedRoot
-      ) continue;
-      const cacheDecision = checkProvenanceCache(
-        checkedProvenanceFor(copy),
-        { pluginIdentity, pluginCache, sourceScope: copy.scope },
-      );
-      if (!cacheDecision.cacheEligible) continue;
-      const effectiveFingerprint = await sourcePolicy.recoveryFingerprint({
-        recoveryContext,
-        group,
-        copy,
-      });
-      if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
-      if (
-        sourcePolicy.matchesRecoveredCopy
-        && !(await sourcePolicy.matchesRecoveredCopy({ descriptor, copy }))
-      ) continue;
-      const provenanceDecision = checkProvenanceSelection(
-        cacheDecision.decision,
-        descriptor.source,
-      );
-      const provenance = provenanceDecision.selectedProvenance
-        ?? provenanceDecision.compatibleProvenance[0];
-      if (provenanceDecision.selectionEligible && provenance) {
-        matches.push({ group, copy, provenance });
+  const findMatches = async (discovery) => {
+    const matches = [];
+    for (const group of discovery.groups) {
+      if (group.name !== descriptor.source.skill_name) continue;
+      for (const copy of group.copies) {
+        if (copy.active === false) continue;
+        if (
+          excludedRoot
+          && path.resolve(copy.realPath ?? copy.path) === excludedRoot
+        ) continue;
+        const cacheDecision = checkProvenanceCache(
+          checkedProvenanceFor(copy),
+          { pluginIdentity, pluginCache, sourceScope: copy.scope },
+        );
+        if (!cacheDecision.cacheEligible) continue;
+        const effectiveFingerprint = await sourcePolicy.recoveryFingerprint({
+          recoveryContext,
+          group,
+          copy,
+        });
+        if (effectiveFingerprint !== descriptor.source.effective_fingerprint) continue;
+        if (
+          sourcePolicy.matchesRecoveredCopy
+          && !(await sourcePolicy.matchesRecoveredCopy({ descriptor, copy }))
+        ) continue;
+        const provenanceDecision = checkProvenanceSelection(
+          cacheDecision.decision,
+          descriptor.source,
+        );
+        const provenance = provenanceDecision.selectedProvenance
+          ?? provenanceDecision.compatibleProvenance[0];
+        if (provenanceDecision.selectionEligible && provenance) {
+          matches.push({ group, copy, provenance });
+        }
       }
+    }
+    return matches;
+  };
+  let matches = await findMatches(inventory);
+  if (matches.length === 0 && discoverySnapshot) {
+    try {
+      matches = await findMatches(
+        await discoverySnapshot.discover({ input: descriptor.source.skill_name }),
+      );
+    } catch (error) {
+      if (error.code === "NO_LOCAL_COPY") return undefined;
+      throw error;
     }
   }
   if (matches.length !== 1) return undefined;
@@ -1205,7 +1217,7 @@ async function resolveBindingInternal({
         managerRecords,
         customizationRoot,
         discoverySnapshot: operationDiscovery,
-        bindingOperations: operationBindings,
+        bindingOperations: bindingExecutionAdapter(operationBindings),
       };
       const recovered = await recoverMissingPluginBinding({
         binding,

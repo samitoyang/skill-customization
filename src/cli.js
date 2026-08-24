@@ -294,10 +294,12 @@ function discoveryRoots(context) {
   return context.discoveryRoots ?? context.roots ?? context.additionalRoots;
 }
 
-async function discoverInventory(context) {
-  const discovery = await discoverSkills(discoveryOptions(context));
-  context.discoveryRoots = discovery.searchedRoots;
-  return { discovery };
+function createContextBindingOperation(context) {
+  return createBindingOperation({
+    roots: context.roots,
+    managerRecords: context.managerRecords,
+    discoveryOptions: discoveryOptions(context),
+  });
 }
 
 async function selectionFromPrompt({
@@ -442,12 +444,7 @@ async function commandBind(descriptorPath, options, io) {
   const sourcePath = requireValue(options.source, "--source is required");
   const bindingContext = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const { discovery } = await discoverInventory(context);
-  const bindingOperation = createBindingOperation({
-    discovery,
-    roots: discoveryRoots(context),
-    managerRecords: context.managerRecords,
-  });
+  const bindingOperation = createContextBindingOperation(context);
   let requestedScope = options.scope;
   if (!requestedScope && io.stdin.isTTY) {
     try {
@@ -509,12 +506,7 @@ async function commandResolve(descriptorPath, options, io) {
   );
   const descriptor = await readDescriptor(resolvedDescriptorPath);
   const context = await discoveryContext(options);
-  const { discovery } = await discoverInventory(context);
-  const bindingOperation = createBindingOperation({
-    discovery,
-    roots: discoveryRoots(context),
-    managerRecords: context.managerRecords,
-  });
+  const bindingOperation = createContextBindingOperation(context);
   outputJson(
     io,
     await bindingOperation.resolveBinding({
@@ -541,12 +533,7 @@ async function commandReconcile(descriptorPath, options, io) {
   let sourceExecutionPlan;
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
-    const { discovery } = await discoverInventory(context);
-    const bindingOperation = createBindingOperation({
-      discovery,
-      roots: discoveryRoots(context),
-      managerRecords: context.managerRecords,
-    });
+    const bindingOperation = createContextBindingOperation(context);
     const bindingContext = requireValue(
       options.context,
       "--context is required for semantic overlay reconciliation",
@@ -563,9 +550,9 @@ async function commandReconcile(descriptorPath, options, io) {
         descriptorPath: path.join(binding.source.target, "customization.json"),
         context: bindingContext,
         statePath: options.state,
-        roots: discoveryRoots(context),
+        roots: context.roots,
         managerRecords: context.managerRecords,
-        discovery,
+        discoveryOptions: discoveryOptions(context),
       });
       if (nested.status === "maintenance-required") {
         throw new TypeError(
@@ -617,14 +604,13 @@ async function commandPreflight(descriptorPath, options, io) {
   );
   const contextValue = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const { discovery } = await discoverInventory(context);
   const result = await preflightCustomization({
     descriptorPath: resolvedDescriptorPath,
     context: contextValue,
     statePath: options.state,
-    roots: discoveryRoots(context),
+    roots: context.roots,
     managerRecords: context.managerRecords,
-    discovery,
+    discoveryOptions: discoveryOptions(context),
   });
   outputJson(io, result);
   return result.status === "maintenance-required" ? 2 : 0;

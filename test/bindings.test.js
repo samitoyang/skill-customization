@@ -20,6 +20,7 @@ import {
   bindingKey,
   bindingStorePath,
   classifyBindingScope,
+  createBindingOperation,
   readBindingStore,
   resolveBinding,
   validateBinding,
@@ -364,6 +365,84 @@ test("plugin cache recovery rejects mismatched upstream paths", async () => {
     (error) => error.code === "BINDING_TARGET_MISSING",
   );
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+});
+
+test("plugin cache recovery targets outside a seeded same-name inventory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-plugin-cache-targeted-"));
+  const installOne = path.join(root, "plugin", "1");
+  const sourceOne = path.join(installOne, "skills", "review");
+  const installTwo = path.join(root, "plugin", "2");
+  const sourceTwo = path.join(installTwo, "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const identity = "local:plugin:fixture-host:fixture-marketplace:reviewer";
+  const repository = "https://github.com/example/skills";
+  const workflow = "---\nname: review\n---\nstable\n";
+  const rootRecord = (directory, version) => ({
+    path: path.dirname(directory),
+    owner: "plugin:fixture-host",
+    scope: "global",
+    origin: "plugin",
+    plugin: {
+      host: "fixture-host",
+      marketplace: "fixture-marketplace",
+      name: "reviewer",
+      version,
+    },
+    pluginIdentity: identity,
+    pluginRoot: path.dirname(path.dirname(directory)),
+    pluginEvidence: [{
+      kind: "plugin",
+      host: "fixture-host",
+      marketplace: "fixture-marketplace",
+      plugin: "reviewer",
+      repository,
+      identity,
+      version,
+      cache: { kind: "versioned", scope: "global" },
+    }],
+  });
+
+  await mkdir(sourceOne, { recursive: true });
+  await writeFile(path.join(sourceOne, "SKILL.md"), workflow);
+  const sourceDescriptor = {
+    ...descriptor(),
+    source: {
+      ...descriptor().source,
+      effective_fingerprint: await fingerprintPath(sourceOne),
+    },
+  };
+  const initialRoot = rootRecord(sourceOne, "1");
+  const replacementRoot = rootRecord(sourceTwo, "2");
+  await bindCustomization({
+    descriptor: sourceDescriptor,
+    sourcePath: sourceOne,
+    context: "global",
+    statePath,
+    roots: [initialRoot],
+    interactive: true,
+    confirm: async () => true,
+  });
+  const seeded = await discoverFixtureSkills({
+    roots: [initialRoot],
+    managerRecords: [],
+  });
+
+  await rename(installOne, path.join(root, "removed"));
+  await mkdir(sourceTwo, { recursive: true });
+  await writeFile(path.join(sourceTwo, "SKILL.md"), workflow);
+  const operation = createBindingOperation({
+    discovery: seeded,
+    roots: [initialRoot, replacementRoot],
+    managerRecords: [],
+  });
+  const recovered = await operation.resolveBinding({
+    descriptor: sourceDescriptor,
+    context: "global",
+    statePath,
+  });
+
+  assert.equal(recovered.source.path, path.resolve(sourceTwo));
+  assert.equal(recovered.source.pluginIdentity, identity);
 });
 
 test("automatic plugin recovery requires a same-scope versioned cache", async () => {

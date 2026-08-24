@@ -2,9 +2,21 @@ import {
   bindingStorePath,
   createBindingOperation,
 } from "./bindings.js";
-import { MAX_CUSTOMIZATION_DEPTH } from "./execution-graph.js";
+import {
+  inspectCustomizationExecution,
+  MAX_CUSTOMIZATION_DEPTH,
+} from "./execution-graph.js";
 
 export { MAX_CUSTOMIZATION_DEPTH };
+
+function executionBindingAdapter(operation) {
+  return Object.freeze({
+    bindingKey: operation.bindingKey,
+    readBindingStore: operation.readBindingStore,
+    resolveBinding: operation.resolveBinding,
+    validateBinding: operation.validateBinding,
+  });
+}
 
 export async function preflightCustomization({
   descriptorPath,
@@ -13,17 +25,20 @@ export async function preflightCustomization({
   roots,
   managerRecords = [],
   discovery,
+  discoveryOptions = {},
 }) {
-  const bindings = createBindingOperation({
+  const operation = createBindingOperation({
     discovery,
     roots,
     managerRecords,
+    discoveryOptions,
   });
-  return bindings.inspectCustomizationExecution({
+  return inspectCustomizationExecution({
     descriptorPath,
     context,
     statePath,
     roots,
     managerRecords,
+    bindings: executionBindingAdapter(operation),
   });
 }
