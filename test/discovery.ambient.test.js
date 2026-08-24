@@ -2145,6 +2145,24 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
               host: "future-host",
               pluginRoots: 1,
             },
+            {
+              kind: "plugin",
+              path: path.join(root, "map-metadata"),
+              owner: "plugin:future-host",
+              scope: "global",
+              origin: "plugin",
+              host: "future-host",
+              plugin: new Map([["name", "future"]]),
+            },
+            {
+              kind: "plugin",
+              path: path.join(root, "set-metadata"),
+              owner: "plugin:future-host",
+              scope: "global",
+              origin: "plugin",
+              host: "future-host",
+              pluginMetadata: new Set(["future"]),
+            },
           ],
           diagnostics: [{
             kind: "plugin",
@@ -2162,7 +2180,41 @@ test("malformed plugin host results become diagnostics at the discovery seam", a
   assert.ok(result.pluginDiagnostics.filter(
     ({ code, host }) =>
       code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
-  ).length >= 5);
+  ).length >= 7);
+});
+
+
+test("plugin host adapters must return a result instead of exposing the context sink", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-host-missing-result-"));
+  const home = path.join(root, "home");
+  const skill = await writeSkill(path.join(root, "future-plugin", "skills"), "future-review");
+  const result = await discoverAmbientSkills({
+    home,
+    cwd: path.join(root, "workspace"),
+    env: {},
+    managerRecords: [],
+    pluginOptions: {
+      hostSpecifications: [{
+        host: "future-host",
+        discover: async (context) => {
+          context.roots.push({
+            kind: "plugin",
+            path: path.dirname(skill),
+            owner: "plugin:future-host",
+            scope: "global",
+            origin: "plugin",
+            host: "future-host",
+          });
+        },
+      }],
+    },
+  });
+
+  assert.deepEqual(result.groups, []);
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, host }) =>
+      code === "PLUGIN_HOST_DISCOVERY_INVALID_RESULT" && host === "future-host",
+  ));
 });
 
 

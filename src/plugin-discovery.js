@@ -1442,8 +1442,25 @@ const PLUGIN_EVIDENCE_FIELDS = new Set([
   "synced",
 ]);
 
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+function isPlainRecord(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isDataValue(value, seen = new Set()) {
+  if (value === null || value === undefined) return true;
+  if (["string", "number", "boolean", "bigint"].includes(typeof value)) return true;
+  if (typeof value !== "object") return false;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  if (Array.isArray(value)) return value.every((entry) => isDataValue(entry, seen));
+  return isPlainRecord(value)
+    && Object.values(value).every((entry) => isDataValue(entry, seen));
+}
+
+function isDataRecord(value) {
+  return isPlainRecord(value) && isDataValue(value);
 }
 
 function isNonEmptyString(value) {
@@ -1463,7 +1480,7 @@ function isOptionalString(value) {
 }
 
 function isOptionalRecord(value) {
-  return value === undefined || isRecord(value);
+  return value === undefined || isDataRecord(value);
 }
 
 function isOptionalStringArray(value) {
@@ -1472,7 +1489,7 @@ function isOptionalStringArray(value) {
 
 function isPluginEvidence(value, host) {
   if (
-    !isRecord(value)
+    !isDataRecord(value)
     || [...Object.keys(value)].some((field) => !PLUGIN_EVIDENCE_FIELDS.has(field))
     || value.kind !== "plugin"
     || value.host !== host
@@ -1488,7 +1505,7 @@ function isPluginEvidence(value, host) {
     || (value.synced !== undefined && typeof value.synced !== "boolean")
   ) return false;
   if (value.cache === undefined) return true;
-  return isRecord(value.cache)
+  return isDataRecord(value.cache)
     && Object.keys(value.cache).every((field) => ["kind", "scope"].includes(field))
     && value.cache.kind === "versioned"
     && ["global", "workspace"].includes(value.cache.scope);
@@ -1496,7 +1513,7 @@ function isPluginEvidence(value, host) {
 
 function isValidPluginHostRoot(root, host) {
   try {
-    return isRecord(root)
+    return isDataRecord(root)
       && Object.keys(root).every((field) => PLUGIN_HOST_ROOT_FIELDS.has(field))
       && root.kind === "plugin"
       && isNonEmptyString(root.path)
@@ -1527,7 +1544,7 @@ function isValidPluginHostRoot(root, host) {
 
 function isValidPluginHostDiagnostic(entry, host) {
   try {
-    return isRecord(entry)
+    return isDataRecord(entry)
       && Object.keys(entry).every((field) => PLUGIN_HOST_DIAGNOSTIC_FIELDS.has(field))
       && entry.kind === "plugin"
       && entry.host === host
@@ -1666,9 +1683,8 @@ export async function discoverPluginSkillRoots({
     };
     try {
       const result = await specification.discover(hostContext);
-      const emitted = result ?? pluginHostResult(hostContext);
       appendPluginHostResult({
-        result: emitted,
+        result,
         host,
         targetPath: context.cwd,
         roots,
