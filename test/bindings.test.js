@@ -249,6 +249,27 @@ test("first-use publication rechecks full fingerprints in its atomic decision", 
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
+test("first-use publication accepts a SKILL.md file binding", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-file-source-"));
+  const source = path.join(root, "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+
+  const binding = await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: path.join(source, "SKILL.md"),
+    context: "global",
+    statePath,
+    roots: [{ path: root, scope: "global", origin: "personal" }],
+    interactive: true,
+    confirm: async () => true,
+  });
+
+  assert.equal(binding.source.path, path.resolve(path.join(source, "SKILL.md")));
+  assert.equal(binding.source.target, await realpath(path.join(source, "SKILL.md")));
+});
+
 test("publication CAS binds nested repository provenance outside the skill directory", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-nested-git-provenance-"));
   const source = path.join(root, "skills", "review");
@@ -276,6 +297,40 @@ test("publication CAS binds nested repository provenance outside the skill direc
   );
   let gateError;
   try { await waitForDiscoveryGate(nowReached, "nested provenance race gate"); } catch (error) { gateError = error; } finally { await release(); }
+  const result = await settled;
+  if (gateError) throw gateError;
+  assert.equal(result.status, "rejected");
+  assert.equal(result.error.code, "BINDING_SOURCE_SELECTION_INVALID");
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+});
+
+test("publication CAS tracks git worktree config presence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-worktree-config-race-"));
+  const source = path.join(root, "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  await mkdir(path.join(root, ".git"), { recursive: true });
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(root, ".git", "config"), "[remote \"origin\"]\nurl = initial\n");
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  const release = await acquireStateLock(statePath);
+  let signalNow;
+  const nowReached = new Promise((resolve) => { signalNow = resolve; });
+  const pending = bindCustomization({
+    descriptor: descriptor(), sourcePath: source, context: "global", statePath,
+    roots: [{ path: path.join(root, "skills"), scope: "global", origin: "personal" }],
+    interactive: true, confirm: async () => true,
+    now: async () => {
+      await writeFile(path.join(root, ".git", "config.worktree"), "[remote \"origin\"]\nurl = changed\n");
+      signalNow();
+      return "2026-08-04T00:00:00.000Z";
+    },
+  });
+  const settled = pending.then(
+    (value) => ({ status: "fulfilled", value }),
+    (error) => ({ status: "rejected", error }),
+  );
+  let gateError;
+  try { await waitForDiscoveryGate(nowReached, "worktree config race gate"); } catch (error) { gateError = error; } finally { await release(); }
   const result = await settled;
   if (gateError) throw gateError;
   assert.equal(result.status, "rejected");
@@ -1088,6 +1143,37 @@ test("versioned cache recovery checks a customization execution graph", async ()
   assert.equal(recovered.source.path, path.resolve(versionTwo));
   assert.equal(recovered.source.pluginIdentity, identity);
   assert.deepEqual(recovered.source.customization, bound.source.customization);
+
+  // Hold the outer publication on its fifth recursive inspection: the first
+  // four are candidate generation/revalidation outside the lock, while the
+  // fifth is the lock-side read-only graph CAS. A nested owned file changing
+  // at that point must prevent the stale effective fingerprint from landing.
+  const versionThree = path.join(root, "plugin", "3", "skills", "review-fork");
+  await rename(path.join(root, "plugin", "2"), path.join(root, "removed-two"));
+  await writeFork(versionThree);
+  let executionChecks = 0;
+  const racingRuntime = createBindingRuntime({
+    context: {
+      roots: [rootRecord(versionThree, "3")],
+      managerRecords: [],
+    },
+    inspectExecution: async (intent) => {
+      executionChecks += 1;
+      if (executionChecks === 5) {
+        await writeFile(path.join(versionThree, "CUSTOMIZATION.md"), "changed in lock\n");
+      }
+      return inspectCustomizationExecution(intent);
+    },
+  });
+  await assert.rejects(
+    racingRuntime.resolveBinding({
+      descriptor: sourceDescriptor,
+      context,
+      statePath,
+    }),
+    (error) => error.code === "BINDING_SOURCE_SELECTION_INVALID",
+  );
+  assert.equal(executionChecks, 5);
 });
 
 test("concurrent bindings preserve distinct context keys", async () => {
