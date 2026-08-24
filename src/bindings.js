@@ -17,7 +17,6 @@ import {
 import { BindingError } from "./errors.js";
 import { inspectCustomizationExecution } from "./execution-graph.js";
 import { fingerprintFile, fingerprintPath } from "./fingerprint.js";
-import { createBindingExecutionAdapter } from "./internal/binding-execution-adapter.js";
 import {
   generateLocalIdentity,
   normalizeRepositoryUrl,
@@ -536,6 +535,28 @@ function assertRepositoryBinding({ descriptor, binding }) {
   }
 }
 
+function assertRepositoryInspection({ descriptor, binding, inspection }) {
+  const persistedFingerprint = binding.source.fingerprint;
+  const reviewedFingerprint = descriptor.source.effective_fingerprint;
+  // A descriptor whose reviewed checkpoint already differs from the persisted
+  // Binding is handled by Preflight/Reconciliation as source drift. Once the
+  // two checkpoints agree, a later repository change invalidates this Binding
+  // and requires a fresh source confirmation.
+  if (
+    typeof persistedFingerprint !== "string"
+    || persistedFingerprint !== reviewedFingerprint
+    || inspection.fingerprint === persistedFingerprint
+  ) return;
+  throw new BindingError("binding repository source fingerprint changed", {
+    code: "BINDING_SOURCE_FINGERPRINT_MISMATCH",
+    details: {
+      expectedFingerprint: persistedFingerprint,
+      reviewedFingerprint,
+      actualFingerprint: inspection.fingerprint,
+    },
+  });
+}
+
 function assertLocalBinding({ descriptor, binding }) {
   if (binding.source.localIdentity !== descriptor.source.identity) {
     throw new BindingError("binding local source no longer matches the descriptor", {
@@ -728,7 +749,7 @@ async function inspectBindingSource({
   };
 }
 
-const BINDING_OPERATIONS = createBindingExecutionAdapter({
+const BINDING_OPERATIONS = Object.freeze({
   bindingKey,
   readBindingStore,
   resolveBinding: resolveBindingInternal,
@@ -798,6 +819,7 @@ const BINDING_SOURCE_POLICIES = Object.freeze({
       upstreamPath: inspection.upstreamPath,
     }),
     validateBinding: assertRepositoryBinding,
+    validateInspection: assertRepositoryInspection,
     recoveryFingerprint: recoverStandardFingerprint,
   }),
   local: Object.freeze({
@@ -809,6 +831,8 @@ const BINDING_SOURCE_POLICIES = Object.freeze({
       localIdentity: inspection.localIdentity,
     }),
     validateBinding: assertLocalBinding,
+    // Local Binding identity is derived from SKILL.md bytes, but a confirmed
+    // local Binding remains available across content drift for reconciliation.
     recoveryFingerprint: recoverStandardFingerprint,
     matchesRecoveredCopy: matchesLocalRecoveredSource,
   }),
@@ -1000,8 +1024,29 @@ async function assertReplacementActivation({
   discoverySnapshot,
 }) {
   if (descriptor.activation.mode !== "replace") return;
-  const discovery = await discoverySnapshot.inventory();
-  let activeSkills = activeSkillInventory(discovery);
+  const discoveries = [await discoverySnapshot.inventory()];
+  try {
+    discoveries.push(
+      await discoverySnapshot.discover({ input: descriptor.name }),
+    );
+  } catch (error) {
+    if (error.code !== "NO_LOCAL_COPY") throw error;
+  }
+  const activeSkillsByPath = new Map();
+  for (const skill of discoveries.flatMap(activeSkillInventory)) {
+    const candidate = skill.realPath ?? skill.path;
+    const canonicalPath = typeof candidate === "string"
+      ? path.resolve(await realpath(candidate).catch(() => candidate))
+      : undefined;
+    const key = `${skill.name}\0${canonicalPath}`;
+    if (!activeSkillsByPath.has(key)) {
+      activeSkillsByPath.set(key, {
+        ...skill,
+        ...(canonicalPath ? { realPath: canonicalPath } : {}),
+      });
+    }
+  }
+  let activeSkills = [...activeSkillsByPath.values()];
   if (customizationRoot) {
     activeSkills = await excludeSkillRootFromInventory(activeSkills, customizationRoot);
   }
@@ -1190,6 +1235,7 @@ async function validateBindingInternal({
   managerRecords = [],
   discovery,
   discoverySnapshot,
+  enforceReviewedFingerprint = true,
 }) {
   assertValidDescriptor(descriptor);
   if (!binding || typeof binding !== "object" || !binding.source) {
@@ -1251,6 +1297,13 @@ async function validateBindingInternal({
     discoverySnapshot: operationDiscovery,
     requireLocalIdentityMatch: false,
   });
+  if (enforceReviewedFingerprint) {
+    bindingSourcePolicyFor(descriptor.source.kind).validateInspection?.({
+      descriptor,
+      binding,
+      inspection,
+    });
+  }
   return { binding, inspection, currentTarget };
 }
 
@@ -1295,6 +1348,9 @@ async function resolveBindingInternal({
         managerRecords,
         customizationRoot,
         discoverySnapshot: operationDiscovery,
+        // Preflight and Reconciliation own full-source drift decisions after
+        // they have the resolved path; Binding validation remains strict.
+        enforceReviewedFingerprint: false,
       })
     ).binding;
   } catch (error) {
@@ -1307,7 +1363,7 @@ async function resolveBindingInternal({
         managerRecords,
         customizationRoot,
         discoverySnapshot: operationDiscovery,
-        bindingOperations: createBindingExecutionAdapter(operationBindings),
+        bindingOperations: operationBindings,
       };
       const recovered = await recoverMissingPluginBinding({
         binding,
@@ -1384,8 +1440,8 @@ function callerIntentOptions(options = {}) {
   return intent;
 }
 
-export async function bindCustomization(options = {}) {
-  const operation = createBindingOperation({
+function createPublicBindingOperation(options = {}) {
+  return createBindingOperation({
     runtime: {
       discovery: options.discovery,
       discoverySnapshot: options.discoverySnapshot,
@@ -1394,31 +1450,21 @@ export async function bindCustomization(options = {}) {
       discoveryOptions: options.discoveryOptions,
     },
   });
-  return operation.bindCustomization(callerIntentOptions(options));
+}
+
+async function invokePublicBindingOperation(method, options = {}) {
+  const operation = createPublicBindingOperation(options);
+  return operation[method](callerIntentOptions(options));
+}
+
+export async function bindCustomization(options = {}) {
+  return invokePublicBindingOperation("bindCustomization", options);
 }
 
 export async function validateBinding(options = {}) {
-  const operation = createBindingOperation({
-    runtime: {
-      discovery: options.discovery,
-      discoverySnapshot: options.discoverySnapshot,
-      roots: options.roots,
-      managerRecords: options.managerRecords,
-      discoveryOptions: options.discoveryOptions,
-    },
-  });
-  return operation.validateBinding(callerIntentOptions(options));
+  return invokePublicBindingOperation("validateBinding", options);
 }
 
 export async function resolveBinding(options = {}) {
-  const operation = createBindingOperation({
-    runtime: {
-      discovery: options.discovery,
-      discoverySnapshot: options.discoverySnapshot,
-      roots: options.roots,
-      managerRecords: options.managerRecords,
-      discoveryOptions: options.discoveryOptions,
-    },
-  });
-  return operation.resolveBinding(callerIntentOptions(options));
+  return invokePublicBindingOperation("resolveBinding", options);
 }

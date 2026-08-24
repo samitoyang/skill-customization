@@ -924,6 +924,36 @@ test("replacement binding requires a separate explicit confirmation", async () =
   );
 });
 
+test("replacement validation merges a seeded inventory with targeted discovery", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "replace-targeted-discovery-"));
+  const source = path.join(root, "review");
+  const otherSource = path.join(root, "other-review");
+  const statePath = path.join(root, "bindings.json");
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  await mkdir(source);
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  const seeded = await discoverFixtureSkills({ roots, managerRecords: [] });
+  await mkdir(otherSource);
+  await writeFile(path.join(otherSource, "SKILL.md"), "---\nname: review\n---\nother\n");
+
+  await assert.rejects(
+    bindCustomization({
+      descriptor: descriptor({ mode: "replace", precedence: "customization-first" }),
+      sourcePath: source,
+      context: "global",
+      statePath,
+      roots,
+      discovery: seeded,
+      interactive: true,
+      confirm: async () => true,
+      confirmReplace: async () => true,
+    }),
+    (error) => error.code === "AMBIGUOUS_REPLACEMENT"
+      && Array.isArray(error.details)
+      && error.details.length === 2,
+  );
+});
+
 test("persisted replacement validation owns the current active inventory", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "replace-validation-"));
   const source = path.join(root, "review");
@@ -1746,6 +1776,53 @@ test("resolution preserves a confirmed local binding across content drift", asyn
     roots: [{ path: root, scope: "global", origin: "personal" }],
   });
   assert.equal(resolved.source.localIdentity, localDescriptor.source.identity);
+  const validation = await validateBinding({
+    descriptor: localDescriptor,
+    binding: resolved,
+    roots: [{ path: root, scope: "global", origin: "personal" }],
+  });
+  assert.notEqual(validation.inspection.fingerprint, resolved.source.fingerprint);
+  assert.equal(validation.binding.source.localIdentity, localDescriptor.source.identity);
+  assert.equal(Object.keys((await readBindingStore(statePath)).bindings).length, 1);
+});
+
+test("binding validation rejects a repository binding after its reviewed source checkpoint drifts", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-revalidate-repository-fingerprint-"));
+  const source = path.join(root, "review");
+  const statePath = path.join(root, "bindings.json");
+  await mkdir(source);
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nreviewed source\n");
+  const baseDescriptor = descriptor();
+  const repositoryDescriptor = {
+    ...baseDescriptor,
+    source: {
+      ...baseDescriptor.source,
+      effective_fingerprint: await fingerprintPath(source),
+    },
+  };
+  const roots = [{ path: root, scope: "global", origin: "personal" }];
+  await bindCustomization({
+    descriptor: repositoryDescriptor,
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots,
+    interactive: true,
+    confirm: async () => true,
+  });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nchanged source\n");
+
+  const binding = (await readBindingStore(statePath)).bindings[
+    bindingKey(repositoryDescriptor.id, "global")
+  ];
+  await assert.rejects(
+    validateBinding({
+      descriptor: repositoryDescriptor,
+      binding,
+      roots,
+    }),
+    (error) => error.code === "BINDING_SOURCE_FINGERPRINT_MISMATCH",
+  );
   assert.equal(Object.keys((await readBindingStore(statePath)).bindings).length, 1);
 });
 

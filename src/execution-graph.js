@@ -10,6 +10,7 @@ import {
   fingerprintValues,
   payloadFingerprint,
 } from "./fingerprint.js";
+import { createBindingExecutionAdapter } from "./internal/binding-execution-adapter.js";
 import { reconcileCustomization } from "./reconcile.js";
 
 export const MAX_CUSTOMIZATION_DEPTH = 32;
@@ -82,7 +83,7 @@ async function forkTrackingAdvisory(descriptor, {
 }) {
   let store;
   try {
-    store = await bindings.readBindingStore(statePath);
+    store = await bindings.readBindingStore();
   } catch (error) {
     return {
       code: "tracking-state-invalid",
@@ -105,12 +106,17 @@ async function forkTrackingAdvisory(descriptor, {
       validated = await bindings.validateBinding({
         descriptor,
         binding,
-        roots,
-        managerRecords,
         customizationRoot,
-        discoverySnapshot,
       });
     } catch (error) {
+      if (error.code === "BINDING_SOURCE_FINGERPRINT_MISMATCH") {
+        return {
+          code: "tracking-source-drift",
+          message: "The optional tracked source differs from its reviewed or confirmed fingerprint; adoption or rebase remains explicit.",
+          expectedFingerprint: descriptor.source.effective_fingerprint,
+          actualFingerprint: error.details?.actualFingerprint,
+        };
+      }
       return {
         code: "tracking-binding-invalid",
         message: "The optional fork tracking binding is invalid; fork execution is unaffected.",
@@ -262,13 +268,17 @@ async function visit({
     binding = await bindings.resolveBinding({
       descriptor,
       context,
-      statePath,
-      roots,
-      managerRecords,
       customizationRoot: root,
-      discoverySnapshot,
     });
   } catch (error) {
+    if (error.code === "BINDING_SOURCE_FINGERPRINT_MISMATCH") {
+      return maintenance(
+        descriptor,
+        root,
+        "source-drift",
+        "The full source effective fingerprint changed.",
+      );
+    }
     return maintenance(descriptor, root, "binding-maintenance", error.message);
   }
 
@@ -373,6 +383,12 @@ export async function inspectCustomizationExecution({
   if (typeof context !== "string" || !context.trim()) {
     throw new TypeError("preflight context is required");
   }
+  const executionBindings = createBindingExecutionAdapter(bindings, {
+    statePath,
+    roots,
+    managerRecords,
+    discoverySnapshot,
+  });
   return visit({
     descriptorPath: path.resolve(descriptorPath),
     context,
@@ -383,6 +399,6 @@ export async function inspectCustomizationExecution({
     depth: 1,
     activeIds: new Set(),
     activePaths: new Set(),
-    bindings,
+    bindings: executionBindings,
   });
 }

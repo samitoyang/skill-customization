@@ -3,7 +3,6 @@ import {
   inspectCustomizationExecution,
   MAX_CUSTOMIZATION_DEPTH,
 } from "./execution-graph.js";
-import { createBindingExecutionAdapter } from "./internal/binding-execution-adapter.js";
 import { createBindingRuntime } from "./internal/binding-runtime.js";
 
 export { MAX_CUSTOMIZATION_DEPTH };
@@ -31,6 +30,6 @@ export async function preflightCustomization({
     statePath,
     roots,
     managerRecords,
-    bindings: createBindingExecutionAdapter(operation),
+    bindings: operation,
   });
 }
