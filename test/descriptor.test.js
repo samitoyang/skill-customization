@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { validateDescriptor } from "../src/descriptor.js";
-import { isMachineAbsolutePath, isPathContained } from "../src/paths.js";
+import { isPathContained } from "../src/paths.js";
 
 const MACHINE_PATHS = [
   "/Users/alice/customization.schema.json",
@@ -222,116 +221,6 @@ test("descriptor rejects whitespace-only portable review strings", () => {
   assert.ok(
     errors.some(({ path: pointer }) => pointer === "/source/review/revision"),
   );
-});
-
-test("JSON Schema and runtime share machine-path exclusions", async () => {
-  const schema = JSON.parse(
-    await readFile(new URL("../customization.schema.json", import.meta.url), "utf8"),
-  );
-  const reference = "#/$defs/nonMachinePathString";
-  const nonBlankReference = "#/$defs/nonBlankPortableString";
-  assert.equal(schema.properties.$schema.$ref, reference);
-  assert.equal(schema.$defs.license.$ref, nonBlankReference);
-  assert.equal(
-    schema.$defs.repositorySource.properties.review.properties.revision.$ref,
-    nonBlankReference,
-  );
-  assert.equal(
-    schema.$defs.materialization.properties.reviewed_at.$ref,
-    nonBlankReference,
-  );
-  assert.equal(
-    schema.$defs.materialization.properties.evidence.$ref,
-    nonBlankReference,
-  );
-  const nonBlank = new RegExp(
-    schema.$defs.nonBlankPortableString.allOf.find(({ pattern }) => pattern)
-      .pattern,
-  );
-  assert.equal(nonBlank.test(" \t\n "), false);
-  assert.equal(nonBlank.test("reviewed"), true);
-  const exclusions = schema.$defs.nonMachinePathString.allOf.map(
-    ({ not }) => new RegExp(not.pattern),
-  );
-  const idPattern = new RegExp(schema.$defs.stableId.pattern);
-  assert.equal(schema.properties.entrypoint.$ref, "#/$defs/runtimePath");
-  assert.equal(schema.properties.customization.$ref, "#/$defs/runtimePath");
-  const runtimeExclusion = new RegExp(
-    schema.$defs.runtimePath.allOf.find(({ not }) => not)?.not.pattern,
-  );
-  const relativePath = new RegExp(schema.$defs.relativePath.pattern);
-  const provenancePath = new RegExp(
-    schema.$defs.provenancePath.allOf.find(({ pattern }) => pattern).pattern,
-  );
-  assert.equal(
-    schema.$defs.fork.properties.snapshot.$ref,
-    "#/$defs/provenancePath",
-  );
-  assert.equal(schema.$defs.fork.properties.diff.$ref, "#/$defs/provenancePath");
-  for (const value of [
-    "customization.json",
-    "CUSTOMIZATION.JSON",
-    "provenance",
-    "provenance/run.md",
-    "Provenance/run.md",
-    ".git/run.md",
-    "helpers/.Hg/run.md",
-    "helpers/deep/.SVN/run.md",
-  ]) {
-    assert.equal(runtimeExclusion.test(value), true);
-  }
-  for (const value of ["SKILL.md", "CUSTOMIZATION.md", "helpers/run.md"]) {
-    assert.equal(runtimeExclusion.test(value), false);
-  }
-  for (const value of [
-    "./customization.json",
-    "./provenance/run.md",
-    "helpers/./run.md",
-    "customization.json.",
-    "provenance./run.md",
-    "provenance /run.md",
-    "customization.json:stream",
-    "helpers//run.md",
-    "helpers/",
-    "helpers/\0run.md",
-    "helpers\n/run.md",
-    "helpers\r/run:stream",
-    "helpers\u2028/../run.md",
-    "helpers\u2029/run\\file.md",
-  ]) {
-    assert.equal(relativePath.test(value), false);
-  }
-  for (const value of ["SKILL.md", "helpers/run.md"]) {
-    assert.equal(relativePath.test(value), true);
-  }
-  for (const value of ["provenance/source", "provenance/reviews/source.diff"]) {
-    assert.equal(provenancePath.test(value), true);
-  }
-  for (const value of ["provenance", "source", "source.diff", "Provenance/source"]) {
-    assert.equal(provenancePath.test(value), false);
-  }
-
-  for (const id of MACHINE_IDS) assert.equal(idPattern.test(id), false);
-  for (const id of [
-    "urn:skill-customization:example:review-local-archive",
-    "https://example.com/customizations/review-local-archive",
-  ]) {
-    assert.equal(idPattern.test(id), true);
-  }
-
-  for (const value of MACHINE_PATHS) {
-    assert.equal(isMachineAbsolutePath(value), true);
-    assert.equal(exclusions.some(pattern => pattern.test(value)), true);
-  }
-  for (const value of [
-    "MIT",
-    "refs/heads/main",
-    "schema/customization.schema.json",
-    "https://skill-customization.dev/schema/customization-v1.json",
-  ]) {
-    assert.equal(isMachineAbsolutePath(value), false);
-    assert.equal(exclusions.some(pattern => pattern.test(value)), false);
-  }
 });
 
 test("replace requires an equal source name and deterministic precedence", () => {

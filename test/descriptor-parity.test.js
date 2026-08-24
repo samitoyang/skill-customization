@@ -3,9 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { validateDescriptor } from "../src/descriptor.js";
+import { DESCRIPTOR_SCHEMA_GAPS } from "../src/descriptor-invariants.js";
 import {
   DESCRIPTOR_PARITY_CORPUS,
-  DESCRIPTOR_SCHEMA_GAPS,
 } from "./support/descriptor-parity-corpus.js";
 import { matchesJsonSchema } from "./support/json-schema-validator.js";
 

@@ -1,6 +1,7 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
+import { DESCRIPTOR_INVARIANTS } from "./descriptor-invariants.js";
 import { DescriptorError } from "./errors.js";
 import { normalizeRepositoryUrl } from "./normalization.js";
 import { isOwnedPayloadExcludedPath } from "./owned-payload.js";
@@ -150,59 +151,24 @@ import { isMachineAbsolutePath, resolveOwnedPath } from "./paths.js";
  * @typedef {DescriptorIngestionSuccess | DescriptorIngestionFailure} DescriptorIngestion
  */
 
-const TOP_LEVEL = new Set([
-  "$schema",
-  "schema_version",
-  "id",
-  "type",
-  "name",
-  "license",
-  "entrypoint",
-  "customization",
-  "dependencies",
-  "owned_payload",
-  "source",
-  "activation",
-  "fork",
-]);
-const SOURCE_COMMON = new Set([
-  "skill_name",
-  "kind",
-  "license",
-  "effective_fingerprint",
-]);
-const REPOSITORY_SOURCE = new Set([
-  ...SOURCE_COMMON,
-  "repository",
-  "upstream_path",
-  "review",
-]);
-const LOCAL_SOURCE = new Set([...SOURCE_COMMON, "identity"]);
-const CUSTOMIZATION_SOURCE = new Set([
-  ...SOURCE_COMMON,
-  "id",
-  "type",
-]);
-const ACTIVATION = new Set(["mode", "precedence"]);
-const REVIEW = new Set(["revision"]);
-const OWNED_PAYLOAD = new Set(["reviewed_fingerprint"]);
-const FORK = new Set([
-  "snapshot",
-  "diff",
-  "snapshot_fingerprint",
-  "diff_fingerprint",
-  "materialization",
-]);
-const MATERIALIZATION = new Set([
-  "source_effective_fingerprint",
-  "snapshot_fingerprint",
-  "reviewed_at",
-  "evidence",
-]);
-const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const STABLE_ID = /^[a-z][a-z0-9+.-]*:\S+$/;
-const FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
-const LOCAL_IDENTITY = /^local:sha256:[0-9a-f]{64}$/;
+const { fields, patterns, values, relationships } = DESCRIPTOR_INVARIANTS;
+const TOP_LEVEL = new Set(fields.topLevel.allowed);
+const SOURCE_COMMON = new Set(fields.source.common.allowed);
+const REPOSITORY_SOURCE = new Set(fields.source.variants.repository.allowed);
+const LOCAL_SOURCE = new Set(fields.source.variants.local.allowed);
+const CUSTOMIZATION_SOURCE = new Set(fields.source.variants.customization.allowed);
+const ACTIVATION = new Set(fields.activation.allowed);
+const REVIEW = new Set(fields.review.allowed);
+const OWNED_PAYLOAD = new Set(fields.ownedPayload.allowed);
+const FORK = new Set(fields.fork.allowed);
+const MATERIALIZATION = new Set(fields.materialization.allowed);
+const KEBAB = new RegExp(patterns.skillName.source);
+const STABLE_ID = new RegExp(patterns.stableId.source);
+const FINGERPRINT = new RegExp(patterns.fingerprint.source);
+const LOCAL_IDENTITY = new RegExp(patterns.localIdentity.source);
+const REPOSITORY_URL = new RegExp(patterns.repositoryUrl.source);
+const PORTABLE_RELATIVE_PATH = new RegExp(patterns.relativePath.source);
+const NON_BLANK = new RegExp(patterns.nonBlank.source);
 
 function issue(errors, pointer, message) {
   errors.push({ path: pointer, message });
@@ -226,8 +192,16 @@ function checkRequired(errors, value, pointer, keys) {
 }
 
 function checkName(errors, value, pointer) {
-  if (typeof value !== "string" || !KEBAB.test(value) || value.length > 63) {
-    issue(errors, pointer, "must be lowercase kebab-case and shorter than 64 characters");
+  if (
+    typeof value !== "string"
+    || !KEBAB.test(value)
+    || value.length > patterns.skillName.maxLength
+  ) {
+    issue(
+      errors,
+      pointer,
+      `must be lowercase kebab-case and shorter than ${patterns.skillName.maxLength + 1} characters`,
+    );
   }
 }
 
@@ -248,7 +222,7 @@ function checkFingerprint(errors, value, pointer) {
 }
 
 function checkPortableNonEmptyString(errors, value, pointer, label) {
-  if (typeof value !== "string" || !value.trim()) {
+  if (typeof value !== "string" || !NON_BLANK.test(value)) {
     issue(errors, pointer, `must be a non-empty ${label}`);
   } else if (isMachineAbsolutePath(value)) {
     issue(errors, pointer, "must not be a machine-local absolute path");
@@ -260,18 +234,7 @@ function checkPortableNonEmptyString(errors, value, pointer, label) {
  * @returns {boolean}
  */
 export function isPortableRelativePath(value) {
-  if (typeof value !== "string" || value.length === 0) return false;
-  if (
-    value.includes("\\")
-    || value.includes("\0")
-    || value.includes(":")
-    || /[\r\n\u2028\u2029]/.test(value)
-  ) return false;
-  if (path.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value)) return false;
-  const parts = value.split("/");
-  return !parts.some(
-    (part) => part === "" || part === "." || part === ".." || /[. ]$/.test(part),
-  );
+  return typeof value === "string" && PORTABLE_RELATIVE_PATH.test(value);
 }
 
 function validateSource(source, errors) {
@@ -287,22 +250,20 @@ function validateSource(source, errors) {
         ? CUSTOMIZATION_SOURCE
         : SOURCE_COMMON;
   checkObject(errors, source, "/source", allowed);
-  checkRequired(errors, source, "/source", [
-    "skill_name",
-    "kind",
-    "license",
-    "effective_fingerprint",
-  ]);
+  checkRequired(errors, source, "/source", fields.source.common.required);
   checkName(errors, source.skill_name, "/source/skill_name");
   checkPortableNonEmptyString(errors, source.license, "/source/license", "license identifier");
   checkFingerprint(errors, source.effective_fingerprint, "/source/effective_fingerprint");
 
   if (source.kind === "repository") {
-    checkRequired(errors, source, "/source", [
-      "repository",
-      "upstream_path",
-      "review",
-    ]);
+    checkRequired(
+      errors,
+      source,
+      "/source",
+      fields.source.variants.repository.required.filter(
+        (key) => !fields.source.common.required.includes(key),
+      ),
+    );
     let canonicalRepository = false;
     try {
       const url = new URL(source.repository);
@@ -311,6 +272,7 @@ function validateSource(source, errors) {
         && !url.password
         && !url.search
         && !url.hash
+        && REPOSITORY_URL.test(source.repository)
         && normalizeRepositoryUrl(source.repository) === source.repository;
     } catch {
       canonicalRepository = false;
@@ -322,7 +284,7 @@ function validateSource(source, errors) {
       issue(errors, "/source/upstream_path", "must be a portable relative path");
     }
     if (checkObject(errors, source.review, "/source/review", REVIEW)) {
-      checkRequired(errors, source.review, "/source/review", ["revision"]);
+      checkRequired(errors, source.review, "/source/review", fields.review.required);
       checkPortableNonEmptyString(
         errors,
         source.review.revision,
@@ -331,14 +293,28 @@ function validateSource(source, errors) {
       );
     }
   } else if (source.kind === "local") {
-    checkRequired(errors, source, "/source", ["identity"]);
+    checkRequired(
+      errors,
+      source,
+      "/source",
+      fields.source.variants.local.required.filter(
+        (key) => !fields.source.common.required.includes(key),
+      ),
+    );
     if (!LOCAL_IDENTITY.test(source.identity ?? "")) {
       issue(errors, "/source/identity", "must be a generated local:sha256 identity, never a filesystem path");
     }
   } else if (source.kind === "customization") {
-    checkRequired(errors, source, "/source", ["id", "type"]);
+    checkRequired(
+      errors,
+      source,
+      "/source",
+      fields.source.variants.customization.required.filter(
+        (key) => !fields.source.common.required.includes(key),
+      ),
+    );
     checkStableId(errors, source.id, "/source/id");
-    if (!["semantic-overlay", "fork"].includes(source.type)) {
+    if (!values.customizationTypes.includes(source.type)) {
       issue(errors, "/source/type", "must be semantic-overlay or fork");
     }
   } else {
@@ -348,12 +324,12 @@ function validateSource(source, errors) {
 
 function validateActivation(descriptor, errors) {
   if (!checkObject(errors, descriptor.activation, "/activation", ACTIVATION)) return;
-  checkRequired(errors, descriptor.activation, "/activation", ["mode"]);
+  checkRequired(errors, descriptor.activation, "/activation", fields.activation.required);
   const mode = descriptor.activation.mode;
-  if (!["coexist", "replace"].includes(mode)) {
+  if (!values.activationModes.includes(mode)) {
     issue(errors, "/activation/mode", "must be coexist or replace");
   }
-  if (mode === "coexist") {
+  if (mode === relationships.activation.coexist.mode) {
     if ("precedence" in descriptor.activation) {
       issue(errors, "/activation/precedence", "is only valid for replace mode");
     }
@@ -361,28 +337,24 @@ function validateActivation(descriptor, errors) {
       issue(errors, "/name", "coexist mode requires a name different from the source skill");
     }
   }
-  if (mode === "replace") {
+  if (mode === relationships.activation.replace.mode) {
     if (descriptor.name !== descriptor.source?.skill_name) {
       issue(errors, "/name", "replace mode requires the same name as the source skill");
     }
-    if (descriptor.activation.precedence !== "customization-first") {
+    if (descriptor.activation.precedence !== relationships.activation.replace.precedence) {
       issue(errors, "/activation/precedence", "replace mode requires deterministic customization-first precedence");
     }
   }
 }
 
 function validateFork(descriptor, errors) {
-  if (descriptor.type !== "fork") {
+  const materializationRelationship = relationships.fork.materialization;
+  if (descriptor.type !== materializationRelationship.descriptorType) {
     if (descriptor.fork !== undefined) issue(errors, "/fork", "is only valid for fork customizations");
     return;
   }
   if (!checkObject(errors, descriptor.fork, "/fork", FORK)) return;
-  checkRequired(errors, descriptor.fork, "/fork", [
-    "snapshot",
-    "diff",
-    "snapshot_fingerprint",
-    "diff_fingerprint",
-  ]);
+  checkRequired(errors, descriptor.fork, "/fork", fields.fork.required);
   for (const key of ["snapshot", "diff"]) {
     if (!isPortableRelativePath(descriptor.fork[key])) {
       issue(errors, `/fork/${key}`, "must be a portable relative path");
@@ -396,8 +368,8 @@ function validateFork(descriptor, errors) {
   }
   checkFingerprint(errors, descriptor.fork.snapshot_fingerprint, "/fork/snapshot_fingerprint");
   checkFingerprint(errors, descriptor.fork.diff_fingerprint, "/fork/diff_fingerprint");
-  const needsMaterialization = descriptor.source?.kind === "customization"
-    && descriptor.source.type === "semantic-overlay";
+  const needsMaterialization = descriptor.source?.kind === materializationRelationship.sourceKind
+    && descriptor.source.type === materializationRelationship.sourceType;
   if (needsMaterialization && descriptor.fork.materialization === undefined) {
     issue(errors, "/fork/materialization", "is required when forking an overlay source");
   }
@@ -407,31 +379,30 @@ function validateFork(descriptor, errors) {
   if (descriptor.fork.materialization !== undefined) {
     const materialization = descriptor.fork.materialization;
     if (checkObject(errors, materialization, "/fork/materialization", MATERIALIZATION)) {
-      checkRequired(errors, materialization, "/fork/materialization", [
-        "source_effective_fingerprint",
-        "snapshot_fingerprint",
-        "reviewed_at",
-        "evidence",
-      ]);
+      checkRequired(errors, materialization, "/fork/materialization", fields.materialization.required);
       checkFingerprint(
         errors,
-        materialization.source_effective_fingerprint,
-        "/fork/materialization/source_effective_fingerprint",
+        materialization[materializationRelationship.materializationSourceField],
+        materializationRelationship.sourceFingerprintPath,
       );
       checkFingerprint(
         errors,
-        materialization.snapshot_fingerprint,
-        "/fork/materialization/snapshot_fingerprint",
+        materialization[materializationRelationship.materializationSnapshotField],
+        materializationRelationship.snapshotFingerprintPath,
       );
       checkPortableNonEmptyString(errors, materialization.reviewed_at, "/fork/materialization/reviewed_at", "review timestamp");
       checkPortableNonEmptyString(errors, materialization.evidence, "/fork/materialization/evidence", "review evidence");
       if (
-        materialization.source_effective_fingerprint !== descriptor.source?.effective_fingerprint
+        materialization[materializationRelationship.materializationSourceField]
+          !== descriptor.source?.[materializationRelationship.sourceFingerprintField]
       ) {
-        issue(errors, "/fork/materialization/source_effective_fingerprint", "must equal source.effective_fingerprint");
+        issue(errors, materializationRelationship.sourceFingerprintPath, "must equal source.effective_fingerprint");
       }
-      if (materialization.snapshot_fingerprint !== descriptor.fork.snapshot_fingerprint) {
-        issue(errors, "/fork/materialization/snapshot_fingerprint", "must equal fork.snapshot_fingerprint");
+      if (
+        materialization[materializationRelationship.materializationSnapshotField]
+          !== descriptor.fork[materializationRelationship.snapshotFingerprintField]
+      ) {
+        issue(errors, materializationRelationship.snapshotFingerprintPath, "must equal fork.snapshot_fingerprint");
       }
     }
   }
@@ -444,26 +415,14 @@ function validateFork(descriptor, errors) {
 export function validateDescriptor(descriptor) {
   const errors = [];
   if (!checkObject(errors, descriptor, "", TOP_LEVEL)) return errors;
-  checkRequired(errors, descriptor, "", [
-    "schema_version",
-    "id",
-    "type",
-    "name",
-    "license",
-    "entrypoint",
-    "customization",
-    "dependencies",
-    "owned_payload",
-    "source",
-    "activation",
-  ]);
-  if (descriptor.schema_version !== 1) issue(errors, "/schema_version", "must equal 1");
+  checkRequired(errors, descriptor, "", fields.topLevel.required);
+  if (descriptor.schema_version !== values.schemaVersion) issue(errors, "/schema_version", "must equal 1");
   if (descriptor.$schema !== undefined) {
     if (typeof descriptor.$schema !== "string") issue(errors, "/$schema", "must be a string when present");
     else if (isMachineAbsolutePath(descriptor.$schema)) issue(errors, "/$schema", "must not be a machine-local absolute path");
   }
   checkStableId(errors, descriptor.id, "/id");
-  if (!["semantic-overlay", "fork"].includes(descriptor.type)) {
+  if (!values.customizationTypes.includes(descriptor.type)) {
     issue(errors, "/type", "must be semantic-overlay or fork");
   }
   checkName(errors, descriptor.name, "/name");
@@ -490,7 +449,7 @@ export function validateDescriptor(descriptor) {
     });
   }
   if (checkObject(errors, descriptor.owned_payload, "/owned_payload", OWNED_PAYLOAD)) {
-    checkRequired(errors, descriptor.owned_payload, "/owned_payload", ["reviewed_fingerprint"]);
+    checkRequired(errors, descriptor.owned_payload, "/owned_payload", fields.ownedPayload.required);
     checkFingerprint(errors, descriptor.owned_payload.reviewed_fingerprint, "/owned_payload/reviewed_fingerprint");
   }
   validateSource(descriptor.source, errors);

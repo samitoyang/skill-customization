@@ -2,6 +2,7 @@ import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { DESCRIPTOR_INVARIANTS } from "./descriptor-invariants.js";
 import { assertValidDescriptor } from "./descriptor.js";
 import { ReconciliationError } from "./errors.js";
 import {
@@ -19,6 +20,7 @@ import { resolveOwnedPath } from "./paths.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
 const EMPTY_CACHE = { version: 1, compatibility: {} };
+const FINGERPRINT = new RegExp(DESCRIPTOR_INVARIANTS.patterns.fingerprint.source);
 
 export function compatibilityCachePath({ env = process.env, home = os.homedir() } = {}) {
   return env.XDG_STATE_HOME
@@ -603,7 +605,7 @@ async function reconcileOverlay({
   });
   if (
     descriptor.source.kind === "customization"
-    && !/^sha256:[0-9a-f]{64}$/.test(sourceEffectiveFingerprint ?? "")
+    && !FINGERPRINT.test(sourceEffectiveFingerprint ?? "")
   ) {
     throw new ReconciliationError(
       "customization sources require their checked effective fingerprint",

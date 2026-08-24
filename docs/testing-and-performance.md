@@ -20,7 +20,7 @@ These test seams do not change the production interface: `discoverSkills` retain
 
 `npm run verify` remains the required complete correctness check and runs behavior, ambient integration, and emitted-artifact lanes before the package audit. The performance suite is an additional check, not a replacement for correctness. CI runs both jobs. Concurrent `node:test` durations and whole-suite wall-clock time are diagnostic only; they are not performance evidence or regression gates.
 
-The behavior suite includes one immutable [Descriptor parity corpus](../test/support/descriptor-parity-corpus.js). Its cases exercise both `validateDescriptor` and the exported `customization.schema.json`; named runtime-only rules are documented as expressibility gaps, while every other result must agree. Because emitted-artifact verification runs the emitted test suite and package checking delegates to it, the same host-independent corpus verifies source behavior and the packaged artifact exactly once per package check.
+The behavior suite includes one immutable [Descriptor parity corpus](../test/support/descriptor-parity-corpus.js). Its cases exercise both `validateDescriptor` and the exported `customization.schema.json`; the [Descriptor invariant catalog](../src/descriptor-invariants.js) owns the named runtime-only expressibility gaps, while every other result must agree. Because emitted-artifact verification runs the emitted test suite and package checking delegates to it, the same host-independent catalog audit and corpus verify source behavior and the packaged artifact exactly once per package check.
 
 ## Performance scenarios
 

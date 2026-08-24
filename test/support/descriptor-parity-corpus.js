@@ -1,3 +1,5 @@
+import { DESCRIPTOR_SCHEMA_GAPS } from "../../src/descriptor-invariants.js";
+
 const fingerprint = (character) => `sha256:${character.repeat(64)}`;
 
 function freezeDeep(value) {
@@ -66,16 +68,6 @@ const caseOf = (name, descriptor, expected, gap) => freezeDeep({
   descriptor,
   expected,
   ...(gap ? { gap } : {}),
-});
-
-/** Runtime-only invariants deliberately absent from portable JSON Schema. */
-export const DESCRIPTOR_SCHEMA_GAPS = freezeDeep({
-  coexistName: "coexist activation requires a customization name distinct from its source",
-  replaceName: "replace activation requires a customization name equal to its source",
-  activationPrecedence: "coexist activation forbids precedence",
-  repositoryCanonicalization: "repository URLs must already be normalized by runtime policy",
-  materializationSource: "materialization source fingerprint equals the selected source fingerprint",
-  materializationSnapshot: "materialization snapshot fingerprint equals the fork snapshot fingerprint",
 });
 
 export const DESCRIPTOR_PARITY_CORPUS = freezeDeep([
