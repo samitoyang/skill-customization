@@ -1702,6 +1702,59 @@ test("replacement publication rejects changed customization metadata", async () 
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
+test("binding publication rejects changed plugin, settings, and manager control evidence", async () => {
+  for (const kind of ["plugin", "settings", "manager"]) {
+    const root = await mkdtemp(path.join(os.tmpdir(), `binding-${kind}-control-race-`));
+    const source = path.join(root, "source");
+    const statePath = path.join(root, "state", "bindings.json");
+    const controlPath = path.join(root, `${kind}.control`);
+    const roots = [{ path: root, scope: "global", origin: "personal" }];
+    await mkdir(source, { recursive: true });
+    await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+    await writeFile(controlPath, "before\n");
+    const release = await acquireStateLock(statePath);
+    let signalNow;
+    const nowReached = new Promise((resolve) => { signalNow = resolve; });
+    const pending = bindCustomization({
+      descriptor: descriptor(),
+      sourcePath: source,
+      context: "global",
+      statePath,
+      roots,
+      discover: discoverFixtureSkills,
+      managerDiagnostics: kind === "manager" ? [{ source: controlPath, status: "missing" }] : [],
+      discoveryOptions: {
+        ...(kind === "plugin" ? { pluginControlPaths: [controlPath] } : {}),
+        ...(kind === "settings" ? { settingsControlPaths: [controlPath] } : {}),
+      },
+      interactive: true,
+      confirm: async () => true,
+      now: async () => {
+        await writeFile(controlPath, "after\n");
+        signalNow();
+        return "2026-08-04T00:00:00.000Z";
+      },
+    });
+    const settled = pending.then(
+      (value) => ({ status: "fulfilled", value }),
+      (error) => ({ status: "rejected", error }),
+    );
+    let gateError;
+    try {
+      await waitForDiscoveryGate(nowReached, `${kind} control evidence race gate`);
+    } catch (error) {
+      gateError = error;
+    } finally {
+      await release();
+    }
+    const result = await settled;
+    if (gateError) throw gateError;
+    assert.equal(result.status, "rejected");
+    assert.equal(result.error.code, "BINDING_SOURCE_SELECTION_INVALID");
+    assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+  }
+});
+
 test("binding rejects the wrong declared source name and conflicting repository evidence", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-source-"));
   const source = path.join(root, "skills", "other");

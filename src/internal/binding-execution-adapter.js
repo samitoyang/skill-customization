@@ -12,6 +12,7 @@ export function createBindingExecutionAdapter(
     statePath,
     roots,
     managerRecords = [],
+    managerDiagnostics = [],
     discoverySnapshot,
   } = {},
 ) {
@@ -20,6 +21,7 @@ export function createBindingExecutionAdapter(
     statePath,
     roots,
     managerRecords,
+    managerDiagnostics,
     discoverySnapshot,
   });
 

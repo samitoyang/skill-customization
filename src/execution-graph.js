@@ -12,6 +12,7 @@ import {
 } from "./fingerprint.js";
 import { createBindingExecutionAdapter } from "./internal/binding-execution-adapter.js";
 import { attachPublicationToken, publicationTokenFor } from "./internal/publication-token.js";
+import { statePathExclusions } from "./paths.js";
 import { reconcileCustomization } from "./reconcile.js";
 
 export const MAX_CUSTOMIZATION_DEPTH = 32;
@@ -183,7 +184,9 @@ async function forkTrackingAdvisory(descriptor, {
       }
       current = tracked.effectiveFingerprint;
     } else {
-      current = validated?.inspection.fingerprint ?? await fingerprintPath(root);
+      current = validated?.inspection.fingerprint ?? await fingerprintPath(root, {
+        excludedPaths: statePathExclusions(statePath),
+      });
     }
     if (current !== expected) {
       return {
@@ -349,7 +352,9 @@ async function visit({
       );
     }
   } else {
-    const actualSourceFingerprint = await fingerprintPath(boundRoot);
+    const actualSourceFingerprint = await fingerprintPath(boundRoot, {
+      excludedPaths: statePathExclusions(statePath),
+    });
     if (actualSourceFingerprint !== descriptor.source.effective_fingerprint) {
       return maintenance(
         descriptor,
@@ -417,6 +422,7 @@ export async function inspectCustomizationExecution({
   statePath,
   roots,
   managerRecords = [],
+  managerDiagnostics = [],
   discoverySnapshot,
   bindings,
 }) {
@@ -427,6 +433,7 @@ export async function inspectCustomizationExecution({
     statePath,
     roots,
     managerRecords,
+    managerDiagnostics,
     discoverySnapshot,
   });
   return visit({

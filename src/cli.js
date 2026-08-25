@@ -541,6 +541,7 @@ async function commandReconcile(descriptorPath, options, io) {
         statePath: options.state,
         roots: context.roots,
         managerRecords: context.managerRecords,
+        managerDiagnostics: context.managerDiagnostics,
         discoveryOptions: discoveryOptions(context),
       });
       if (nested.status === "maintenance-required") {
@@ -599,6 +600,7 @@ async function commandPreflight(descriptorPath, options, io) {
     statePath: options.state,
     roots: context.roots,
     managerRecords: context.managerRecords,
+    managerDiagnostics: context.managerDiagnostics,
     discoveryOptions: discoveryOptions(context),
   });
   outputJson(io, result);

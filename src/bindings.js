@@ -25,7 +25,7 @@ import {
   normalizeRepositoryUrl,
   normalizeUpstreamEntrypoint,
 } from "./normalization.js";
-import { isPathContained } from "./paths.js";
+import { canonicalPath, isPathContained, statePathExclusions } from "./paths.js";
 import {
   checkProvenance,
   checkProvenanceCache,
@@ -192,31 +192,10 @@ function filesystemStatRevision(info, { stableDirectory = false } = {}) {
 }
 
 function stateEvidenceExcludedPaths(statePath) {
-  if (typeof statePath !== "string" || !statePath.trim()) return [];
   // Exclude the state file itself, never its parent. A state file may live
   // beneath a discovery or source root; excluding that directory would make
   // its non-state children invisible to the bounded tree token.
-  const resolved = path.resolve(statePath);
-  return [resolved, `${resolved}.lock`];
-}
-
-async function canonicalEvidencePath(candidatePath) {
-  const original = path.resolve(candidatePath);
-  let cursor = original;
-  const suffix = [];
-  while (true) {
-    try {
-      await lstat(cursor);
-      const canonicalParent = path.resolve(await realpath(path.dirname(cursor)));
-      return path.join(canonicalParent, path.basename(cursor), ...suffix);
-    } catch (error) {
-      if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
-      const parent = path.dirname(cursor);
-      if (parent === cursor) return original;
-      suffix.unshift(path.basename(cursor));
-      cursor = parent;
-    }
-  }
+  return statePathExclusions(statePath);
 }
 
 async function filesystemEvidenceRevision({
@@ -229,10 +208,22 @@ async function filesystemEvidenceRevision({
   optionalTreePaths = [],
   ignoredPaths = [],
 }) {
+  const suppliedPathCount = new Set([
+    sourcePath,
+    targetPath,
+    entrypoint,
+    ...additionalPaths,
+    ...optionalAdditionalPaths,
+    ...treePaths,
+    ...optionalTreePaths,
+    ...ignoredPaths,
+  ].filter((candidate) => typeof candidate === "string" && candidate.trim())
+    .map((candidate) => path.resolve(candidate))).size;
+  if (suppliedPathCount > MAX_PUBLICATION_EVIDENCE_PATHS) return undefined;
   const normalizePaths = async (candidates) => [...new Set(await Promise.all(
     candidates
       .filter((candidate) => typeof candidate === "string" && candidate.trim())
-      .map((candidate) => canonicalEvidencePath(candidate)),
+      .map((candidate) => canonicalPath(candidate)),
   ))].sort();
   const paths = [
     sourcePath,
@@ -1287,13 +1278,16 @@ export function createBindingOperation({
     discoverySnapshot,
     roots,
     managerRecords = [],
-    managerDiagnostics = [],
+    managerDiagnostics: suppliedManagerDiagnostics,
     discoveryOptions: operationDiscoveryOptions = {},
     discover,
     recoverCustomizationExecution,
     refreshDiscovery: suppliedRefreshDiscovery,
     revalidateSeededDiscovery: suppliedRevalidateSeededDiscovery,
   } = runtime;
+  const managerDiagnostics = suppliedManagerDiagnostics
+    ?? operationDiscoveryOptions.managerDiagnostics
+    ?? [];
   const revalidateSeededDiscovery = Boolean(
     suppliedRevalidateSeededDiscovery
     || discovery !== undefined
@@ -1309,14 +1303,17 @@ export function createBindingOperation({
   const operationRefreshDiscovery = typeof suppliedRefreshDiscovery === "function"
     ? suppliedRefreshDiscovery
     : () => createDiscoverySnapshot({
-        roots: roots ?? discovery?.searchedRoots,
+        roots: roots ?? (discovery?.rootsAreExplicit === false ? undefined : discovery?.searchedRoots),
         managerRecords,
         options: {
           ...operationDiscoveryOptions,
           managerDiagnostics,
-          pluginControlPaths: discovery?.pluginControlPaths,
-          managerControlPaths: discovery?.managerControlPaths,
-          settingsControlPaths: discovery?.settingsControlPaths,
+          ...(Array.isArray(discovery?.pluginControlPaths)
+            ? { pluginControlPaths: discovery.pluginControlPaths } : {}),
+          ...(Array.isArray(discovery?.managerControlPaths)
+            ? { managerControlPaths: discovery.managerControlPaths } : {}),
+          ...(Array.isArray(discovery?.settingsControlPaths)
+            ? { settingsControlPaths: discovery.settingsControlPaths } : {}),
         },
         ...(discover ? { discover } : {}),
       });
@@ -1972,12 +1969,15 @@ async function validateBindingReadOnlyInternal({
   roots,
   customizationRoot,
   managerRecords = [],
-  managerDiagnostics = [],
+  managerDiagnostics: suppliedManagerDiagnostics,
   discoveryOptions = {},
   discovery,
   discoverySnapshot,
   revalidateSeededDiscovery = false,
 }) {
+  const managerDiagnostics = suppliedManagerDiagnostics
+    ?? discoveryOptions.managerDiagnostics
+    ?? [];
   // Use the full validation seam without invoking resolution or persistence.
   // Recursive lock-side graph checks therefore re-evaluate targeted Discovery
   // provenance and replacement activation for every nested binding.
@@ -2810,7 +2810,7 @@ async function bindCustomizationInternal({
   confirm,
   confirmReplace,
   managerRecords = [],
-  managerDiagnostics = [],
+  managerDiagnostics: suppliedManagerDiagnostics,
   discoveryOptions = {},
   confirmedSelection,
   selectSource,
@@ -2823,6 +2823,9 @@ async function bindCustomizationInternal({
   revalidateSeededDiscovery = false,
   now = () => new Date().toISOString(),
 }) {
+  const managerDiagnostics = suppliedManagerDiagnostics
+    ?? discoveryOptions.managerDiagnostics
+    ?? [];
   assertValidDescriptor(descriptor);
   if (typeof context !== "string" || !context.trim()) {
     throw new BindingError("binding context is required", { code: "BINDING_CONTEXT_REQUIRED" });
@@ -3330,7 +3333,7 @@ async function resolveBindingInternal({
   roots,
   customizationRoot,
   managerRecords = [],
-  managerDiagnostics = [],
+  managerDiagnostics: suppliedManagerDiagnostics,
   discoveryOptions = {},
   discovery,
   discoverySnapshot,
@@ -3339,6 +3342,9 @@ async function resolveBindingInternal({
   revalidateSeededDiscovery = false,
   recoveryAttempts = 0,
 }) {
+  const managerDiagnostics = suppliedManagerDiagnostics
+    ?? discoveryOptions.managerDiagnostics
+    ?? [];
   assertValidDescriptor(descriptor);
   const operationDiscovery = bindingDiscoverySnapshot({
     discovery,
@@ -3586,6 +3592,7 @@ async function resolveBindingInternal({
             statePath,
             roots,
             managerRecords,
+            managerDiagnostics,
             discoveryOptions,
             discovery,
             customizationRoot,
@@ -3625,6 +3632,7 @@ async function resolveBindingInternal({
           statePath,
           roots,
           managerRecords,
+          managerDiagnostics,
           discoveryOptions,
           discovery,
           customizationRoot,
@@ -3650,7 +3658,7 @@ function createPublicBindingOperation(options = {}) {
     discoverySnapshot: options.discoverySnapshot,
     roots: options.roots,
     managerRecords: options.managerRecords ?? [],
-    managerDiagnostics: options.managerDiagnostics ?? [],
+    managerDiagnostics: options.managerDiagnostics,
     discoveryOptions: options.discoveryOptions ?? {},
     ...(options.discover ? { discover: options.discover } : {}),
     ...(typeof options.refreshDiscovery === "function"

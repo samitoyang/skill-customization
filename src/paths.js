@@ -19,6 +19,43 @@ export function isPathContained(root, target) {
   return relative === "" || (!escapesRoot && !path.isAbsolute(relative));
 }
 
+// Resolve a path through every existing ancestor without requiring the leaf
+// itself to exist.  Evidence and fingerprint exclusions use this same seam so
+// a state path reached through a source symlink names the same file as the
+// traversal that validates the source.
+export async function canonicalPath(
+  candidatePath,
+  { preserveLeafSymlink = true } = {},
+) {
+  const original = path.resolve(candidatePath);
+  let cursor = original;
+  const suffix = [];
+  while (true) {
+    try {
+      await lstat(cursor);
+      const canonical = preserveLeafSymlink && suffix.length === 0
+        ? path.join(
+            path.resolve(await realpath(path.dirname(cursor))),
+            path.basename(cursor),
+          )
+        : path.resolve(await realpath(cursor));
+      return path.join(canonical, ...suffix);
+    } catch (error) {
+      if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
+      const parent = path.dirname(cursor);
+      if (parent === cursor) return original;
+      suffix.unshift(path.basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+export function statePathExclusions(statePath) {
+  if (typeof statePath !== "string" || !statePath.trim()) return [];
+  const resolved = path.resolve(statePath);
+  return [resolved, `${resolved}.lock`];
+}
+
 async function assertNoSymlinks(target) {
   const info = await lstat(target);
   if (info.isSymbolicLink()) throw new Error(`symbolic link is not owned provenance: ${target}`);

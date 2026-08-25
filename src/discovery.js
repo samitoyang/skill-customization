@@ -834,6 +834,7 @@ export async function discoverSkills({
       ...groups.map((group) => ({ kind: "skill", name: group.name, fingerprint: group.fingerprint })),
       { kind: "custom-path" },
     ],
+    rootsAreExplicit,
     searchedRoots: normalizedRoots,
     rootDiagnostics,
     managerDiagnostics,
@@ -867,7 +868,11 @@ export function createDiscoverySnapshot({
   if (typeof discover !== "function") {
     throw new TypeError("discovery snapshot adapter must be a function");
   }
-  const seededRoots = roots ?? options.roots ?? discovery?.searchedRoots;
+  // A seed from ambient Discovery must retain ambient mode on refresh: its
+  // searched roots are observations, not an explicit caller policy.  An
+  // explicit roots argument (including []) remains deterministic.
+  const seededRoots = roots ?? options.roots
+    ?? (discovery?.rootsAreExplicit === false ? undefined : discovery?.searchedRoots);
   const {
     pluginControlPaths: optionPluginControlPaths = [],
     managerControlPaths: optionManagerControlPaths = [],

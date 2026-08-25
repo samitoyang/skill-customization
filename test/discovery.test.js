@@ -83,6 +83,26 @@ test("discovery snapshots seed inventory and memoize targeted lookups per operat
   assert.equal(calls, 2);
 });
 
+test("ambient discovery snapshots refresh without freezing observed plugin roots", async () => {
+  const seeded = {
+    groups: [],
+    rootsAreExplicit: false,
+    searchedRoots: [{ path: "/observed-plugin-cache" }],
+  };
+  let refreshed = 0;
+  const snapshot = createDiscoverySnapshot({
+    discovery: seeded,
+    discover: async ({ roots }) => {
+      refreshed += 1;
+      assert.equal(roots, undefined);
+      return seeded;
+    },
+  });
+  assert.equal(await snapshot.inventory(), seeded);
+  await snapshot.discover({ input: "review" });
+  assert.equal(refreshed, 1);
+});
+
 test("discovery snapshot revision records an expected targeted miss", async () => {
   const snapshot = createDiscoverySnapshot({
     discovery: { groups: [], searchedRoots: [] },

@@ -6,6 +6,7 @@ import {
   isOwnedPayloadExcludedPath,
   isSourceFingerprintExcludedPath,
 } from "./owned-payload.js";
+import { canonicalPath, isPathContained } from "./paths.js";
 
 function digest(hash) {
   return `sha256:${hash.digest("hex")}`;
@@ -65,33 +66,6 @@ export async function fingerprintFiles(filePaths) {
   return digest(hash);
 }
 
-function isPathWithin(ancestor, candidate) {
-  const relative = path.relative(ancestor, candidate);
-  return relative === ""
-    || (!relative.startsWith(`..${path.sep}`)
-      && relative !== ".."
-      && !path.isAbsolute(relative));
-}
-
-async function canonicalExcludedPath(candidatePath) {
-  const original = path.resolve(candidatePath);
-  let cursor = original;
-  const suffix = [];
-  while (true) {
-    try {
-      await lstat(cursor);
-      const canonicalParent = path.resolve(await realpath(path.dirname(cursor)));
-      return path.join(canonicalParent, path.basename(cursor), ...suffix);
-    } catch (error) {
-      if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
-      const parent = path.dirname(cursor);
-      if (parent === cursor) return original;
-      suffix.unshift(path.basename(cursor));
-      cursor = parent;
-    }
-  }
-}
-
 async function listTree(root, current = root, excludedPaths = []) {
   const entries = await readdir(current, { withFileTypes: true });
   entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
@@ -103,7 +77,7 @@ async function listTree(root, current = root, excludedPaths = []) {
     if (excludedPaths.some((excluded) => path.resolve(excluded) === absolute)) continue;
     if (entry.isDirectory()) {
       const suppressDirectory = excludedPaths.some((excluded) =>
-        isPathWithin(absolute, path.resolve(excluded)));
+        isPathContained(absolute, excluded));
       if (!suppressDirectory) result.push({ type: "directory", relative });
       result.push(...(await listTree(root, absolute, excludedPaths)));
     } else if (entry.isSymbolicLink()) {
@@ -167,7 +141,7 @@ export async function fingerprintPath(targetPath, { excludedPaths = [] } = {}) {
   frame(hash, "skill-customization-directory-v1");
   const normalizedExcludedPaths = [...new Set(await Promise.all(excludedPaths
     .filter((candidate) => typeof candidate === "string" && candidate.trim())
-    .map((candidate) => canonicalExcludedPath(candidate))))];
+    .map((candidate) => canonicalPath(candidate, { preserveLeafSymlink: false }))))];
   for (const entry of await listTree(canonicalRoot, canonicalRoot, normalizedExcludedPaths)) {
     frame(hash, entry.type);
     frame(hash, entry.relative);

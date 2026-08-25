@@ -13,14 +13,19 @@ export async function preflightCustomization({
   statePath = bindingStorePath(),
   roots,
   managerRecords = [],
+  managerDiagnostics: suppliedManagerDiagnostics,
   discovery,
   discoveryOptions = {},
 }) {
+  const managerDiagnostics = suppliedManagerDiagnostics
+    ?? discoveryOptions.managerDiagnostics
+    ?? [];
   const operation = createBindingRuntime({
     discovery,
     context: {
       roots,
       managerRecords,
+      managerDiagnostics,
       discoveryOptions,
     },
     inspectExecution: inspectCustomizationExecution,
@@ -31,6 +36,7 @@ export async function preflightCustomization({
     statePath,
     roots,
     managerRecords,
+    managerDiagnostics,
     bindings: operation,
   });
 }
