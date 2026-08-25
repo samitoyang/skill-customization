@@ -87,6 +87,34 @@ test("overlay requires a live source and accepts an exact checkpoint", async () 
   assert.equal(result.checkpointMatch, true);
 });
 
+test("overlay reconciliation excludes its request state store from source drift", async () => {
+  const fixture = await overlayFixture();
+  const statePath = path.join(fixture.sourceRoot, ".state", "bindings.json");
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(statePath, "first state\n");
+  fixture.descriptor.source.effective_fingerprint = await fingerprintPath(
+    fixture.sourceRoot,
+    { excludedPaths: [statePath] },
+  );
+
+  const first = await reconcileCustomization({
+    descriptor: fixture.descriptor,
+    customizationRoot: fixture.customizationRoot,
+    sourcePath: fixture.sourceRoot,
+    statePath,
+  });
+  assert.equal(first.status, "compatible");
+
+  await writeFile(statePath, "changed state\n");
+  const second = await reconcileCustomization({
+    descriptor: fixture.descriptor,
+    customizationRoot: fixture.customizationRoot,
+    sourcePath: fixture.sourceRoot,
+    statePath,
+  });
+  assert.equal(second.status, "compatible");
+});
+
 test("overlay follows an installed symlink to a live source directory", async () => {
   const fixture = await overlayFixture();
   const alias = path.join(fixture.root, "installed-review");

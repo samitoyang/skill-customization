@@ -293,10 +293,11 @@ function discoveryOptions(context) {
   };
 }
 
-function createContextBindingOperation(context) {
+function createContextBindingOperation(context, statePath) {
   return createBindingRuntime({
     context: {
       ...context,
+      statePath,
       discoveryOptions: discoveryOptions(context),
     },
     inspectExecution: inspectCustomizationExecution,
@@ -444,7 +445,7 @@ async function commandBind(descriptorPath, options, io) {
   const sourcePath = requireValue(options.source, "--source is required");
   const bindingContext = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const bindingOperation = createContextBindingOperation(context);
+  const bindingOperation = createContextBindingOperation(context, options.state);
   outputJson(
     io,
     await bindingOperation.bindCustomization({
@@ -495,7 +496,7 @@ async function commandResolve(descriptorPath, options, io) {
   );
   const descriptor = await readDescriptor(resolvedDescriptorPath);
   const context = await discoveryContext(options);
-  const bindingOperation = createContextBindingOperation(context);
+  const bindingOperation = createContextBindingOperation(context, options.state);
   outputJson(
     io,
     await bindingOperation.resolveBinding({
@@ -522,7 +523,7 @@ async function commandReconcile(descriptorPath, options, io) {
   let sourceExecutionPlan;
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
-    const bindingOperation = createContextBindingOperation(context);
+    const bindingOperation = createContextBindingOperation(context, options.state);
     const bindingContext = requireValue(
       options.context,
       "--context is required for semantic overlay reconciliation",
@@ -581,6 +582,7 @@ async function commandReconcile(descriptorPath, options, io) {
     sourcePath,
     sourceEffectiveFingerprint,
     sourceExecutionPlan,
+    statePath: options.state,
     cachePath: options.cache,
     semanticReconciler,
   });

@@ -26,6 +26,7 @@ export async function preflightCustomization({
       roots,
       managerRecords,
       managerDiagnostics,
+      statePath,
       discoveryOptions,
     },
     inspectExecution: inspectCustomizationExecution,

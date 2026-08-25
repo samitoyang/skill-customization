@@ -55,6 +55,27 @@ test("fixture discovery keeps plugin roots disabled and explicit roots authorita
   assert.equal(explicit.searchedRoots.length, 0);
 });
 
+test("discovery fingerprints exclude the request state store inside a source", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-state-fingerprint-"));
+  const source = await writeSkill(root, "review", "review");
+  const statePath = path.join(source, ".state", "bindings.json");
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(statePath, "first state\n");
+
+  const options = {
+    roots: [{ path: root, scope: "global", origin: "personal" }],
+    managerRecords: [],
+    statePath,
+  };
+  const first = await discoverFixtureSkills(options);
+  const expected = await fingerprintPath(source, { excludedPaths: [statePath] });
+  assert.equal(first.groups[0].fingerprint, expected);
+
+  await writeFile(statePath, "changed state\n");
+  const second = await discoverFixtureSkills(options);
+  assert.equal(second.groups[0].fingerprint, expected);
+});
+
 test("discovery snapshots seed inventory and memoize targeted lookups per operation", async () => {
   const seeded = { groups: [], searchedRoots: [{ path: "/seeded" }] };
   const targeted = { groups: [], searchedRoots: [{ path: "/targeted" }] };

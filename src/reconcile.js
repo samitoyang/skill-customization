@@ -16,7 +16,7 @@ import {
   isSourceFingerprintExcludedPath,
   isVersionControlMetadataPath,
 } from "./owned-payload.js";
-import { resolveOwnedPath } from "./paths.js";
+import { resolveOwnedPath, statePathExclusions } from "./paths.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
 const EMPTY_CACHE = { version: 1, compatibility: {} };
@@ -581,6 +581,7 @@ async function reconcileOverlay({
   sourcePath,
   sourceEffectiveFingerprint,
   sourceExecutionPlan,
+  statePath,
   cachePath = compatibilityCachePath(),
   semanticReconciler,
 }) {
@@ -614,7 +615,9 @@ async function reconcileOverlay({
   }
   const sourceFingerprint = descriptor.source.kind === "customization"
     ? sourceEffectiveFingerprint
-    : await fingerprintPath(sourceRoot);
+    : await fingerprintPath(sourceRoot, {
+        excludedPaths: statePathExclusions(statePath),
+      });
   const sourceIdentityFingerprint = descriptor.source.kind === "local"
     ? await fingerprintFile(entrypoint)
     : undefined;

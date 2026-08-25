@@ -19,6 +19,7 @@ export function createBindingRuntime({
     roots: context.roots,
     managerRecords: context.managerRecords ?? [],
     managerDiagnostics: context.managerDiagnostics,
+    statePath: context.statePath,
     discoveryOptions: context.discoveryOptions ?? {},
     ...(context.discover ? { discover: context.discover } : {}),
     ...(typeof context.refreshDiscovery === "function"

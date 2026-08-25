@@ -60,6 +60,7 @@ export function createCustomizationRecoveryAdapter({
         statePath,
         roots: runtime.roots,
         managerRecords: runtime.managerRecords ?? [],
+        managerDiagnostics: runtime.managerDiagnostics ?? [],
         discoverySnapshot,
         // Candidate inspection must not create nested bindings before the outer
         // candidate itself has passed the persistence CAS.

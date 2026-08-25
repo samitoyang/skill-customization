@@ -1104,17 +1104,16 @@ function publicationProvenanceRevision(inspection) {
 }
 
 function requiresPublicationProvenanceRefresh(inspection) {
-  // An explicit local path has no Discovery-derived provenance to go stale;
-  // the filesystem revision is rechecked inside the state CAS instead. Any
-  // repository, plugin, manager, or confirmed-selection evidence must be
-  // retargeted immediately before publication because it can change without
-  // changing the selected skill payload.
+  // Discovery owns both source provenance and the observed control-plane
+  // paths that determine which candidates exist. Reinspect when those paths
+  // were observed because they can change without changing source payload.
   return (
     inspection.selection !== undefined
     || inspection.provenance.length > 0
     || inspection.evidence.some(({ kind }) => kind !== "explicit")
     || inspection.pluginIdentity !== undefined
     || inspection.pluginCache !== undefined
+    || inspection.controlPaths?.length > 0
   );
 }
 
@@ -1193,13 +1192,18 @@ function bindingDiscoverySnapshot({
   roots,
   managerRecords,
   managerDiagnostics,
+  statePath,
   discoveryOptions = {},
 }) {
   return discoverySnapshot ?? createDiscoverySnapshot({
     discovery,
     roots,
     managerRecords,
-    options: { ...discoveryOptions, managerDiagnostics },
+    options: {
+      ...discoveryOptions,
+      managerDiagnostics,
+      ...(statePath === undefined ? {} : { statePath }),
+    },
   });
 }
 
@@ -1279,6 +1283,7 @@ export function createBindingOperation({
     roots,
     managerRecords = [],
     managerDiagnostics: suppliedManagerDiagnostics,
+    statePath: runtimeStatePath,
     discoveryOptions: operationDiscoveryOptions = {},
     discover,
     recoverCustomizationExecution,
@@ -1297,7 +1302,11 @@ export function createBindingOperation({
     discovery,
     roots,
     managerRecords,
-    options: { ...operationDiscoveryOptions, managerDiagnostics },
+    options: {
+      ...operationDiscoveryOptions,
+      managerDiagnostics,
+      ...(runtimeStatePath === undefined ? {} : { statePath: runtimeStatePath }),
+    },
     ...(discover ? { discover } : {}),
   });
   const operationRefreshDiscovery = typeof suppliedRefreshDiscovery === "function"
@@ -1308,6 +1317,7 @@ export function createBindingOperation({
         options: {
           ...operationDiscoveryOptions,
           managerDiagnostics,
+          ...(runtimeStatePath === undefined ? {} : { statePath: runtimeStatePath }),
           ...(Array.isArray(discovery?.pluginControlPaths)
             ? { pluginControlPaths: discovery.pluginControlPaths } : {}),
           ...(Array.isArray(discovery?.managerControlPaths)
@@ -1325,6 +1335,7 @@ export function createBindingOperation({
       roots,
       managerRecords,
       managerDiagnostics,
+      statePath: intent.statePath ?? runtimeStatePath,
       discoveryOptions: operationDiscoveryOptions,
       ...(options.selectSource === undefined && selectSource
         ? { selectSource }
@@ -2837,6 +2848,7 @@ async function bindCustomizationInternal({
     roots,
     managerRecords,
     managerDiagnostics,
+    statePath,
     discoveryOptions,
   });
   const refreshOperationDiscovery = typeof refreshDiscovery === "function"
@@ -3285,6 +3297,7 @@ async function validateBindingInternal({
     roots,
     managerRecords,
     managerDiagnostics,
+    statePath,
     discoveryOptions,
   });
   const replacementEvidence = await assertReplacementActivation({
@@ -3352,6 +3365,7 @@ async function resolveBindingInternal({
     roots,
     managerRecords,
     managerDiagnostics,
+    statePath,
     discoveryOptions,
   });
   const refreshOperationDiscovery = typeof refreshDiscovery === "function"
@@ -3659,6 +3673,7 @@ function createPublicBindingOperation(options = {}) {
     roots: options.roots,
     managerRecords: options.managerRecords ?? [],
     managerDiagnostics: options.managerDiagnostics,
+    statePath: options.statePath,
     discoveryOptions: options.discoveryOptions ?? {},
     ...(options.discover ? { discover: options.discover } : {}),
     ...(typeof options.refreshDiscovery === "function"

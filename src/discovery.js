@@ -30,7 +30,7 @@ import {
   confirmProvenanceDecision,
   stableProvenanceKey,
 } from "./provenance.js";
-import { isPathContained } from "./paths.js";
+import { isPathContained, statePathExclusions } from "./paths.js";
 import {
   normalizeSkillRootObservations,
   registrySkillRoots,
@@ -276,7 +276,7 @@ async function inspectFilesystemInput(input, cwd) {
   return { exists: true };
 }
 
-async function scanRoot(rootInfo) {
+async function scanRoot(rootInfo, { statePath } = {}) {
   publishDiscoveryPerformanceMetric("root_scans");
   let entries;
   try {
@@ -345,7 +345,7 @@ async function scanRoot(rootInfo) {
     }
   }
   const results = await Promise.allSettled(
-    directories.map((directory) => candidateFromDirectory(directory, rootInfo)),
+    directories.map((directory) => candidateFromDirectory(directory, rootInfo, { statePath })),
   );
   return {
     candidates: results
@@ -452,7 +452,7 @@ async function adjacentCustomization(directory) {
   });
 }
 
-async function candidateFromDirectory(directory, rootInfo) {
+async function candidateFromDirectory(directory, rootInfo, { statePath } = {}) {
   const realDirectory = await realpath(directory).catch(() => path.resolve(directory));
   const customization = await adjacentCustomization(realDirectory);
   const entrypoint = path.join(
@@ -482,7 +482,9 @@ async function candidateFromDirectory(directory, rootInfo) {
       : {}),
     ...(rootInfo.active === false ? { active: false } : {}),
     fingerprint: customization?.owned_payload.reviewed_fingerprint
-      ?? await fingerprintPath(directory),
+      ?? await fingerprintPath(directory, {
+        excludedPaths: statePathExclusions(statePath),
+      }),
     classification: customization ? "customization" : "skill",
     ...(customization
       ? {
@@ -639,6 +641,7 @@ export async function discoverSkills({
   managerDiagnostics: suppliedManagerDiagnostics = [],
   settingsEvidence: suppliedSettingsEvidence = [],
   settingsControlPaths: suppliedSettingsControlPaths = [],
+  statePath,
   managerOptions,
   managerCollector = collectManagerRecords,
   customPath,
@@ -709,7 +712,8 @@ export async function discoverSkills({
   // Keep the historical mutable result surface, but copy only after the
   // registry has completed all root identity and policy decisions.
   const normalizedRoots = rootRegistry.roots.map((record) => structuredClone(record));
-  const scans = await Promise.all(normalizedRoots.map(scanRoot));
+  const scans = await Promise.all(normalizedRoots.map((root) =>
+    scanRoot(root, { statePath })));
   const candidates = scans.flatMap(({ candidates: rootCandidates }) =>
     rootCandidates
   );

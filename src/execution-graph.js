@@ -258,7 +258,7 @@ async function visit({
 
   if (descriptor.type === "fork") {
     try {
-      await reconcileCustomization({ descriptor, customizationRoot: root });
+      await reconcileCustomization({ descriptor, customizationRoot: root, statePath });
     } catch (error) {
       return maintenance(descriptor, root, "fork-payload-or-provenance-drift", error.message);
     }
