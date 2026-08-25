@@ -1293,6 +1293,10 @@ export function createBindingOperation({
   const managerDiagnostics = suppliedManagerDiagnostics
     ?? operationDiscoveryOptions.managerDiagnostics
     ?? [];
+  // State is request-scoped lifecycle data. Give every downstream seam the
+  // same concrete path, even when the public Binding interface uses its
+  // default, so exclusion and persistence evidence cannot disagree.
+  const statePath = runtimeStatePath ?? bindingStorePath();
   const revalidateSeededDiscovery = Boolean(
     suppliedRevalidateSeededDiscovery
     || discovery !== undefined
@@ -1305,7 +1309,7 @@ export function createBindingOperation({
     options: {
       ...operationDiscoveryOptions,
       managerDiagnostics,
-      ...(runtimeStatePath === undefined ? {} : { statePath: runtimeStatePath }),
+      statePath,
     },
     ...(discover ? { discover } : {}),
   });
@@ -1317,7 +1321,7 @@ export function createBindingOperation({
         options: {
           ...operationDiscoveryOptions,
           managerDiagnostics,
-          ...(runtimeStatePath === undefined ? {} : { statePath: runtimeStatePath }),
+          statePath,
           ...(Array.isArray(discovery?.pluginControlPaths)
             ? { pluginControlPaths: discovery.pluginControlPaths } : {}),
           ...(Array.isArray(discovery?.managerControlPaths)
@@ -1335,7 +1339,7 @@ export function createBindingOperation({
       roots,
       managerRecords,
       managerDiagnostics,
-      statePath: intent.statePath ?? runtimeStatePath,
+      statePath: intent.statePath ?? statePath,
       discoveryOptions: operationDiscoveryOptions,
       ...(options.selectSource === undefined && selectSource
         ? { selectSource }
@@ -1352,6 +1356,7 @@ export function createBindingOperation({
   const operation = {
     bindingKey,
     readBindingStore,
+    statePath,
     bindCustomization: (options) =>
       bindCustomizationInternal(withOperationContext(options)),
     resolveBinding: (options) =>
@@ -3377,6 +3382,7 @@ async function resolveBindingInternal({
       roots,
       managerRecords,
       managerDiagnostics,
+      statePath,
       discoveryOptions,
       refreshDiscovery: refreshOperationDiscovery,
       recoverCustomizationExecution,

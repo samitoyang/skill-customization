@@ -285,6 +285,69 @@ test("CLI validates, fingerprints, discovers, binds, resolves, and reconciles", 
   assert.equal(JSON.parse(cached.stdout).cached, true);
 });
 
+test("CLI shares default and explicit state paths across binding and reconciliation", async () => {
+  const item = await fixture();
+  const defaultStateHome = path.join(item.root, "default-state-home");
+  const defaultStatePath = path.join(
+    defaultStateHome,
+    "skill-customization",
+    "bindings.json",
+  );
+  const defaultEnvironment = { ...process.env, XDG_STATE_HOME: defaultStateHome };
+  const common = [
+    item.descriptorPath,
+    "--context",
+    "global",
+    "--root",
+    path.dirname(item.source),
+  ];
+
+  const originalStateHome = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = defaultStateHome;
+  try {
+    await bindCustomization({
+      descriptor: item.descriptor,
+      sourcePath: item.source,
+      context: "global",
+      roots: [{ path: path.dirname(item.source), scope: "global", origin: "personal" }],
+      interactive: true,
+      confirm: async () => true,
+    });
+  } finally {
+    if (originalStateHome === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = originalStateHome;
+  }
+  const defaultState = await readFile(defaultStatePath, "utf8");
+  assert.doesNotThrow(() => JSON.parse(defaultState));
+
+  const resolvedDefault = await run(["resolve", ...common], {
+    env: defaultEnvironment,
+  });
+  assert.equal(resolvedDefault.code, 0, resolvedDefault.stderr);
+  const reconciledDefault = await run(["reconcile", ...common], {
+    env: defaultEnvironment,
+  });
+  assert.equal(reconciledDefault.code, 0, reconciledDefault.stderr);
+
+  const explicitStatePath = path.join(item.root, "explicit", "bindings.json");
+  await bindCustomization({
+    descriptor: item.descriptor,
+    sourcePath: item.source,
+    context: "global",
+    statePath: explicitStatePath,
+    roots: [{ path: path.dirname(item.source), scope: "global", origin: "personal" }],
+    interactive: true,
+    confirm: async () => true,
+  });
+  const reconciledExplicit = await run([
+    "reconcile",
+    ...common,
+    "--state",
+    explicitStatePath,
+  ], { env: defaultEnvironment });
+  assert.equal(reconciledExplicit.code, 0, reconciledExplicit.stderr);
+});
+
 
 
 test("CLI binding commands exclude the active replacement customization", async () => {

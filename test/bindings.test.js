@@ -20,6 +20,7 @@ import {
   bindingKey,
   bindingStorePath,
   classifyBindingScope,
+  createBindingOperation,
   readBindingStore,
   resolveBinding,
   validateBinding,
@@ -95,6 +96,24 @@ test("binding state uses XDG then the agents fallback", () => {
     bindingStorePath({ env: {}, home: "/home/alice" }),
     "/home/alice/.agents/skill-customization/bindings.json",
   );
+});
+
+test("Binding request runtimes materialize and preserve their state path", () => {
+  const defaultOperation = createBindingOperation({ runtime: {} });
+  assert.equal(defaultOperation.statePath, bindingStorePath());
+
+  const explicitStatePath = "/tmp/custom-bindings.json";
+  const explicitOperation = createBindingOperation({
+    runtime: { statePath: explicitStatePath },
+  });
+  assert.equal(explicitOperation.statePath, explicitStatePath);
+
+  const runtimeDefault = createBindingRuntime({ context: {} });
+  assert.equal(runtimeDefault.statePath, bindingStorePath());
+  const runtimeExplicit = createBindingRuntime({
+    context: { statePath: explicitStatePath },
+  });
+  assert.equal(runtimeExplicit.statePath, explicitStatePath);
 });
 
 test("scope follows known target origin and custom paths require a choice", async () => {

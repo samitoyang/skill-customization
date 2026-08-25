@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline/promises";
 
+import { bindingStorePath } from "./bindings.js";
 import { createBindingRuntime } from "./internal/binding-runtime.js";
 import {
   helperContractSupport,
@@ -294,10 +295,11 @@ function discoveryOptions(context) {
 }
 
 function createContextBindingOperation(context, statePath) {
+  const resolvedStatePath = statePath ?? bindingStorePath();
   return createBindingRuntime({
     context: {
       ...context,
-      statePath,
+      statePath: resolvedStatePath,
       discoveryOptions: discoveryOptions(context),
     },
     inspectExecution: inspectCustomizationExecution,
@@ -445,14 +447,15 @@ async function commandBind(descriptorPath, options, io) {
   const sourcePath = requireValue(options.source, "--source is required");
   const bindingContext = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const bindingOperation = createContextBindingOperation(context, options.state);
+  const statePath = options.state ?? bindingStorePath();
+  const bindingOperation = createContextBindingOperation(context, statePath);
   outputJson(
     io,
     await bindingOperation.bindCustomization({
       descriptor,
       sourcePath,
       context: bindingContext,
-      statePath: options.state,
+      statePath,
       customizationRoot: path.dirname(resolvedDescriptorPath),
       requestedScope: options.scope,
       requestScope: io.stdin.isTTY ? async () => ttyBindingScope(io) : undefined,
@@ -496,13 +499,14 @@ async function commandResolve(descriptorPath, options, io) {
   );
   const descriptor = await readDescriptor(resolvedDescriptorPath);
   const context = await discoveryContext(options);
-  const bindingOperation = createContextBindingOperation(context, options.state);
+  const statePath = options.state ?? bindingStorePath();
+  const bindingOperation = createContextBindingOperation(context, statePath);
   outputJson(
     io,
     await bindingOperation.resolveBinding({
       descriptor,
       context: requireValue(options.context, "--context is required"),
-      statePath: options.state,
+      statePath,
       customizationRoot: path.dirname(resolvedDescriptorPath),
     }),
   );
@@ -513,6 +517,7 @@ async function commandReconcile(descriptorPath, options, io) {
     requireValue(descriptorPath, "descriptor path is required"),
   );
   const descriptor = await readDescriptor(resolvedDescriptorPath);
+  const statePath = options.state ?? bindingStorePath();
   if (options.source) {
     throw new TypeError(
       "--source cannot bypass binding; bind the source and reconcile with --context",
@@ -523,7 +528,7 @@ async function commandReconcile(descriptorPath, options, io) {
   let sourceExecutionPlan;
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
-    const bindingOperation = createContextBindingOperation(context, options.state);
+    const bindingOperation = createContextBindingOperation(context, statePath);
     const bindingContext = requireValue(
       options.context,
       "--context is required for semantic overlay reconciliation",
@@ -531,7 +536,7 @@ async function commandReconcile(descriptorPath, options, io) {
     const binding = await bindingOperation.resolveBinding({
       descriptor,
       context: bindingContext,
-      statePath: options.state,
+      statePath,
       customizationRoot: path.dirname(resolvedDescriptorPath),
     });
     sourcePath = binding.source.alias ?? binding.source.path;
@@ -539,7 +544,7 @@ async function commandReconcile(descriptorPath, options, io) {
       const nested = await preflightCustomization({
         descriptorPath: path.join(binding.source.target, "customization.json"),
         context: bindingContext,
-        statePath: options.state,
+        statePath,
         roots: context.roots,
         managerRecords: context.managerRecords,
         managerDiagnostics: context.managerDiagnostics,
@@ -582,7 +587,7 @@ async function commandReconcile(descriptorPath, options, io) {
     sourcePath,
     sourceEffectiveFingerprint,
     sourceExecutionPlan,
-    statePath: options.state,
+    statePath,
     cachePath: options.cache,
     semanticReconciler,
   });
@@ -596,10 +601,11 @@ async function commandPreflight(descriptorPath, options, io) {
   );
   const contextValue = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
+  const statePath = options.state ?? bindingStorePath();
   const result = await preflightCustomization({
     descriptorPath: resolvedDescriptorPath,
     context: contextValue,
-    statePath: options.state,
+    statePath,
     roots: context.roots,
     managerRecords: context.managerRecords,
     managerDiagnostics: context.managerDiagnostics,

@@ -1,4 +1,4 @@
-import { createBindingOperation } from "../bindings.js";
+import { bindingStorePath, createBindingOperation } from "../bindings.js";
 import { createCustomizationRecoveryAdapter } from "./customization-recovery-adapter.js";
 
 /**
@@ -19,7 +19,7 @@ export function createBindingRuntime({
     roots: context.roots,
     managerRecords: context.managerRecords ?? [],
     managerDiagnostics: context.managerDiagnostics,
-    statePath: context.statePath,
+    statePath: context.statePath ?? bindingStorePath(),
     discoveryOptions: context.discoveryOptions ?? {},
     ...(context.discover ? { discover: context.discover } : {}),
     ...(typeof context.refreshDiscovery === "function"
