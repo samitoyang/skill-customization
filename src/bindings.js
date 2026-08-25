@@ -44,12 +44,7 @@ const MAX_GIT_INCLUDE_GLOB_MATCHES = 64;
 const MAX_GIT_INCLUDE_GLOB_SCAN_ENTRIES = 4096;
 const MAX_PUBLICATION_EVIDENCE_PATHS = 512;
 const MAX_PUBLICATION_TREE_ENTRIES = 256;
-// A single provenance walk can retain its root metadata, four Git control
-// files, and every permitted include. Reserve that whole envelope before any
-// walk begins so a large candidate inventory cannot multiply bounded walks.
-const MAX_PUBLICATION_PROVENANCE_ROOTS = Math.floor(
-  MAX_PUBLICATION_EVIDENCE_PATHS / (MAX_GIT_INCLUDE_FILES + 8),
-);
+// Every provenance walk is accumulated against the shared evidence-path cap.
 
 const EXPECTED_RECOVERY_MISMATCH_CODES = new Set([
   "BINDING_CUSTOMIZATION_SOURCE_MISMATCH",
@@ -205,6 +200,25 @@ function stateEvidenceExcludedPaths(statePath) {
   return [resolved, `${resolved}.lock`];
 }
 
+async function canonicalEvidencePath(candidatePath) {
+  const original = path.resolve(candidatePath);
+  let cursor = original;
+  const suffix = [];
+  while (true) {
+    try {
+      await lstat(cursor);
+      const canonicalParent = path.resolve(await realpath(path.dirname(cursor)));
+      return path.join(canonicalParent, path.basename(cursor), ...suffix);
+    } catch (error) {
+      if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
+      const parent = path.dirname(cursor);
+      if (parent === cursor) return original;
+      suffix.unshift(path.basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
 async function filesystemEvidenceRevision({
   sourcePath,
   targetPath,
@@ -215,29 +229,31 @@ async function filesystemEvidenceRevision({
   optionalTreePaths = [],
   ignoredPaths = [],
 }) {
+  const normalizePaths = async (candidates) => [...new Set(await Promise.all(
+    candidates
+      .filter((candidate) => typeof candidate === "string" && candidate.trim())
+      .map((candidate) => canonicalEvidencePath(candidate)),
+  ))].sort();
   const paths = [
     sourcePath,
     targetPath,
     entrypoint,
     ...additionalPaths,
-  ]
-    .filter((candidate) => typeof candidate === "string" && candidate.trim())
-    .map((candidate) => path.resolve(candidate));
-  const uniquePaths = [...new Set(paths)].sort();
-  const optionalPaths = [...new Set(optionalAdditionalPaths
-    .filter((candidate) => typeof candidate === "string" && candidate.trim())
-    .map((candidate) => path.resolve(candidate)))].sort();
-  const excludedPaths = [...new Set(ignoredPaths
-    .filter((candidate) => typeof candidate === "string" && candidate.trim())
-    .map((candidate) => path.resolve(candidate)))].sort();
-  const requiredTrees = [...new Set(treePaths
-    .filter((candidate) => typeof candidate === "string" && candidate.trim())
-    .map((candidate) => path.resolve(candidate)))];
-  const optionalTrees = [...new Set(optionalTreePaths
-    .filter((candidate) => typeof candidate === "string" && candidate.trim())
-    .map((candidate) => path.resolve(candidate)))].filter(
-    (candidate) => !requiredTrees.includes(candidate),
-  );
+  ];
+  const [uniquePaths, optionalPaths, excludedPaths, requiredTrees, optionalTrees] = await Promise.all([
+    normalizePaths(paths),
+    normalizePaths(optionalAdditionalPaths),
+    normalizePaths(ignoredPaths),
+    normalizePaths(treePaths),
+    normalizePaths(optionalTreePaths),
+  ]).then(([normalizedPaths, normalizedOptionalPaths, normalizedExcludedPaths,
+    normalizedRequiredTrees, normalizedOptionalTrees]) => [
+    normalizedPaths,
+    normalizedOptionalPaths,
+    normalizedExcludedPaths,
+    normalizedRequiredTrees,
+    normalizedOptionalTrees.filter((candidate) => !normalizedRequiredTrees.includes(candidate)),
+  ]);
   // State writes can churn every ancestor's directory timestamps when they
   // create the local state directory.  Tree capture still records every
   // non-state child, so a new discovery sibling remains observable even
@@ -296,29 +312,34 @@ async function filesystemEvidenceRevision({
     async function captureTree(candidate, { optional = false } = {}) {
       const resolved = path.resolve(candidate);
       if (isExcluded(resolved)) return;
-      // The state directory may be created by the lock itself. Ignore only
-      // that directory, while retaining its containing tree so non-state
-      // siblings remain part of the publication token.
-      if (isStateChurnDirectory(resolved)) return;
       if (seenTrees.has(resolved)) return;
       seenTrees.add(resolved);
-      if (!reserveTreeEntry()) return false;
+      // The lock may create this directory after the initial token. Its own
+      // revision is state churn, but recursively retaining its non-state
+      // children keeps ordinary files in that directory observable.
+      const stableStateDirectory = isStateChurnDirectory(resolved);
+      if (!stableStateDirectory && !reserveTreeEntry()) return false;
       let info;
       try {
         info = await lstat(resolved);
       } catch (error) {
+        if (stableStateDirectory && ["ENOENT", "ENOTDIR"].includes(error.code)) {
+          return;
+        }
         if (optional && ["ENOENT", "ENOTDIR"].includes(error.code)) {
           treeEntries.push({ path: resolved, missing: true });
           return;
         }
         throw error;
       }
-      treeEntries.push({
-        path: resolved,
-        ...filesystemStatRevision(info, {
-          stableDirectory: hasExcludedDescendant(resolved),
-        }),
-      });
+      if (!stableStateDirectory) {
+        treeEntries.push({
+          path: resolved,
+          ...filesystemStatRevision(info, {
+            stableDirectory: hasExcludedDescendant(resolved),
+          }),
+        });
+      }
       if (!info.isDirectory() || info.isSymbolicLink()) return;
       const directory = await opendir(resolved);
       const children = [];
@@ -602,6 +623,7 @@ function bindingDiscoveryTreePaths(inspection) {
   // plugin cache roots can be large and must not turn a bounded CAS into a
   // full ambient installation scan.
   return (inspection?.searchedRoots ?? [])
+    .filter(({ origin }) => origin !== "plugin")
     .map(({ path: rootPath }) => rootPath)
     .filter((rootPath) => typeof rootPath === "string");
 }
@@ -755,6 +777,7 @@ async function fullFingerprintRevision({
   descriptor,
   sourceRoot,
   entrypoint,
+  statePath,
   expectedEffectiveFingerprint,
   replacementEvidence,
   recoveryContext,
@@ -765,9 +788,12 @@ async function fullFingerprintRevision({
 }) {
   let sourceFingerprint;
   let entrypointFingerprint;
+  const sourceExcludedPaths = stateEvidenceExcludedPaths(
+    statePath ?? recoveryContext?.statePath,
+  );
   try {
     [sourceFingerprint, entrypointFingerprint] = await Promise.all([
-      fingerprintPath(sourceRoot),
+      fingerprintPath(sourceRoot, { excludedPaths: sourceExcludedPaths }),
       fingerprintFile(entrypoint),
     ]);
   } catch (error) {
@@ -837,7 +863,7 @@ async function fullFingerprintRevision({
         path: path.resolve(candidate.path),
         fingerprint: classification === "customization" && hasReviewedPayload
           ? await payloadFingerprint(candidate.path)
-          : await fingerprintPath(candidate.path),
+          : await fingerprintPath(candidate.path, { excludedPaths: sourceExcludedPaths }),
         metadataRevision,
       });
     } catch (error) {
@@ -970,7 +996,6 @@ async function bindingEvidenceProvenancePaths(inspection, replacementEvidence) {
       details: { limit: MAX_PUBLICATION_EVIDENCE_PATHS },
     });
   };
-  if (uniqueRoots.length > MAX_PUBLICATION_PROVENANCE_ROOTS) rejectUnboundedEvidence();
   const provenance = [];
   for (const candidate of uniqueRoots) {
     const paths = await sourceProvenancePaths(candidate);
@@ -1065,6 +1090,7 @@ function discoveryEvidenceRevision(inspection) {
     selection: cloneRevisionValue(inspection?.selection),
     pluginIdentity: inspection?.pluginIdentity,
     pluginCache: cloneRevisionValue(inspection?.pluginCache),
+    controlPaths: cloneRevisionValue(inspection?.controlPaths ?? []),
     discovery: {
       name: discovery?.name,
       fingerprint: discovery?.fingerprint,
@@ -1175,11 +1201,14 @@ function bindingDiscoverySnapshot({
   discoverySnapshot,
   roots,
   managerRecords,
+  managerDiagnostics,
+  discoveryOptions = {},
 }) {
   return discoverySnapshot ?? createDiscoverySnapshot({
     discovery,
     roots,
     managerRecords,
+    options: { ...discoveryOptions, managerDiagnostics },
   });
 }
 
@@ -1258,6 +1287,7 @@ export function createBindingOperation({
     discoverySnapshot,
     roots,
     managerRecords = [],
+    managerDiagnostics = [],
     discoveryOptions: operationDiscoveryOptions = {},
     discover,
     recoverCustomizationExecution,
@@ -1273,7 +1303,7 @@ export function createBindingOperation({
     discovery,
     roots,
     managerRecords,
-    options: operationDiscoveryOptions,
+    options: { ...operationDiscoveryOptions, managerDiagnostics },
     ...(discover ? { discover } : {}),
   });
   const operationRefreshDiscovery = typeof suppliedRefreshDiscovery === "function"
@@ -1281,7 +1311,13 @@ export function createBindingOperation({
     : () => createDiscoverySnapshot({
         roots: roots ?? discovery?.searchedRoots,
         managerRecords,
-        options: operationDiscoveryOptions,
+        options: {
+          ...operationDiscoveryOptions,
+          managerDiagnostics,
+          pluginControlPaths: discovery?.pluginControlPaths,
+          managerControlPaths: discovery?.managerControlPaths,
+          settingsControlPaths: discovery?.settingsControlPaths,
+        },
         ...(discover ? { discover } : {}),
       });
   const hasSuppliedRefreshDiscovery = typeof suppliedRefreshDiscovery === "function";
@@ -1291,6 +1327,7 @@ export function createBindingOperation({
       ...intent,
       roots,
       managerRecords,
+      managerDiagnostics,
       discoveryOptions: operationDiscoveryOptions,
       ...(options.selectSource === undefined && selectSource
         ? { selectSource }
@@ -1718,6 +1755,7 @@ function assertCustomizationBinding({ descriptor, binding }) {
 async function inspectBindingSource({
   descriptor,
   sourcePath,
+  statePath,
   roots,
   managerRecords,
   confirmedSelection,
@@ -1865,7 +1903,9 @@ async function inspectBindingSource({
   let fingerprint;
   let entrypointFingerprint;
   try {
-    fingerprint = await fingerprintPath(sourceRoot);
+    fingerprint = await fingerprintPath(sourceRoot, {
+      excludedPaths: stateEvidenceExcludedPaths(statePath),
+    });
     entrypointFingerprint = await fingerprintFile(entrypoint);
   } catch (error) {
     throw bindingErrorWithCause(
@@ -1897,6 +1937,8 @@ async function inspectBindingSource({
     searchedRoots: discovery.searchedRoots,
     controlPaths: [
       ...(discovery.pluginControlPaths ?? []),
+      ...(discovery.managerControlPaths ?? []),
+      ...(discovery.settingsControlPaths ?? []),
       ...(discovery.managerDiagnostics ?? [])
         .map(({ source }) => source)
         .filter((source) => typeof source === "string" && path.isAbsolute(source)),
@@ -1925,10 +1967,12 @@ async function inspectBindingSource({
 async function validateBindingReadOnlyInternal({
   descriptor,
   binding,
+  statePath,
   requireLocalIdentityMatch = false,
   roots,
   customizationRoot,
   managerRecords = [],
+  managerDiagnostics = [],
   discoveryOptions = {},
   discovery,
   discoverySnapshot,
@@ -1940,9 +1984,11 @@ async function validateBindingReadOnlyInternal({
   return validateBindingInternal({
     descriptor,
     binding,
+    statePath,
     roots,
     customizationRoot,
     managerRecords,
+    managerDiagnostics,
     discoveryOptions,
     discovery,
     discoverySnapshot,
@@ -1967,9 +2013,11 @@ function matchesCustomizationCopy(source, group, copy) {
     && copy.customization?.license === source.license;
 }
 
-async function recoverStandardFingerprint({ copy }) {
+async function recoverStandardFingerprint({ copy, recoveryContext }) {
   try {
-    return await fingerprintPath(copy.path);
+    return await fingerprintPath(copy.path, {
+      excludedPaths: stateEvidenceExcludedPaths(recoveryContext?.statePath),
+    });
   } catch (error) {
     if (isExpectedRecoveryMismatch(error)) return undefined;
     throw error;
@@ -2124,6 +2172,8 @@ async function recoverMissingPluginBinding({
     descriptor,
     roots,
     managerRecords,
+    managerDiagnostics,
+    discoveryOptions,
     customizationRoot,
     discoverySnapshot,
   } = recoveryContext;
@@ -2142,8 +2192,10 @@ async function recoverMissingPluginBinding({
       ? await discoverySnapshot.inventory()
       : await discoverSkills({
           input: descriptor.source.skill_name,
+          ...discoveryOptions,
           roots,
           managerRecords,
+          managerDiagnostics,
         });
   } catch (error) {
     if (error.code === "NO_LOCAL_COPY") return undefined;
@@ -2314,6 +2366,7 @@ async function revalidateRecoveredBinding({
   const {
     roots,
     managerRecords,
+    managerDiagnostics,
     customizationRoot,
     discoverySnapshot,
     statePath,
@@ -2333,8 +2386,10 @@ async function revalidateRecoveredBinding({
     validation = await validateBindingInternal({
       descriptor,
       binding: recovered,
+      statePath,
       roots,
       managerRecords,
+      managerDiagnostics,
       discoveryOptions,
       discovery,
       customizationRoot,
@@ -2729,6 +2784,14 @@ async function assertReplacementActivation({
       .map(({ path: rootPath }) => rootPath)
       .filter((rootPath) => typeof rootPath === "string")
       .sort(),
+    controlPaths: [...new Set([
+      ...(discovery.pluginControlPaths ?? []),
+      ...(discovery.managerControlPaths ?? []),
+      ...(discovery.settingsControlPaths ?? []),
+      ...(discovery.managerDiagnostics ?? []).map(({ source }) => source),
+    ].filter((candidate) => typeof candidate === "string" && path.isAbsolute(candidate))
+      .map((candidate) => path.resolve(candidate)))].sort((left, right) =>
+      left.localeCompare(right, "en")),
     candidates,
     ...(contextRevision !== undefined ? { contextRevision } : {}),
     ...(discoveryRevision !== undefined ? { discoveryRevision } : {}),
@@ -2747,6 +2810,7 @@ async function bindCustomizationInternal({
   confirm,
   confirmReplace,
   managerRecords = [],
+  managerDiagnostics = [],
   discoveryOptions = {},
   confirmedSelection,
   selectSource,
@@ -2769,6 +2833,8 @@ async function bindCustomizationInternal({
     discoverySnapshot,
     roots,
     managerRecords,
+    managerDiagnostics,
+    discoveryOptions,
   });
   const refreshOperationDiscovery = typeof refreshDiscovery === "function"
     ? refreshDiscovery
@@ -2786,6 +2852,7 @@ async function bindCustomizationInternal({
       statePath,
       roots,
       managerRecords,
+      managerDiagnostics,
       discoveryOptions,
       discovery,
       customizationRoot,
@@ -2803,6 +2870,7 @@ async function bindCustomizationInternal({
   const inspection = await inspectBindingSource({
     descriptor,
     sourcePath,
+    statePath,
     roots,
     managerRecords,
     confirmedSelection,
@@ -2866,6 +2934,7 @@ async function bindCustomizationInternal({
   const confirmedInspection = await inspectBindingSource({
     descriptor,
     sourcePath,
+    statePath,
     roots,
     managerRecords,
     confirmedSelection: inspection.selection ?? confirmedSelection,
@@ -2894,6 +2963,7 @@ async function bindCustomizationInternal({
   let finalInspection = await inspectBindingSource({
     descriptor,
     sourcePath,
+    statePath,
     roots,
     managerRecords,
     confirmedSelection: confirmedInspection.selection ?? confirmedSelection,
@@ -2908,6 +2978,7 @@ async function bindCustomizationInternal({
     finalInspection = await inspectBindingSource({
       descriptor,
       sourcePath,
+      statePath,
       roots,
       managerRecords,
       confirmedSelection: confirmedInspection.selection ?? confirmedSelection,
@@ -3011,6 +3082,7 @@ async function bindCustomizationInternal({
     descriptor,
     sourceRoot: evidenceRevision.canonicalSource ?? path.resolve(sourcePath),
     entrypoint: evidenceRevision.entrypoint,
+    statePath,
     expectedEffectiveFingerprint: evidenceRevision.effectiveFingerprint,
     replacementEvidence: evidenceRevision.replacement,
     discoverySnapshot: finalDiscovery,
@@ -3044,6 +3116,7 @@ async function bindCustomizationInternal({
     ? await inspectBindingSource({
         descriptor,
         sourcePath,
+        statePath,
         roots,
         managerRecords,
         confirmedSelection: finalInspection.selection ?? confirmedSelection,
@@ -3164,6 +3237,7 @@ async function bindCustomizationInternal({
   return validateBindingInternal({
     descriptor,
     binding: persistedBinding,
+    statePath,
     roots,
     managerRecords,
     discoveryOptions,
@@ -3189,9 +3263,11 @@ async function invalidate(statePath, key, expectedBinding) {
 async function validateBindingInternal({
   descriptor,
   binding,
+  statePath,
   roots,
   customizationRoot,
   managerRecords = [],
+  managerDiagnostics = [],
   discoveryOptions = {},
   discovery,
   discoverySnapshot,
@@ -3205,6 +3281,8 @@ async function validateBindingInternal({
     discoverySnapshot,
     roots,
     managerRecords,
+    managerDiagnostics,
+    discoveryOptions,
   });
   const replacementEvidence = await assertReplacementActivation({
     descriptor,
@@ -3222,6 +3300,7 @@ async function validateBindingInternal({
   const inspection = await inspectBindingSource({
     descriptor,
     sourcePath: lookupPath,
+    statePath,
     roots,
     managerRecords,
     confirmedSelection: binding.source.selection,
@@ -3251,6 +3330,7 @@ async function resolveBindingInternal({
   roots,
   customizationRoot,
   managerRecords = [],
+  managerDiagnostics = [],
   discoveryOptions = {},
   discovery,
   discoverySnapshot,
@@ -3265,6 +3345,8 @@ async function resolveBindingInternal({
     discoverySnapshot,
     roots,
     managerRecords,
+    managerDiagnostics,
+    discoveryOptions,
   });
   const refreshOperationDiscovery = typeof refreshDiscovery === "function"
     ? refreshDiscovery
@@ -3274,6 +3356,7 @@ async function resolveBindingInternal({
       discoverySnapshot: snapshot,
       roots,
       managerRecords,
+      managerDiagnostics,
       discoveryOptions,
       refreshDiscovery: refreshOperationDiscovery,
       recoverCustomizationExecution,
@@ -3301,8 +3384,10 @@ async function resolveBindingInternal({
       await validateBindingInternal({
         descriptor,
         binding,
+        statePath,
         roots,
         managerRecords,
+        managerDiagnostics,
         discoveryOptions,
         discovery,
         customizationRoot,
@@ -3324,6 +3409,7 @@ async function resolveBindingInternal({
         statePath,
         roots,
         managerRecords,
+        managerDiagnostics,
         discoveryOptions,
         discovery,
         customizationRoot,
@@ -3564,6 +3650,7 @@ function createPublicBindingOperation(options = {}) {
     discoverySnapshot: options.discoverySnapshot,
     roots: options.roots,
     managerRecords: options.managerRecords ?? [],
+    managerDiagnostics: options.managerDiagnostics ?? [],
     discoveryOptions: options.discoveryOptions ?? {},
     ...(options.discover ? { discover: options.discover } : {}),
     ...(typeof options.refreshDiscovery === "function"

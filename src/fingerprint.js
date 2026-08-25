@@ -65,7 +65,34 @@ export async function fingerprintFiles(filePaths) {
   return digest(hash);
 }
 
-async function listTree(root, current = root) {
+function isPathWithin(ancestor, candidate) {
+  const relative = path.relative(ancestor, candidate);
+  return relative === ""
+    || (!relative.startsWith(`..${path.sep}`)
+      && relative !== ".."
+      && !path.isAbsolute(relative));
+}
+
+async function canonicalExcludedPath(candidatePath) {
+  const original = path.resolve(candidatePath);
+  let cursor = original;
+  const suffix = [];
+  while (true) {
+    try {
+      await lstat(cursor);
+      const canonicalParent = path.resolve(await realpath(path.dirname(cursor)));
+      return path.join(canonicalParent, path.basename(cursor), ...suffix);
+    } catch (error) {
+      if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
+      const parent = path.dirname(cursor);
+      if (parent === cursor) return original;
+      suffix.unshift(path.basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+async function listTree(root, current = root, excludedPaths = []) {
   const entries = await readdir(current, { withFileTypes: true });
   entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
   const result = [];
@@ -73,9 +100,12 @@ async function listTree(root, current = root) {
     const absolute = path.join(current, entry.name);
     const relative = path.relative(root, absolute).split(path.sep).join("/");
     if (isSourceFingerprintExcludedPath(relative)) continue;
+    if (excludedPaths.some((excluded) => path.resolve(excluded) === absolute)) continue;
     if (entry.isDirectory()) {
-      result.push({ type: "directory", relative });
-      result.push(...(await listTree(root, absolute)));
+      const suppressDirectory = excludedPaths.some((excluded) =>
+        isPathWithin(absolute, path.resolve(excluded)));
+      if (!suppressDirectory) result.push({ type: "directory", relative });
+      result.push(...(await listTree(root, absolute, excludedPaths)));
     } else if (entry.isSymbolicLink()) {
       throw symbolicLinkError(relative);
     } else if (entry.isFile()) {
@@ -125,16 +155,20 @@ export async function payloadFingerprint(directory) {
   return digest(hash);
 }
 
-export async function fingerprintPath(targetPath) {
+export async function fingerprintPath(targetPath, { excludedPaths = [] } = {}) {
   const info = await lstat(targetPath);
   if (info.isFile()) return fingerprintFile(targetPath);
   if (info.isSymbolicLink()) {
-    return fingerprintPath(await realpath(targetPath));
+    return fingerprintPath(await realpath(targetPath), { excludedPaths });
   }
   if (!info.isDirectory()) throw new TypeError("only files, directories, and symlinks can be fingerprinted");
+  const canonicalRoot = path.resolve(await realpath(targetPath));
   const hash = createHash("sha256");
   frame(hash, "skill-customization-directory-v1");
-  for (const entry of await listTree(targetPath)) {
+  const normalizedExcludedPaths = [...new Set(await Promise.all(excludedPaths
+    .filter((candidate) => typeof candidate === "string" && candidate.trim())
+    .map((candidate) => canonicalExcludedPath(candidate))))];
+  for (const entry of await listTree(canonicalRoot, canonicalRoot, normalizedExcludedPaths)) {
     frame(hash, entry.type);
     frame(hash, entry.relative);
     if (entry.bytes) frame(hash, entry.bytes);

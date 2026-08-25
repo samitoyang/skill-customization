@@ -8,6 +8,7 @@ import {
   activeSkillInventory,
   confirmDiscoverySelection,
   configuredHostSkillRoots,
+  discoverSkills,
   hostSkillRoots,
 } from "../src/discovery.js";
 import { fingerprintPath } from "../src/fingerprint.js";
@@ -1684,6 +1685,7 @@ test("Codex config.toml accepts dotted marketplace assignments", async () => {
   assert.equal(result.groups.length, 1);
   assert.equal(result.groups[0].copies[0].path, path.join(plugin, "skills"));
   assert.equal(result.groups[0].copies[0].plugin.marketplace, "dotted-marketplace");
+  assert.ok(result.pluginControlPaths.includes(path.join(codexHome, "config.toml")));
   assert.equal(
     result.pluginDiagnostics.some(({ code }) => code === "MALFORMED_PLUGIN_CONFIGURATION"),
     false,
@@ -2506,6 +2508,17 @@ test("configured host roots load bounded global and workspace Claude settings", 
   assert.deepEqual(configured.diagnostics, []);
   assert.deepEqual(configured.rootDiagnostics, []);
   assert.equal(paths.some((rootPath) => rootPath === root), false);
+  const discovery = await discoverSkills({
+    roots: configured.rootObservations,
+    managerRecords: [],
+    includePlugins: false,
+    settingsEvidence: configured.settingsEvidence,
+    settingsControlPaths: configured.settingsControlPaths,
+  });
+  assert.deepEqual(
+    discovery.settingsControlPaths,
+    configured.settingsControlPaths,
+  );
 });
 
 

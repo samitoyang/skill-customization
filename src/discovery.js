@@ -166,6 +166,8 @@ export async function configuredHostSkillRoots({
     candidates.set(path.join(directory, ".claude", "settings.local.json"), directory);
   }
   const settingsEvidence = [];
+  const settingsControlPaths = [...candidates.keys()].sort((left, right) =>
+    left.localeCompare(right, "en"));
   const diagnostics = [];
   const additionalDirectories = [];
   for (const [settingsPath, base] of candidates) {
@@ -234,6 +236,7 @@ export async function configuredHostSkillRoots({
     rootObservations,
     rootDiagnostics: rootRegistry.diagnostics,
     settingsEvidence,
+    settingsControlPaths,
     diagnostics,
   };
 }
@@ -633,19 +636,22 @@ export async function discoverSkills({
   pluginDiscovery = discoverPluginSkillRoots,
   pluginOptions,
   managerRecords,
+  managerDiagnostics: suppliedManagerDiagnostics = [],
+  settingsEvidence: suppliedSettingsEvidence = [],
+  settingsControlPaths: suppliedSettingsControlPaths = [],
   managerOptions,
   managerCollector = collectManagerRecords,
   customPath,
   rootDiagnostics: suppliedRootDiagnostics = [],
 } = {}) {
   publishDiscoveryPerformanceMetric("discovery_calls");
-  let managerDiagnostics = [];
+  let managerDiagnostics = [...suppliedManagerDiagnostics];
   const rootDiagnostics = [...suppliedRootDiagnostics];
   if (managerRecords === undefined) {
     publishDiscoveryPerformanceMetric("manager_collections");
     const collected = await managerCollector({ home, cwd, env, ...managerOptions });
     managerRecords = collected.records;
-    managerDiagnostics = collected.diagnostics;
+    managerDiagnostics.push(...collected.diagnostics);
   }
   const rootsAreExplicit = roots !== undefined;
   // An omitted roots option is the ambient mode; an explicit empty array is intentionally deterministic.
@@ -805,6 +811,23 @@ export async function discoverSkills({
     });
   }
   const groups = groupCandidates(selected);
+  const managerControlPaths = [...new Set([
+    ...managerRecords.map(({ controlPath }) => controlPath),
+    ...managerDiagnostics.map(({ source }) => source),
+  ].filter((candidate) => typeof candidate === "string" && path.isAbsolute(candidate))
+    .map((candidate) => path.resolve(candidate)))].sort((left, right) =>
+    left.localeCompare(right, "en"));
+  const settingsEvidence = suppliedSettingsEvidence.map((evidence) => ({
+    ...evidence,
+  }));
+  const settingsControlPaths = [...new Set(
+    [
+      ...suppliedSettingsControlPaths,
+      ...settingsEvidence.map(({ file }) => file),
+    ]
+      .filter((candidate) => typeof candidate === "string" && path.isAbsolute(candidate))
+      .map((candidate) => path.resolve(candidate)),
+  )].sort((left, right) => left.localeCompare(right, "en"));
   return {
     groups,
     choices: [
@@ -814,6 +837,9 @@ export async function discoverSkills({
     searchedRoots: normalizedRoots,
     rootDiagnostics,
     managerDiagnostics,
+    managerControlPaths,
+    settingsEvidence,
+    settingsControlPaths,
     pluginDiagnostics,
     pluginControlPaths,
     candidateDiagnostics,
@@ -842,18 +868,76 @@ export function createDiscoverySnapshot({
     throw new TypeError("discovery snapshot adapter must be a function");
   }
   const seededRoots = roots ?? options.roots ?? discovery?.searchedRoots;
+  const {
+    pluginControlPaths: optionPluginControlPaths = [],
+    managerControlPaths: optionManagerControlPaths = [],
+    settingsControlPaths: optionSettingsControlPaths = [],
+    ...discoveryOptions
+  } = options;
+  const seedControlPaths = (...sources) => [...new Set(
+    sources.flatMap((source) => Array.isArray(source) ? source : []),
+  )].sort((left, right) => left.localeCompare(right, "en"));
+  const seededPluginControlPaths = seedControlPaths(
+    discovery?.pluginControlPaths,
+    optionPluginControlPaths,
+  );
+  const seededManagerControlPaths = seedControlPaths(
+    discovery?.managerControlPaths,
+    optionManagerControlPaths,
+  );
+  const seededSettingsControlPaths = seedControlPaths(
+    discovery?.settingsControlPaths,
+    optionSettingsControlPaths,
+  );
   const defaults = {
-    ...options,
+    ...discoveryOptions,
     ...(seededRoots === undefined ? {} : { roots: seededRoots }),
     managerRecords,
   };
+  const targeted = new Map();
+  const mergedControlPaths = (seeded, current) => [...new Set([
+    ...seeded,
+    ...(Array.isArray(current) ? current : []),
+  ])].sort((left, right) => left.localeCompare(right, "en"));
+  const controlPathsMatch = (current, merged) => (
+    (current === undefined && merged.length === 0)
+    || (Array.isArray(current)
+      && current.length === merged.length
+      && current.every((value, index) => value === merged[index]))
+  );
+
+  const attachControlPaths = (result) => {
+    const pluginControlPaths = mergedControlPaths(
+      seededPluginControlPaths,
+      result.pluginControlPaths,
+    );
+    const managerControlPaths = mergedControlPaths(
+      seededManagerControlPaths,
+      result.managerControlPaths,
+    );
+    const settingsControlPaths = mergedControlPaths(
+      seededSettingsControlPaths,
+      result.settingsControlPaths,
+    );
+    if (
+      controlPathsMatch(result.pluginControlPaths, pluginControlPaths)
+      && controlPathsMatch(result.managerControlPaths, managerControlPaths)
+      && controlPathsMatch(result.settingsControlPaths, settingsControlPaths)
+    ) return result;
+    return {
+      ...result,
+      pluginControlPaths,
+      managerControlPaths,
+      settingsControlPaths,
+    };
+  };
+
   let inventoryPromise = discovery === undefined
     ? undefined
-    : Promise.resolve(discovery);
-  const targeted = new Map();
+    : Promise.resolve(discovery).then(attachControlPaths);
 
   async function inventory() {
-    inventoryPromise ??= discover(defaults);
+    inventoryPromise ??= discover(defaults).then(attachControlPaths);
     return inventoryPromise;
   }
 
@@ -861,7 +945,7 @@ export function createDiscoverySnapshot({
     if (input === undefined) return inventory();
     const key = JSON.stringify(input);
     if (!targeted.has(key)) {
-      targeted.set(key, discover({ ...defaults, input }));
+      targeted.set(key, discover({ ...defaults, input }).then(attachControlPaths));
     }
     return targeted.get(key);
   }

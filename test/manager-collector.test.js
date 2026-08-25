@@ -112,3 +112,27 @@ test("manager roots drive binding scope and workspace locks include bounded ance
     ),
   );
 });
+
+test("missing manager inputs remain control-plane evidence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "manager-control-paths-"));
+  const lock = path.join(root, "missing.lock");
+  const sources = path.join(root, "missing-sources.json");
+  const database = path.join(root, "missing.db");
+  const collected = await collectManagerRecords({
+    home: root,
+    cwd: root,
+    env: { PATH: "" },
+    sources: { vercelLocks: [lock], jtianlingSources: [sources], xingDatabases: [database] },
+  });
+  assert.deepEqual(collected.records, []);
+  assert.deepEqual(
+    collected.diagnostics.filter(({ status }) => status === "missing").map(({ source: path }) => path).sort(),
+    [database, lock, sources].sort(),
+  );
+  const discovery = await discoverFixtureSkills({
+    roots: [],
+    managerRecords: collected.records,
+    managerDiagnostics: collected.diagnostics,
+  });
+  assert.deepEqual(discovery.managerControlPaths, [database, lock, sources].sort());
+});

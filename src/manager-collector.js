@@ -132,7 +132,10 @@ export async function collectManagerRecords({
   for (const lockPath of sources.vercelLocks ?? []) {
     try {
       const data = await readIfPresent(lockPath);
-      if (data === undefined) continue;
+      if (data === undefined) {
+        diagnostics.push({ manager: "vercel", source: lockPath, status: "missing" });
+        continue;
+      }
       const scope = workspaceDirectories.some((directory) =>
         path.resolve(lockPath).startsWith(`${path.resolve(directory)}${path.sep}`),
       )
@@ -170,6 +173,7 @@ export async function collectManagerRecords({
   if (!records.some(({ manager }) => manager === "xing")) {
     for (const database of sources.xingDatabases ?? []) {
       if (!(await access(database).then(() => true, () => false))) {
+        diagnostics.push({ manager: "xing", source: database, status: "missing" });
         continue;
       }
       try {
@@ -186,7 +190,10 @@ export async function collectManagerRecords({
   for (const sourcePath of sources.jtianlingSources ?? []) {
     try {
       const data = await readIfPresent(sourcePath);
-      if (data === undefined) continue;
+      if (data === undefined) {
+        diagnostics.push({ manager: "jtianling", source: sourcePath, status: "missing" });
+        continue;
+      }
       const libraryRoot = path.dirname(sourcePath);
       const parsed = parseJtianlingSources(data, { root: libraryRoot });
       records.push(...recordsFromControlPath(parsed, sourcePath));

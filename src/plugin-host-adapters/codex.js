@@ -269,6 +269,10 @@ export function createCodexAdapter({
 }) {
   async function codexMarketplaceDeclarations(codexHome, context) {
     const file = path.join(codexHome, "config.toml");
+    // The marketplace declaration is control-plane input, including when it
+    // is absent or malformed.  Register it before reading so Binding can
+    // compare that decision input in its publication token.
+    context.controlPaths?.add(path.resolve(file));
     let contents;
     try {
       contents = await readFile(file, "utf8");

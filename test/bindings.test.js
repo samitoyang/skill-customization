@@ -408,6 +408,83 @@ test("publication CAS retains non-state discovery siblings under a shared state 
   assert.deepEqual((await readBindingStore(statePath)).bindings, {});
 });
 
+test("publication CAS retains non-state siblings inside the state directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-state-directory-sibling-race-"));
+  const skills = path.join(root, "skills");
+  const source = path.join(skills, "review");
+  const statePath = path.join(skills, ".state", "bindings.json");
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  const release = await acquireStateLock(statePath);
+  let signalNow;
+  const nowReached = new Promise((resolve) => { signalNow = resolve; });
+  const pending = bindCustomization({
+    descriptor: descriptor(), sourcePath: source, context: "global", statePath,
+    roots: [{ path: skills, scope: "global", origin: "personal" }],
+    interactive: true, confirm: async () => true,
+    now: async () => {
+      await writeFile(path.join(skills, ".state", "retained.txt"), "not binding state\n");
+      signalNow();
+      return "2026-08-04T00:00:00.000Z";
+    },
+  });
+  const settled = pending.then(
+    (value) => ({ status: "fulfilled", value }),
+    (error) => ({ status: "rejected", error }),
+  );
+  let gateError;
+  try { await waitForDiscoveryGate(nowReached, "state directory sibling race gate"); } catch (error) { gateError = error; } finally { await release(); }
+  const result = await settled;
+  if (gateError) throw gateError;
+  assert.equal(result.status, "rejected");
+  assert.equal(result.error.code, "BINDING_SOURCE_SELECTION_INVALID");
+  assert.deepEqual((await readBindingStore(statePath)).bindings, {});
+});
+
+test("publication CAS tolerates a state directory created by the lock", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-state-directory-create-"));
+  const skills = path.join(root, "skills");
+  const source = path.join(skills, "review");
+  const statePath = path.join(skills, ".state", "bindings.json");
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+
+  const bound = await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots: [{ path: skills, scope: "global", origin: "personal" }],
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.equal(bound.context, "global");
+  assert.equal((await readBindingStore(statePath)).bindings[bindingKey(
+    descriptor().id,
+    "global",
+  )].source.path, path.resolve(source));
+});
+
+test("source fingerprints exclude a binding store nested in the source", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-state-source-root-"));
+  const skills = path.join(root, "skills");
+  const source = path.join(skills, "review");
+  const statePath = path.join(source, ".state", "bindings.json");
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+
+  const bound = await bindCustomization({
+    descriptor: descriptor(),
+    sourcePath: source,
+    context: "global",
+    statePath,
+    roots: [{ path: skills, scope: "global", origin: "personal" }],
+    interactive: true,
+    confirm: async () => true,
+  });
+  assert.equal(bound.source.path, path.resolve(source));
+});
+
 test("publication ignores oversized Git include configs without blocking", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-git-include-size-"));
   const source = path.join(root, "skills", "review");

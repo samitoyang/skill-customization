@@ -18,6 +18,7 @@ export function createBindingRuntime({
     discoverySnapshot,
     roots: context.roots,
     managerRecords: context.managerRecords ?? [],
+    managerDiagnostics: context.managerDiagnostics ?? [],
     discoveryOptions: context.discoveryOptions ?? {},
     ...(context.discover ? { discover: context.discover } : {}),
     ...(typeof context.refreshDiscovery === "function"
