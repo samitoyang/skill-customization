@@ -1334,12 +1334,24 @@ export function createBindingOperation({
   const hasSuppliedRefreshDiscovery = typeof suppliedRefreshDiscovery === "function";
   const withOperationContext = (options = {}) => {
     const intent = sanitizeBindingIntentOptions(options);
+    if (
+      typeof intent.statePath === "string"
+      && path.resolve(intent.statePath) !== path.resolve(statePath)
+    ) {
+      throw new BindingError(
+        "Binding operation statePath must match its request runtime statePath",
+        { code: "BINDING_STATE_PATH_MISMATCH" },
+      );
+    }
     return {
       ...intent,
       roots,
       managerRecords,
       managerDiagnostics,
-      statePath: intent.statePath ?? statePath,
+      // Discovery, recovery, and persistence share this fixed request value.
+      // Public helpers construct an operation from their supplied statePath, so
+      // callers retain that option without letting a later intent diverge.
+      statePath,
       discoveryOptions: operationDiscoveryOptions,
       ...(options.selectSource === undefined && selectSource
         ? { selectSource }

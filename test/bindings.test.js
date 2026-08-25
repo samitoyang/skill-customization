@@ -116,6 +116,30 @@ test("Binding request runtimes materialize and preserve their state path", () =>
   assert.equal(runtimeExplicit.statePath, explicitStatePath);
 });
 
+test("Binding operations keep a single state path across caller intent", async () => {
+  const runtimeStatePath = "/tmp/request-runtime-bindings.json";
+  const operation = createBindingOperation({
+    runtime: { statePath: runtimeStatePath },
+  });
+
+  await assert.rejects(
+    operation.validateBinding({ statePath: runtimeStatePath }),
+    (error) => error.code === "INVALID_DESCRIPTOR",
+  );
+  await assert.rejects(
+    createBindingOperation({ runtime: {} }).validateBinding({
+      statePath: bindingStorePath(),
+    }),
+    (error) => error.code === "INVALID_DESCRIPTOR",
+  );
+  assert.throws(
+    () => operation.validateBinding({
+      statePath: "/tmp/divergent-bindings.json",
+    }),
+    (error) => error.code === "BINDING_STATE_PATH_MISMATCH",
+  );
+});
+
 test("scope follows known target origin and custom paths require a choice", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "scope-"));
   const globalRoot = path.join(root, "global");
@@ -1336,6 +1360,7 @@ test("versioned cache recovery checks a customization execution graph", async ()
     context: {
       roots: [rootRecord(versionTwo, "2")],
       managerRecords: [],
+      statePath,
     },
     inspectExecution: inspectCustomizationExecution,
   });
@@ -1360,6 +1385,7 @@ test("versioned cache recovery checks a customization execution graph", async ()
     context: {
       roots: [rootRecord(versionThree, "3")],
       managerRecords: [],
+      statePath,
     },
     inspectExecution: async (intent) => {
       executionChecks += 1;
