@@ -777,10 +777,11 @@ async function fullFingerprintRevision({
   requireEffectiveMatch = false,
   readOnlyExecution = false,
 }) {
+  const recoveryOperationContext = recoveryContext?.operationContext;
   let sourceFingerprint;
   let entrypointFingerprint;
   const sourceExcludedPaths = stateEvidenceExcludedPaths(
-    statePath ?? recoveryContext?.statePath,
+    statePath ?? recoveryOperationContext?.statePath,
   );
   try {
     [sourceFingerprint, entrypointFingerprint] = await Promise.all([
@@ -796,7 +797,7 @@ async function fullFingerprintRevision({
   let graphFilesystem;
   let execution;
   if (descriptor.source.kind === "customization" && requireEffectiveMatch) {
-    if (typeof recoveryContext?.recoverCustomizationExecution !== "function") {
+    if (typeof recoveryOperationContext?.recoverCustomizationExecution !== "function") {
       throw new BindingError(
         "customization source recovery requires the CLI or Preflight runtime",
         {
@@ -806,13 +807,12 @@ async function fullFingerprintRevision({
       );
     }
     try {
-      execution = await recoveryContext.recoverCustomizationExecution({
+      execution = await recoveryOperationContext.recoverCustomizationExecution({
         descriptorPath: path.join(sourceRoot, "customization.json"),
         context: recoveryContext.context,
-        statePath: recoveryContext.statePath,
+        statePath: recoveryOperationContext.statePath,
         discoverySnapshot:
-          recoveryContext.publicationDiscoverySnapshot
-          ?? recoveryContext.discoverySnapshot,
+          recoveryOperationContext.discoverySnapshot,
         bindings: recoveryContext.bindingOperations,
         readOnly: readOnlyExecution,
       });
@@ -831,7 +831,7 @@ async function fullFingerprintRevision({
       entrypoint,
       optionalAdditionalPaths: publicationTokenFor(execution)?.paths ?? [],
       optionalTreePaths: publicationTokenFor(execution)?.stateTreePaths ?? [],
-      ignoredPaths: stateEvidenceExcludedPaths(recoveryContext.statePath),
+      ignoredPaths: stateEvidenceExcludedPaths(recoveryOperationContext.statePath),
     });
     if (!graphFilesystem) return undefined;
   } else if (requireEffectiveMatch) {
@@ -866,8 +866,7 @@ async function fullFingerprintRevision({
 
   let replacementDiscoveryRevision = replacementEvidence?.discoveryRevision;
   const activeDiscoverySnapshot = discoverySnapshot
-    ?? recoveryContext?.publicationDiscoverySnapshot
-    ?? recoveryContext?.discoverySnapshot;
+    ?? recoveryOperationContext?.discoverySnapshot;
   if (
     replacementEvidence?.discoveryRevision !== undefined
     && typeof activeDiscoverySnapshot?.revision === "function"
@@ -881,7 +880,7 @@ async function fullFingerprintRevision({
   }
   const currentReplacementContextRevision = suppliedReplacementContextRevision
     ?? (recoveryContext
-      ? replacementContextRevision(recoveryContext)
+      ? replacementContextRevision(recoveryOperationContext)
       : replacementEvidence?.contextRevision);
 
   return {
@@ -1172,6 +1171,7 @@ function sanitizeBindingIntentOptions(options = {}) {
     discoverySnapshot: _discoverySnapshot,
     roots: _roots,
     managerRecords: _managerRecords,
+    managerDiagnostics: _managerDiagnostics,
     discoveryOptions: _discoveryOptions,
     discover: _discover,
     runtime: _runtime,
@@ -1186,24 +1186,10 @@ function sanitizeBindingIntentOptions(options = {}) {
   return intent;
 }
 
-function bindingDiscoverySnapshot({
-  discovery,
-  discoverySnapshot,
-  roots,
-  managerRecords,
-  managerDiagnostics,
-  statePath,
-  discoveryOptions = {},
-}) {
-  return discoverySnapshot ?? createDiscoverySnapshot({
-    discovery,
-    roots,
-    managerRecords,
-    options: {
-      ...discoveryOptions,
-      managerDiagnostics,
-      ...(statePath === undefined ? {} : { statePath }),
-    },
+function withBindingDiscovery(operationContext, discoverySnapshot) {
+  return Object.freeze({
+    ...operationContext,
+    discoverySnapshot,
   });
 }
 
@@ -1332,51 +1318,51 @@ export function createBindingOperation({
         ...(discover ? { discover } : {}),
       });
   const hasSuppliedRefreshDiscovery = typeof suppliedRefreshDiscovery === "function";
-  const withOperationContext = (options = {}) => {
-    const intent = sanitizeBindingIntentOptions(options);
+  const operationContext = Object.freeze({
+    discovery,
+    roots,
+    managerRecords,
+    managerDiagnostics,
+    statePath,
+    discoveryOptions: operationDiscoveryOptions,
+    discoverySnapshot: operationDiscovery,
+    refreshDiscovery: operationRefreshDiscovery,
+    refreshFinalDiscovery: hasSuppliedRefreshDiscovery,
+    revalidateSeededDiscovery,
+    ...(recoverCustomizationExecution
+      ? { recoverCustomizationExecution }
+      : {}),
+  });
+  const callerIntent = (options = {}) => {
+    const sanitized = sanitizeBindingIntentOptions(options);
     if (
-      typeof intent.statePath === "string"
-      && path.resolve(intent.statePath) !== path.resolve(statePath)
+      typeof sanitized.statePath === "string"
+      && path.resolve(sanitized.statePath) !== path.resolve(statePath)
     ) {
       throw new BindingError(
         "Binding operation statePath must match its request runtime statePath",
         { code: "BINDING_STATE_PATH_MISMATCH" },
       );
     }
+    const { statePath: _statePath, ...intent } = sanitized;
     return {
       ...intent,
-      roots,
-      managerRecords,
-      managerDiagnostics,
-      // Discovery, recovery, and persistence share this fixed request value.
-      // Public helpers construct an operation from their supplied statePath, so
-      // callers retain that option without letting a later intent diverge.
-      statePath,
-      discoveryOptions: operationDiscoveryOptions,
       ...(options.selectSource === undefined && selectSource
         ? { selectSource }
-        : {}),
-      discoverySnapshot: operationDiscovery,
-      refreshDiscovery: operationRefreshDiscovery,
-      refreshFinalDiscovery: hasSuppliedRefreshDiscovery,
-      revalidateSeededDiscovery,
-      ...(recoverCustomizationExecution
-        ? { recoverCustomizationExecution }
         : {}),
     };
   };
   const operation = {
     bindingKey,
-    readBindingStore,
-    statePath,
+    readBindingStore: () => readBindingStore(statePath),
     bindCustomization: (options) =>
-      bindCustomizationInternal(withOperationContext(options)),
+      bindCustomizationInternal(callerIntent(options), operationContext),
     resolveBinding: (options) =>
-      resolveBindingInternal(withOperationContext(options)),
+      resolveBindingInternal(callerIntent(options), operationContext),
     validateBinding: (options) =>
-      validateBindingInternal(withOperationContext(options)),
+      validateBindingInternal(callerIntent(options), operationContext),
     validateBindingReadOnly: (options) =>
-      validateBindingReadOnlyInternal(withOperationContext(options)),
+      validateBindingReadOnlyInternal(callerIntent(options), operationContext),
   };
   return Object.freeze(operation);
 }
@@ -1992,46 +1978,19 @@ async function inspectBindingSource({
 async function validateBindingReadOnlyInternal({
   descriptor,
   binding,
-  statePath,
   requireLocalIdentityMatch = false,
-  roots,
   customizationRoot,
-  managerRecords = [],
-  managerDiagnostics: suppliedManagerDiagnostics,
-  discoveryOptions = {},
-  discovery,
-  discoverySnapshot,
-  revalidateSeededDiscovery = false,
-}) {
-  const managerDiagnostics = suppliedManagerDiagnostics
-    ?? discoveryOptions.managerDiagnostics
-    ?? [];
+}, operationContext) {
   // Use the full validation seam without invoking resolution or persistence.
   // Recursive lock-side graph checks therefore re-evaluate targeted Discovery
   // provenance and replacement activation for every nested binding.
   return validateBindingInternal({
     descriptor,
     binding,
-    statePath,
-    roots,
     customizationRoot,
-    managerRecords,
-    managerDiagnostics,
-    discoveryOptions,
-    discovery,
-    discoverySnapshot,
     requireLocalIdentityMatch,
-    revalidateSeededDiscovery,
-  });
+  }, operationContext);
 }
-
-const BINDING_OPERATIONS = Object.freeze({
-  bindingKey,
-  readBindingStore,
-  resolveBinding: resolveBindingInternal,
-  validateBinding: validateBindingInternal,
-  validateBindingReadOnly: validateBindingReadOnlyInternal,
-});
 
 function matchesCustomizationCopy(source, group, copy) {
   return copy.classification === "customization"
@@ -2044,7 +2003,9 @@ function matchesCustomizationCopy(source, group, copy) {
 async function recoverStandardFingerprint({ copy, recoveryContext }) {
   try {
     return await fingerprintPath(copy.path, {
-      excludedPaths: stateEvidenceExcludedPaths(recoveryContext?.statePath),
+      excludedPaths: stateEvidenceExcludedPaths(
+        recoveryContext?.operationContext?.statePath,
+      ),
     });
   } catch (error) {
     if (isExpectedRecoveryMismatch(error)) return undefined;
@@ -2060,11 +2021,13 @@ async function recoverCustomizationFingerprint({
   const {
     descriptor,
     context,
+    bindingOperations,
+  } = recoveryContext;
+  const {
     statePath,
     discoverySnapshot,
-    bindingOperations = BINDING_OPERATIONS,
     recoverCustomizationExecution,
-  } = recoveryContext;
+  } = recoveryContext.operationContext;
   if (!matchesCustomizationCopy(descriptor.source, group, copy)) return undefined;
   // The graph runner is injected by the Preflight/runtime composition root;
   // Binding only asks for the candidate's checked effective result.
@@ -2198,13 +2161,15 @@ async function recoverMissingPluginBinding({
 }) {
   const {
     descriptor,
+    customizationRoot,
+  } = recoveryContext;
+  const {
     roots,
     managerRecords,
     managerDiagnostics,
     discoveryOptions,
-    customizationRoot,
     discoverySnapshot,
-  } = recoveryContext;
+  } = recoveryContext.operationContext;
   const { pluginCache, pluginIdentity } = binding.source;
   const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
   if (
@@ -2391,17 +2356,8 @@ async function revalidateRecoveredBinding({
   copy,
   recoveryContext,
 }) {
-  const {
-    roots,
-    managerRecords,
-    managerDiagnostics,
-    customizationRoot,
-    discoverySnapshot,
-    statePath,
-    discoveryOptions,
-    discovery,
-    revalidateSeededDiscovery,
-  } = recoveryContext;
+  const { customizationRoot, operationContext } = recoveryContext;
+  const { statePath, managerRecords } = operationContext;
   const sourcePolicy = bindingSourcePolicyFor(descriptor.source.kind);
   let validation;
   let effectiveFingerprint;
@@ -2414,20 +2370,12 @@ async function revalidateRecoveredBinding({
     validation = await validateBindingInternal({
       descriptor,
       binding: recovered,
-      statePath,
-      roots,
-      managerRecords,
-      managerDiagnostics,
-      discoveryOptions,
-      discovery,
       customizationRoot,
-      discoverySnapshot,
-      revalidateSeededDiscovery,
       requireLocalIdentityMatch: descriptor.source.kind === "local",
       // Resolution keeps source-drift decisions with Preflight/Reconciliation;
       // this check still validates the candidate's current source state.
       enforceReviewedFingerprint: false,
-    });
+    }, operationContext);
     effectiveFingerprint = await sourcePolicy.recoveryFingerprint({
       recoveryContext,
       group,
@@ -2596,9 +2544,8 @@ async function locateRecoveryCandidate({
 }
 
 async function revalidateRecoveryCandidate(candidate, recoveryContext) {
-  const snapshot = await refreshedDiscoverySnapshot(recoveryContext);
+  const snapshot = await refreshedDiscoverySnapshot(recoveryContext.operationContext);
   if (!snapshot) return undefined;
-  recoveryContext.publicationDiscoverySnapshot = snapshot;
   const located = await locateRecoveryCandidate({
     descriptor: recoveryContext.descriptor,
     sourcePath: candidate.binding.source.path,
@@ -2606,13 +2553,18 @@ async function revalidateRecoveryCandidate(candidate, recoveryContext) {
     expectedPluginIdentity: candidate.binding.source.pluginIdentity,
   });
   if (!located) return undefined;
+  const operationContext = withBindingDiscovery(
+    recoveryContext.operationContext,
+    snapshot,
+  );
   const currentContext = {
     ...recoveryContext,
-    discoverySnapshot: snapshot,
+    operationContext,
     bindingOperations: recoveryContext.createRecoveryBindingOperations
       ? recoveryContext.createRecoveryBindingOperations(snapshot)
       : recoveryContext.bindingOperations,
   };
+  recoveryContext.operationContext = operationContext;
   recoveryContext.bindingOperations = currentContext.bindingOperations;
   const result = await revalidateRecoveredBinding({
     descriptor: recoveryContext.descriptor,
@@ -2830,47 +2782,34 @@ async function bindCustomizationInternal({
   descriptor,
   sourcePath,
   context,
-  statePath = bindingStorePath(),
-  roots,
   customizationRoot,
   requestedScope,
   interactive = Boolean(process.stdin.isTTY),
   confirm,
   confirmReplace,
-  managerRecords = [],
-  managerDiagnostics: suppliedManagerDiagnostics,
-  discoveryOptions = {},
   confirmedSelection,
   selectSource,
   requestScope,
-  refreshDiscovery,
-  refreshFinalDiscovery = false,
-  discovery,
-  discoverySnapshot,
-  recoverCustomizationExecution,
-  revalidateSeededDiscovery = false,
   now = () => new Date().toISOString(),
-}) {
-  const managerDiagnostics = suppliedManagerDiagnostics
-    ?? discoveryOptions.managerDiagnostics
-    ?? [];
+}, operationContext) {
+  const {
+    statePath,
+    roots,
+    managerRecords,
+    managerDiagnostics,
+    discoveryOptions,
+    discovery,
+    discoverySnapshot: operationDiscovery,
+    refreshDiscovery: refreshOperationDiscovery,
+    refreshFinalDiscovery,
+    recoverCustomizationExecution,
+    revalidateSeededDiscovery,
+  } = operationContext;
   assertValidDescriptor(descriptor);
   if (typeof context !== "string" || !context.trim()) {
     throw new BindingError("binding context is required", { code: "BINDING_CONTEXT_REQUIRED" });
   }
   const key = bindingKey(descriptor.id, context);
-  const operationDiscovery = bindingDiscoverySnapshot({
-    discovery,
-    discoverySnapshot,
-    roots,
-    managerRecords,
-    managerDiagnostics,
-    statePath,
-    discoveryOptions,
-  });
-  const refreshOperationDiscovery = typeof refreshDiscovery === "function"
-    ? refreshDiscovery
-    : () => operationDiscovery;
   const initialLifecycleRevision = bindingLifecycleRevision({
     roots,
     managerRecords,
@@ -2881,18 +2820,8 @@ async function bindCustomizationInternal({
     return resolveBindingInternal({
       descriptor,
       context,
-      statePath,
-      roots,
-      managerRecords,
-      managerDiagnostics,
-      discoveryOptions,
-      discovery,
       customizationRoot,
-      discoverySnapshot: operationDiscovery,
-      refreshDiscovery: refreshOperationDiscovery,
-      recoverCustomizationExecution,
-      revalidateSeededDiscovery,
-    });
+    }, operationContext);
   }
   if (!interactive) {
     throw new BindingError("first use requires interactive source confirmation", {
@@ -3269,15 +3198,8 @@ async function bindCustomizationInternal({
   return validateBindingInternal({
     descriptor,
     binding: persistedBinding,
-    statePath,
-    roots,
-    managerRecords,
-    discoveryOptions,
-    discovery,
     customizationRoot,
-    discoverySnapshot: operationDiscovery,
-    revalidateSeededDiscovery,
-  }).then((result) => result.binding);
+  }, operationContext).then((result) => result.binding);
 }
 
 async function invalidate(statePath, key, expectedBinding) {
@@ -3295,28 +3217,20 @@ async function invalidate(statePath, key, expectedBinding) {
 async function validateBindingInternal({
   descriptor,
   binding,
-  statePath,
-  roots,
   customizationRoot,
-  managerRecords = [],
-  managerDiagnostics = [],
-  discoveryOptions = {},
-  discovery,
-  discoverySnapshot,
   enforceReviewedFingerprint = true,
   requireLocalIdentityMatch = false,
-  revalidateSeededDiscovery = false,
-}) {
-  assertBindingRecord(descriptor, binding);
-  const operationDiscovery = bindingDiscoverySnapshot({
-    discovery,
-    discoverySnapshot,
+}, operationContext) {
+  const {
+    statePath,
     roots,
     managerRecords,
-    managerDiagnostics,
-    statePath,
     discoveryOptions,
-  });
+    discovery,
+    discoverySnapshot: operationDiscovery,
+    revalidateSeededDiscovery,
+  } = operationContext;
+  assertBindingRecord(descriptor, binding);
   const replacementEvidence = await assertReplacementActivation({
     descriptor,
     customizationRoot,
@@ -3359,35 +3273,22 @@ async function validateBindingInternal({
 async function resolveBindingInternal({
   descriptor,
   context,
-  statePath = bindingStorePath(),
-  roots,
   customizationRoot,
-  managerRecords = [],
-  managerDiagnostics: suppliedManagerDiagnostics,
-  discoveryOptions = {},
-  discovery,
-  discoverySnapshot,
-  refreshDiscovery,
-  recoverCustomizationExecution,
-  revalidateSeededDiscovery = false,
   recoveryAttempts = 0,
-}) {
-  const managerDiagnostics = suppliedManagerDiagnostics
-    ?? discoveryOptions.managerDiagnostics
-    ?? [];
-  assertValidDescriptor(descriptor);
-  const operationDiscovery = bindingDiscoverySnapshot({
-    discovery,
-    discoverySnapshot,
+}, operationContext) {
+  const {
+    statePath,
     roots,
     managerRecords,
     managerDiagnostics,
-    statePath,
     discoveryOptions,
-  });
-  const refreshOperationDiscovery = typeof refreshDiscovery === "function"
-    ? refreshDiscovery
-    : () => operationDiscovery;
+    discovery,
+    discoverySnapshot: operationDiscovery,
+    refreshDiscovery: refreshOperationDiscovery,
+    recoverCustomizationExecution,
+    revalidateSeededDiscovery,
+  } = operationContext;
+  assertValidDescriptor(descriptor);
   const createRecoveryBindingOperations = (snapshot) => createBindingOperation({
     runtime: {
       discoverySnapshot: snapshot,
@@ -3422,19 +3323,11 @@ async function resolveBindingInternal({
       await validateBindingInternal({
         descriptor,
         binding,
-        statePath,
-        roots,
-        managerRecords,
-        managerDiagnostics,
-        discoveryOptions,
-        discovery,
         customizationRoot,
-        discoverySnapshot: operationDiscovery,
-        revalidateSeededDiscovery,
         // Preflight and Reconciliation own full-source drift decisions after
         // they have the resolved path; public Binding validation remains strict.
         enforceReviewedFingerprint: false,
-      })
+      }, operationContext)
     ).binding;
   } catch (error) {
     if (
@@ -3444,19 +3337,10 @@ async function resolveBindingInternal({
       const recoveryContext = {
         descriptor,
         context,
-        statePath,
-        roots,
-        managerRecords,
-        managerDiagnostics,
-        discoveryOptions,
-        discovery,
         customizationRoot,
-        discoverySnapshot: operationDiscovery,
-        refreshDiscovery: refreshOperationDiscovery,
+        operationContext,
         bindingOperations: operationBindings,
         createRecoveryBindingOperations,
-        recoverCustomizationExecution,
-        revalidateSeededDiscovery,
       };
       const recovered = await recoverMissingPluginBinding({
         binding,
@@ -3496,7 +3380,7 @@ async function resolveBindingInternal({
             replacementEvidence:
               validatedForPublication.evidenceRevision?.replacement,
             recoveryContext,
-            discoverySnapshot: recoveryContext.publicationDiscoverySnapshot,
+            discoverySnapshot: recoveryContext.operationContext.discoverySnapshot,
             requireEffectiveMatch: true,
           });
           if (
@@ -3618,22 +3502,16 @@ async function resolveBindingInternal({
         }
         if (persisted) return persistedBinding;
         if (stateChanged && recoveryAttempts < MAX_RECOVERY_RETRIES) {
+          const refreshedContext = withBindingDiscovery(
+            operationContext,
+            await refreshOperationDiscovery(),
+          );
           return resolveBindingInternal({
             descriptor,
             context,
-            statePath,
-            roots,
-            managerRecords,
-            managerDiagnostics,
-            discoveryOptions,
-            discovery,
             customizationRoot,
-            discoverySnapshot: await refreshOperationDiscovery(),
-            refreshDiscovery: refreshOperationDiscovery,
-            recoverCustomizationExecution,
-            revalidateSeededDiscovery,
             recoveryAttempts: recoveryAttempts + 1,
-          });
+          }, refreshedContext);
         }
       }
     }
@@ -3658,22 +3536,16 @@ async function resolveBindingInternal({
     ) {
       const invalidated = await invalidate(statePath, key, binding);
       if (!invalidated && recoveryAttempts < MAX_RECOVERY_RETRIES) {
+        const refreshedContext = withBindingDiscovery(
+          operationContext,
+          await refreshOperationDiscovery(),
+        );
         return resolveBindingInternal({
           descriptor,
           context,
-          statePath,
-          roots,
-          managerRecords,
-          managerDiagnostics,
-          discoveryOptions,
-          discovery,
           customizationRoot,
-          discoverySnapshot: await refreshOperationDiscovery(),
-          refreshDiscovery: refreshOperationDiscovery,
-          recoverCustomizationExecution,
-          revalidateSeededDiscovery,
           recoveryAttempts: recoveryAttempts + 1,
-        });
+        }, refreshedContext);
       }
     }
     throw error;

@@ -429,13 +429,7 @@ export async function inspectCustomizationExecution({
   if (typeof context !== "string" || !context.trim()) {
     throw new TypeError("preflight context is required");
   }
-  const executionBindings = createBindingExecutionAdapter(bindings, {
-    statePath,
-    roots,
-    managerRecords,
-    managerDiagnostics,
-    discoverySnapshot,
-  });
+  const executionBindings = createBindingExecutionAdapter(bindings);
   return visit({
     descriptorPath: path.resolve(descriptorPath),
     context,

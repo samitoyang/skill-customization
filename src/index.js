@@ -22,6 +22,7 @@ export * from "./paths.js";
 export * from "./preflight.js";
 export * from "./provenance.js";
 export * from "./reconcile.js";
+export * from "./reconciliation-operation.js";
 export * from "./state.js";
 export * from "./skill-metadata.js";
 export * from "./skill-root-registry.js";

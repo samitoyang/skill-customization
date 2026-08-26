@@ -20,7 +20,6 @@ import {
   bindingKey,
   bindingStorePath,
   classifyBindingScope,
-  createBindingOperation,
   readBindingStore,
   resolveBinding,
   validateBinding,
@@ -98,45 +97,45 @@ test("binding state uses XDG then the agents fallback", () => {
   );
 });
 
-test("Binding request runtimes materialize and preserve their state path", () => {
-  const defaultOperation = createBindingOperation({ runtime: {} });
-  assert.equal(defaultOperation.statePath, bindingStorePath());
+test("Binding public operations keep state local to the selected path", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-state-locality-"));
+  const source = path.join(root, "skills", "review");
+  const selectedState = path.join(root, "selected", "bindings.json");
+  const unrelatedState = path.join(root, "unrelated", "bindings.json");
+  const context = "workspace:selected";
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  const item = descriptor();
+  item.source.effective_fingerprint = await fingerprintPath(source);
+  const roots = [{ path: path.dirname(source), scope: "workspace", origin: "fixture" }];
 
-  const explicitStatePath = "/tmp/custom-bindings.json";
-  const explicitOperation = createBindingOperation({
-    runtime: { statePath: explicitStatePath },
-  });
-  assert.equal(explicitOperation.statePath, explicitStatePath);
-
-  const runtimeDefault = createBindingRuntime({ context: {} });
-  assert.equal(runtimeDefault.statePath, bindingStorePath());
-  const runtimeExplicit = createBindingRuntime({
-    context: { statePath: explicitStatePath },
-  });
-  assert.equal(runtimeExplicit.statePath, explicitStatePath);
-});
-
-test("Binding operations keep a single state path across caller intent", async () => {
-  const runtimeStatePath = "/tmp/request-runtime-bindings.json";
-  const operation = createBindingOperation({
-    runtime: { statePath: runtimeStatePath },
+  await bindCustomization({
+    descriptor: item,
+    sourcePath: source,
+    context,
+    statePath: selectedState,
+    roots,
+    interactive: true,
+    confirm: async () => true,
   });
 
-  await assert.rejects(
-    operation.validateBinding({ statePath: runtimeStatePath }),
-    (error) => error.code === "INVALID_DESCRIPTOR",
+  assert.equal(
+    (await resolveBinding({
+      descriptor: item,
+      context,
+      statePath: selectedState,
+      roots,
+    })).source.target,
+    await realpath(source),
   );
   await assert.rejects(
-    createBindingOperation({ runtime: {} }).validateBinding({
-      statePath: bindingStorePath(),
+    resolveBinding({
+      descriptor: item,
+      context,
+      statePath: unrelatedState,
+      roots,
     }),
-    (error) => error.code === "INVALID_DESCRIPTOR",
-  );
-  assert.throws(
-    () => operation.validateBinding({
-      statePath: "/tmp/divergent-bindings.json",
-    }),
-    (error) => error.code === "BINDING_STATE_PATH_MISMATCH",
+    (error) => error.code === "BINDING_NOT_FOUND",
   );
 });
 
@@ -1240,6 +1239,7 @@ test("versioned cache recovery checks a customization execution graph", async ()
   const root = await mkdtemp(path.join(os.tmpdir(), "binding-customization-cache-"));
   const versionOne = path.join(root, "plugin", "1", "skills", "review-fork");
   const versionTwo = path.join(root, "plugin", "2", "skills", "review-fork");
+  const customizationRoot = path.join(root, "review-local-archive");
   const statePath = path.join(root, "state", "bindings.json");
   const context = "global";
   const plugin = {
@@ -1318,8 +1318,20 @@ test("versioned cache recovery checks a customization execution graph", async ()
     statePath,
   });
   assert.equal(nestedExecution.status, "ready");
+  await mkdir(customizationRoot, { recursive: true });
+  await writeFile(
+    path.join(customizationRoot, "SKILL.md"),
+    "---\nname: review-fork-notify\n---\ndispatch\n",
+  );
+  await writeFile(
+    path.join(customizationRoot, "CUSTOMIZATION.md"),
+    "Notify after review.\n",
+  );
   const sourceDescriptor = {
     ...descriptor(),
+    owned_payload: {
+      reviewed_fingerprint: await payloadFingerprint(customizationRoot),
+    },
     source: {
       skill_name: nestedDescriptor.name,
       kind: "customization",
@@ -1329,12 +1341,18 @@ test("versioned cache recovery checks a customization execution graph", async ()
       effective_fingerprint: nestedExecution.effectiveFingerprint,
     },
   };
+  const sourceDescriptorPath = path.join(customizationRoot, "customization.json");
+  await writeFile(
+    sourceDescriptorPath,
+    `${JSON.stringify(sourceDescriptor, null, 2)}\n`,
+  );
   const bound = await bindCustomization({
     descriptor: sourceDescriptor,
     sourcePath: versionOne,
     context,
     statePath,
     roots: [rootRecord(versionOne, "1")],
+    customizationRoot,
     interactive: true,
     confirm: async () => true,
   });
@@ -1356,18 +1374,20 @@ test("versioned cache recovery checks a customization execution graph", async ()
     }),
     (error) => error.code === "BINDING_CUSTOMIZATION_RECOVERY_UNAVAILABLE",
   );
-  const runtime = createBindingRuntime({
-    context: {
-      roots: [rootRecord(versionTwo, "2")],
-      managerRecords: [],
-      statePath,
-    },
-    inspectExecution: inspectCustomizationExecution,
+  const execution = await preflightCustomization({
+    descriptorPath: sourceDescriptorPath,
+    context,
+    statePath,
+    roots: [rootRecord(versionTwo, "2")],
+    managerRecords: [],
   });
-  const recovered = await runtime.resolveBinding({
+  assert.equal(execution.status, "ready", JSON.stringify(execution));
+  const recovered = await resolveBinding({
     descriptor: sourceDescriptor,
     context,
     statePath,
+    roots: [rootRecord(versionTwo, "2")],
+    customizationRoot,
   });
   assert.equal(recovered.source.path, path.resolve(versionTwo));
   assert.equal(recovered.source.pluginIdentity, identity);
@@ -1399,7 +1419,6 @@ test("versioned cache recovery checks a customization execution graph", async ()
     racingRuntime.resolveBinding({
       descriptor: sourceDescriptor,
       context,
-      statePath,
     }),
     (error) => error.code === "BINDING_SOURCE_SELECTION_INVALID",
   );

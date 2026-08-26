@@ -55,6 +55,52 @@ test("fixture discovery keeps plugin roots disabled and explicit roots authorita
   assert.equal(explicit.searchedRoots.length, 0);
 });
 
+test("configured host roots load bounded global and workspace Claude settings", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-settings-"));
+  const home = path.join(root, "home");
+  const repository = path.join(root, "repository");
+  const nested = path.join(repository, "packages", "app");
+  const directSkills = path.join(root, "direct", "skills");
+  await mkdir(path.join(home, ".claude"), { recursive: true });
+  await mkdir(path.join(repository, ".claude"), { recursive: true });
+  await mkdir(path.join(repository, ".git"), { recursive: true });
+  await mkdir(nested, { recursive: true });
+  await writeFile(
+    path.join(home, ".claude", "settings.json"),
+    JSON.stringify({ additionalDirectories: ["~/shared"] }),
+  );
+  await writeFile(
+    path.join(repository, ".claude", "settings.json"),
+    JSON.stringify({
+      permissions: { additionalDirectories: ["../team", directSkills] },
+    }),
+  );
+
+  const configured = await configuredHostSkillRoots({ home, cwd: nested, env: {} });
+  const paths = configured.roots.map(({ path: rootPath }) => rootPath);
+  assert.ok(paths.includes(path.join(home, "shared", ".claude", "skills")));
+  assert.ok(paths.includes(path.join(root, "team", ".claude", "skills")));
+  assert.ok(paths.includes(directSkills));
+  assert.ok(configured.rootObservations.every(({ kind }) => kind === "configured"));
+  assert.ok(configured.roots.every(({ owner }) =>
+    ["claude-additional", "copilot-env"].includes(owner),
+  ));
+  assert.equal(configured.settingsEvidence.length, 3);
+  assert.deepEqual(configured.diagnostics, []);
+  assert.deepEqual(configured.rootDiagnostics, []);
+  assert.equal(paths.some((rootPath) => rootPath === root), false);
+  const discovery = await discoverFixtureSkills({
+    roots: configured.rootObservations,
+    managerRecords: [],
+    settingsEvidence: configured.settingsEvidence,
+    settingsControlPaths: configured.settingsControlPaths,
+  });
+  assert.deepEqual(
+    discovery.settingsControlPaths,
+    configured.settingsControlPaths,
+  );
+});
+
 test("discovery fingerprints exclude the request state store inside a source", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "discover-state-fingerprint-"));
   const source = await writeSkill(root, "review", "review");
@@ -231,6 +277,86 @@ test("discovery normalizes standard, plugin, and manager roots through one regis
     result.groups[0].evidence.some(({ kind }) => kind === "manager"),
     true,
   );
+});
+
+test("Discovery preserves plugin-root ownership when observations share a physical root", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "discover-plugin-root-ownership-"));
+  const broadInstall = path.join(root, "broad-plugin");
+  const narrowInstall = path.join(broadInstall, "narrow-plugin");
+  const skills = path.join(narrowInstall, "skills");
+  const broadIdentity = "local:plugin:fixture:broad";
+  const narrowIdentity = "local:plugin:fixture:narrow";
+  const broadRepository = "https://github.com/example/broad-plugin";
+  const narrowRepository = "https://github.com/example/narrow-plugin";
+  const broadOwnedSkill = await writeSkill(
+    path.join(broadInstall, "shared-skills"),
+    "review",
+  );
+  const outside = path.join(root, "outside");
+  const escaped = await writeSkill(outside, "escaped", "escaped-review");
+  await mkdir(skills, { recursive: true });
+  await symlink(broadOwnedSkill, path.join(skills, "review"), "dir");
+  await symlink(escaped, path.join(skills, "escaped"), "dir");
+
+  const result = await discoverFixtureSkills({
+    roots: [
+      {
+        kind: "plugin",
+        path: skills,
+        owner: "plugin:fixture:narrow",
+        scope: "global",
+        origin: "plugin",
+        pluginIdentity: narrowIdentity,
+        pluginEvidence: [{
+          kind: "plugin",
+          host: "fixture",
+          plugin: "narrow",
+          marketplace: "fixture",
+          identity: narrowIdentity,
+          repository: narrowRepository,
+        }],
+        pluginRoot: narrowInstall,
+      },
+      {
+        kind: "plugin",
+        path: skills,
+        owner: "plugin:fixture:broad",
+        scope: "global",
+        origin: "plugin",
+        pluginIdentity: broadIdentity,
+        pluginEvidence: [{
+          kind: "plugin",
+          host: "fixture",
+          plugin: "broad",
+          marketplace: "fixture",
+          identity: broadIdentity,
+          repository: broadRepository,
+        }],
+        pluginRoot: broadInstall,
+      },
+    ],
+    managerRecords: [],
+  });
+
+  assert.deepEqual(result.groups.map(({ name }) => name), ["review"]);
+  const [copy] = result.groups[0].copies;
+  assert.equal(copy.owner, "plugin:fixture:broad");
+  assert.deepEqual(copy.owners, ["plugin:fixture:broad"]);
+  assert.equal(copy.pluginIdentity, broadIdentity);
+  assert.deepEqual(copy.provenance, [`repository:${broadRepository}`]);
+  assert.equal(
+    copy.evidence.some(({ repository }) => repository === narrowRepository),
+    false,
+  );
+  assert.equal(
+    result.groups.some(({ name }) => name === "escaped-review"),
+    false,
+  );
+  assert.ok(result.pluginDiagnostics.some(
+    ({ code, path: diagnosticPath }) =>
+      code === "PLUGIN_ROOT_ESCAPE"
+      && diagnosticPath === path.join(skills, "escaped"),
+  ));
 });
 
 

@@ -1,7 +1,7 @@
 import { BindingError } from "../errors.js";
 
-function createReadOnlyBindingOperation(operation, statePath, { graphReadOnly = false } = {}) {
-  const readStore = () => operation.readBindingStore(statePath);
+function createReadOnlyBindingOperation(operation, { graphReadOnly = false } = {}) {
+  const readStore = operation.readBindingStore;
   const validate = (intent) => {
     if (!graphReadOnly) return operation.validateBinding(intent);
     if (typeof operation.validateBindingReadOnly !== "function") {
@@ -64,7 +64,7 @@ export function createCustomizationRecoveryAdapter({
         discoverySnapshot,
         // Candidate inspection must not create nested bindings before the outer
         // candidate itself has passed the persistence CAS.
-        bindings: createReadOnlyBindingOperation(bindings, statePath, {
+        bindings: createReadOnlyBindingOperation(bindings, {
           graphReadOnly: readOnly,
         }),
       })

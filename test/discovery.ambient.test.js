@@ -7,8 +7,6 @@ import test from "node:test";
 import {
   activeSkillInventory,
   confirmDiscoverySelection,
-  configuredHostSkillRoots,
-  discoverSkills,
   hostSkillRoots,
 } from "../src/discovery.js";
 import { fingerprintPath } from "../src/fingerprint.js";
@@ -2468,57 +2466,6 @@ test("host roots include bounded Git ancestors as workspace roots", async () => 
     ),
   );
   assert.equal(roots.some(({ path: rootPath }) => rootPath === base), false);
-});
-
-
-
-
-
-test("configured host roots load bounded global and workspace Claude settings", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "claude-settings-"));
-  const home = path.join(root, "home");
-  const repository = path.join(root, "repository");
-  const nested = path.join(repository, "packages", "app");
-  const directSkills = path.join(root, "direct", "skills");
-  await mkdir(path.join(home, ".claude"), { recursive: true });
-  await mkdir(path.join(repository, ".claude"), { recursive: true });
-  await mkdir(path.join(repository, ".git"), { recursive: true });
-  await mkdir(nested, { recursive: true });
-  await writeFile(
-    path.join(home, ".claude", "settings.json"),
-    JSON.stringify({ additionalDirectories: ["~/shared"] }),
-  );
-  await writeFile(
-    path.join(repository, ".claude", "settings.json"),
-    JSON.stringify({
-      permissions: { additionalDirectories: ["../team", directSkills] },
-    }),
-  );
-
-  const configured = await configuredHostSkillRoots({ home, cwd: nested, env: {} });
-  const paths = configured.roots.map(({ path: rootPath }) => rootPath);
-  assert.ok(paths.includes(path.join(home, "shared", ".claude", "skills")));
-  assert.ok(paths.includes(path.join(root, "team", ".claude", "skills")));
-  assert.ok(paths.includes(directSkills));
-  assert.ok(configured.rootObservations.every(({ kind }) => kind === "configured"));
-  assert.ok(configured.roots.every(({ owner }) =>
-    ["claude-additional", "copilot-env"].includes(owner),
-  ));
-  assert.equal(configured.settingsEvidence.length, 3);
-  assert.deepEqual(configured.diagnostics, []);
-  assert.deepEqual(configured.rootDiagnostics, []);
-  assert.equal(paths.some((rootPath) => rootPath === root), false);
-  const discovery = await discoverSkills({
-    roots: configured.rootObservations,
-    managerRecords: [],
-    includePlugins: false,
-    settingsEvidence: configured.settingsEvidence,
-    settingsControlPaths: configured.settingsControlPaths,
-  });
-  assert.deepEqual(
-    discovery.settingsControlPaths,
-    configured.settingsControlPaths,
-  );
 });
 
 

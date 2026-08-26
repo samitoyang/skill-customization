@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { pluginHostResult } from "./interface.js";
+import { createPluginHostAdapter } from "./interface.js";
 import { isPathContained } from "../paths.js";
 import {
   GENERIC_MANIFEST_FILES,
@@ -332,11 +332,5 @@ export function createClaudeCodeAdapter({
     }
   }
 
-  return Object.freeze({
-    host: "claude-code",
-    discover: async (context) => {
-      await discoverClaude(context);
-      return pluginHostResult(context);
-    },
-  });
+  return createPluginHostAdapter("claude-code", discoverClaude);
 }

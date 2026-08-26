@@ -23,6 +23,8 @@ import {
 } from "../src/fingerprint.js";
 import { preflightCustomization } from "../src/preflight.js";
 import { reconcileCustomization } from "../src/reconcile.js";
+import { reconcileBoundCustomization } from "../src/index.js";
+import { ReconciliationError } from "../src/errors.js";
 import { acceptMaintenanceUpdate } from "../src/maintenance.js";
 import { discoveryPerformanceChannel } from "../src/performance-diagnostics.js";
 
@@ -252,6 +254,70 @@ test("preflight reuses one discovery snapshot and refreshes it for the next oper
   } finally {
     discoveryPerformanceChannel.unsubscribe(listener);
   }
+});
+
+test("Reconciliation reuses one Discovery snapshot and refreshes the next operation", async () => {
+  const item = await recursiveFixture();
+  const metrics = {};
+  const listener = ({ name, amount = 1 }) => {
+    metrics[name] = (metrics[name] ?? 0) + amount;
+  };
+  discoveryPerformanceChannel.subscribe(listener);
+  try {
+    const request = {
+      descriptor: item.outerDescriptor,
+      customizationRoot: item.outer,
+      bindingContext: "workspace:test",
+      statePath: item.statePath,
+      discoveryContext: {
+        roots: item.roots,
+        managerRecords: [],
+        discoveryOptions: { includePlugins: false },
+      },
+      cachePath: null,
+    };
+    const first = await reconcileBoundCustomization(request);
+    assert.equal(first.status, "compatible");
+    assert.equal(first.sourceFingerprint, item.innerEffective);
+    assert.equal(metrics.discovery_calls, 1);
+    assert.equal(metrics.root_scans, 1);
+
+    const second = await reconcileBoundCustomization(request);
+    assert.equal(second.status, "compatible");
+    assert.equal(metrics.discovery_calls, 2);
+    assert.equal(metrics.root_scans, 2);
+  } finally {
+    discoveryPerformanceChannel.unsubscribe(listener);
+  }
+});
+
+test("bound reconciliation reports nested maintenance as a structured library error", async () => {
+  const item = await recursiveFixture();
+  await writeFile(
+    path.join(item.inner, "CUSTOMIZATION.md"),
+    "Unreviewed nested maintenance.\n",
+  );
+
+  await assert.rejects(
+    reconcileBoundCustomization({
+      descriptor: item.outerDescriptor,
+      customizationRoot: item.outer,
+      bindingContext: "workspace:test",
+      statePath: item.statePath,
+      discoveryContext: {
+        roots: item.roots,
+        managerRecords: [],
+        discoveryOptions: { includePlugins: false },
+      },
+      cachePath: null,
+    }),
+    (error) => {
+      assert.ok(error instanceof ReconciliationError);
+      assert.equal(error.code, "CUSTOMIZATION_SOURCE_NOT_READY");
+      assert.equal(error.details.maintenanceHandler.reason, "owned-payload-drift");
+      return true;
+    },
+  );
 });
 
 test("reconciliation uses a nested customization's checked effective fingerprint", async () => {

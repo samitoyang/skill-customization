@@ -276,6 +276,66 @@ async function inspectFilesystemInput(input, cwd) {
   return { exists: true };
 }
 
+function pluginCandidateRootInfo(rootInfo, observations) {
+  const allPluginOwners = new Set(
+    rootInfo.pluginRootObservations.flatMap(({ owners, owner }) =>
+      owners ?? [owner]),
+  );
+  const selectedPluginOwners = new Set(
+    observations.flatMap(({ owners, owner }) => owners ?? [owner]),
+  );
+  const owners = (rootInfo.owners ?? [rootInfo.owner]).filter((owner) =>
+    !allPluginOwners.has(owner) || selectedPluginOwners.has(owner));
+  const primary = observations[0];
+  const owner = owners.includes(rootInfo.owner) ? rootInfo.owner : primary.owner;
+  const pluginEvidence = new Map();
+  for (const evidence of observations.flatMap(({ pluginEvidence = [] }) => pluginEvidence)) {
+    pluginEvidence.set(stableProvenanceKey(evidence), structuredClone(evidence));
+  }
+  const pluginIdentities = [...new Set(observations.flatMap((observation) => [
+    ...(observation.pluginIdentities ?? []),
+    observation.pluginIdentity,
+  ]).filter(Boolean))];
+  const pluginRoots = [...new Set(observations.flatMap(({ roots }) => roots))];
+  const candidateRootInfo = {
+    ...rootInfo,
+    owner,
+    owners,
+    scope: owner === rootInfo.owner ? rootInfo.scope : primary.scope,
+    pluginRootObservations: observations,
+    pluginRoots,
+    pluginEvidence: [...pluginEvidence.values()],
+  };
+  for (const field of [
+    "host",
+    "plugin",
+    "pluginMetadata",
+    "pluginManifest",
+    "pluginRoot",
+    "pluginIdentity",
+    "pluginIdentities",
+  ]) {
+    delete candidateRootInfo[field];
+  }
+  for (const field of ["host", "plugin", "pluginMetadata", "pluginManifest"]) {
+    if (primary[field] !== undefined) {
+      candidateRootInfo[field] = structuredClone(primary[field]);
+    }
+  }
+  if (pluginRoots.length > 0) candidateRootInfo.pluginRoot = pluginRoots[0];
+  if (primary.pluginIdentity) candidateRootInfo.pluginIdentity = primary.pluginIdentity;
+  if (pluginIdentities.length > 0) candidateRootInfo.pluginIdentities = pluginIdentities;
+  const hasNonPluginOwner = owners.some((candidate) => !allPluginOwners.has(candidate));
+  if (!hasNonPluginOwner) {
+    if (observations.every(({ active }) => active === false)) {
+      candidateRootInfo.active = false;
+    } else {
+      delete candidateRootInfo.active;
+    }
+  }
+  return candidateRootInfo;
+}
+
 async function scanRoot(rootInfo, { statePath } = {}) {
   publishDiscoveryPerformanceMetric("root_scans");
   let entries;
@@ -300,25 +360,56 @@ async function scanRoot(rootInfo, { statePath } = {}) {
   }
   const directories = [];
   const diagnostics = [];
-  const canonicalPluginRoots = (
-    await Promise.all(
-      [...new Set([
-        ...(rootInfo.pluginRoots ?? []),
-        rootInfo.pluginRoot,
-      ].filter(Boolean))].map((pluginRoot) =>
-        realpath(pluginRoot).catch(() => undefined),
-      ),
-    )
+  const pluginRootObservations = rootInfo.pluginRootObservations?.length > 0
+    ? rootInfo.pluginRootObservations
+    : [{
+        path: rootInfo.path,
+        roots: [...new Set([
+          ...(rootInfo.pluginRoots ?? []),
+          rootInfo.pluginRoot,
+        ].filter(Boolean))],
+      }];
+  const hasPluginContainmentPolicy = rootInfo.origin === "plugin"
+    && pluginRootObservations.some(({ roots }) => roots?.length > 0);
+  const canonicalPluginRootObservations = (
+    await Promise.all(pluginRootObservations.map(async (observation) => {
+      const canonicalObservationPath = await realpath(observation.path)
+        .catch(() => undefined);
+      if (!canonicalObservationPath) return undefined;
+      const canonicalRoots = (
+        await Promise.all((observation.roots ?? []).map((pluginRoot) =>
+          realpath(pluginRoot).catch(() => undefined),
+        ))
+      ).filter((pluginRoot) =>
+        pluginRoot && isPathContained(pluginRoot, canonicalObservationPath));
+      if (canonicalRoots.length === 0) return undefined;
+      return {
+        ...observation,
+        canonicalPath: canonicalObservationPath,
+        roots: canonicalRoots,
+      };
+    }))
   ).filter(Boolean);
-  const isContainedPluginDirectory = async (directory) => {
-    if (canonicalPluginRoots.length === 0 || rootInfo.origin !== "plugin") return true;
+  const candidateRootInfo = async (directory) => {
+    if (!hasPluginContainmentPolicy) return rootInfo;
     const canonicalDirectory = await realpath(directory).catch(() => undefined);
-    if (
-      !canonicalDirectory
-      || canonicalPluginRoots.every((pluginRoot) =>
-        isPathContained(pluginRoot, canonicalDirectory),
-      )
-    ) return true;
+    if (!canonicalDirectory) return rootInfo;
+    const relativeDirectory = path.relative(rootInfo.path, directory);
+    const owningObservations = (
+      await Promise.all(canonicalPluginRootObservations.map(async (observation) => {
+        const observedDirectory = path.resolve(observation.path, relativeDirectory);
+        const canonicalObservedDirectory = await realpath(observedDirectory)
+          .catch(() => undefined);
+        return canonicalObservedDirectory === canonicalDirectory
+          && observation.roots.some((pluginRoot) =>
+            isPathContained(pluginRoot, canonicalObservedDirectory))
+          ? observation
+          : undefined;
+      }))
+    ).filter(Boolean);
+    if (owningObservations.length > 0) {
+      return pluginCandidateRootInfo(rootInfo, owningObservations);
+    }
     diagnostics.push({
       kind: "plugin",
       host: rootInfo.host,
@@ -327,25 +418,29 @@ async function scanRoot(rootInfo, { statePath } = {}) {
       message: `plugin skill directory resolves outside its plugin root: ${directory}`,
       ...(rootInfo.plugin ? { plugin: structuredClone(rootInfo.plugin) } : {}),
     });
-    return false;
+    return undefined;
   };
   if (
     (rootInfo.singleSkill || rootInfo.includeRootSkill !== false)
     && await hasDiscoverableSkill(rootInfo.path)
-  ) directories.push(rootInfo.path);
+  ) {
+    const ownedRootInfo = await candidateRootInfo(rootInfo.path);
+    if (ownedRootInfo) directories.push({ directory: rootInfo.path, rootInfo: ownedRootInfo });
+  }
   if (!rootInfo.singleSkill) {
     for (const entry of entries) {
       if (entry.isDirectory() || entry.isSymbolicLink()) {
         const directory = path.join(rootInfo.path, entry.name);
-        if (
-          await hasDiscoverableSkill(directory)
-          && await isContainedPluginDirectory(directory)
-        ) directories.push(directory);
+        if (await hasDiscoverableSkill(directory)) {
+          const ownedRootInfo = await candidateRootInfo(directory);
+          if (ownedRootInfo) directories.push({ directory, rootInfo: ownedRootInfo });
+        }
       }
     }
   }
   const results = await Promise.allSettled(
-    directories.map((directory) => candidateFromDirectory(directory, rootInfo, { statePath })),
+    directories.map(({ directory, rootInfo: ownedRootInfo }) =>
+      candidateFromDirectory(directory, ownedRootInfo, { statePath })),
   );
   return {
     candidates: results
@@ -353,7 +448,7 @@ async function scanRoot(rootInfo, { statePath } = {}) {
       .map(({ value }) => value),
     failures: results.flatMap((result, index) =>
       result.status === "rejected"
-        ? [{ directory: directories[index], error: result.reason }]
+        ? [{ directory: directories[index].directory, error: result.reason }]
         : []),
     diagnostics,
   };

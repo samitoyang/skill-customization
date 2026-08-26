@@ -222,6 +222,30 @@ export function pluginHostResult(context) {
 }
 
 /**
+ * Construct the identical host-adapter result contract while leaving every
+ * host's discovery policy in its own implementation.
+ *
+ * @param {string} host
+ * @param {(context: PluginHostDiscoveryContext) => Promise<void>} discover
+ * @returns {PluginHostAdapter}
+ */
+export function createPluginHostAdapter(host, discover) {
+  if (typeof host !== "string" || !host.trim()) {
+    throw new TypeError("plugin host adapter requires a host");
+  }
+  if (typeof discover !== "function") {
+    throw new TypeError("plugin host adapter requires discovery policy");
+  }
+  return Object.freeze({
+    host,
+    discover: async (context) => {
+      await discover(context);
+      return pluginHostResult(context);
+    },
+  });
+}
+
+/**
  * Clone and freeze one adapter-owned record without freezing the mutable
  * discovery context that produced it.
  *

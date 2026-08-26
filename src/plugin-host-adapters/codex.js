@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { pluginHostResult } from "./interface.js";
+import { createPluginHostAdapter } from "./interface.js";
 import {
   GENERIC_MANIFEST_FILES,
   GENERIC_MARKETPLACE_MANIFEST_FILES,
@@ -490,11 +490,5 @@ export function createCodexAdapter({
     }
   }
 
-  return Object.freeze({
-    host: "codex",
-    discover: async (context) => {
-      await discoverCodex(context);
-      return pluginHostResult(context);
-    },
-  });
+  return createPluginHostAdapter("codex", discoverCodex);
 }

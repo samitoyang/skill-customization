@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { pluginHostResult } from "./interface.js";
+import { createPluginHostAdapter } from "./interface.js";
 import {
   GENERIC_MARKETPLACE_MANIFEST_FILES,
   stringValue,
@@ -309,11 +309,5 @@ export function createCursorAdapter({
     }
   }
 
-  return Object.freeze({
-    host: "cursor",
-    discover: async (context) => {
-      await discoverCursor(context);
-      return pluginHostResult(context);
-    },
-  });
+  return createPluginHostAdapter("cursor", discoverCursor);
 }

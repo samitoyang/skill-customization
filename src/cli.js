@@ -18,7 +18,7 @@ import { renderDispatcher } from "./dispatcher-renderer.js";
 import { DiscoveryError } from "./errors.js";
 import { fingerprintPath, payloadFingerprint } from "./fingerprint.js";
 import { collectManagerRecords } from "./manager-collector.js";
-import { reconcileCustomization } from "./reconcile.js";
+import { reconcileBoundCustomization } from "./reconciliation-operation.js";
 import { preflightCustomization } from "./preflight.js";
 import { acceptMaintenanceUpdate } from "./maintenance.js";
 import { inspectCustomizationExecution } from "./execution-graph.js";
@@ -455,7 +455,6 @@ async function commandBind(descriptorPath, options, io) {
       descriptor,
       sourcePath,
       context: bindingContext,
-      statePath,
       customizationRoot: path.dirname(resolvedDescriptorPath),
       requestedScope: options.scope,
       requestScope: io.stdin.isTTY ? async () => ttyBindingScope(io) : undefined,
@@ -506,7 +505,6 @@ async function commandResolve(descriptorPath, options, io) {
     await bindingOperation.resolveBinding({
       descriptor,
       context: requireValue(options.context, "--context is required"),
-      statePath,
       customizationRoot: path.dirname(resolvedDescriptorPath),
     }),
   );
@@ -523,41 +521,18 @@ async function commandReconcile(descriptorPath, options, io) {
       "--source cannot bypass binding; bind the source and reconcile with --context",
     );
   }
-  let sourcePath;
-  let sourceEffectiveFingerprint;
-  let sourceExecutionPlan;
+  let bindingContext;
+  let reconciliationDiscoveryContext;
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
-    const bindingOperation = createContextBindingOperation(context, statePath);
-    const bindingContext = requireValue(
+    bindingContext = requireValue(
       options.context,
       "--context is required for semantic overlay reconciliation",
     );
-    const binding = await bindingOperation.resolveBinding({
-      descriptor,
-      context: bindingContext,
-      statePath,
-      customizationRoot: path.dirname(resolvedDescriptorPath),
-    });
-    sourcePath = binding.source.alias ?? binding.source.path;
-    if (descriptor.source.kind === "customization") {
-      const nested = await preflightCustomization({
-        descriptorPath: path.join(binding.source.target, "customization.json"),
-        context: bindingContext,
-        statePath,
-        roots: context.roots,
-        managerRecords: context.managerRecords,
-        managerDiagnostics: context.managerDiagnostics,
-        discoveryOptions: discoveryOptions(context),
-      });
-      if (nested.status === "maintenance-required") {
-        throw new TypeError(
-          `nested customization is not ready: ${nested.maintenanceHandler?.reason ?? "unknown"}`,
-        );
-      }
-      sourceEffectiveFingerprint = nested.effectiveFingerprint;
-      sourceExecutionPlan = nested.steps;
-    }
+    reconciliationDiscoveryContext = {
+      ...context,
+      discoveryOptions: discoveryOptions(context),
+    };
   }
   const decision = options.decision;
   if (decision && !["compatible", "absorbed", "incompatible", "ambiguous"].includes(decision)) {
@@ -581,16 +556,23 @@ async function commandReconcile(descriptorPath, options, io) {
         evidence: options.evidence,
       })
     : undefined;
-  const result = await reconcileCustomization({
-    descriptor,
-    customizationRoot: path.dirname(resolvedDescriptorPath),
-    sourcePath,
-    sourceEffectiveFingerprint,
-    sourceExecutionPlan,
-    statePath,
-    cachePath: options.cache,
-    semanticReconciler,
-  });
+  let result;
+  try {
+    result = await reconcileBoundCustomization({
+      descriptor,
+      customizationRoot: path.dirname(resolvedDescriptorPath),
+      bindingContext,
+      statePath,
+      discoveryContext: reconciliationDiscoveryContext,
+      cachePath: options.cache,
+      semanticReconciler,
+    });
+  } catch (error) {
+    if (error.code === "CUSTOMIZATION_SOURCE_NOT_READY") {
+      throw new TypeError(error.message, { cause: error });
+    }
+    throw error;
+  }
   outputJson(io, result);
   return result.stopped ? 2 : 0;
 }

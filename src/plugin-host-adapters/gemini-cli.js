@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { pluginHostResult } from "./interface.js";
+import { createPluginHostAdapter } from "./interface.js";
 import { stringValue } from "./metadata.js";
 
 const GEMINI_MANIFEST_POLICY = Object.freeze({
@@ -184,11 +184,5 @@ export function createGeminiCliAdapter({
     }
   }
 
-  return Object.freeze({
-    host: "gemini-cli",
-    discover: async (context) => {
-      await discoverGemini(context);
-      return pluginHostResult(context);
-    },
-  });
+  return createPluginHostAdapter("gemini-cli", discoverGemini);
 }

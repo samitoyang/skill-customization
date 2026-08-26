@@ -13,6 +13,23 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
 /** @typedef {Record<string, unknown>} PluginRootMetadata */
 
 /**
+ * @typedef {object} PluginRootContainmentObservation
+ * @property {string} path
+ * @property {readonly string[]} roots
+ * @property {string} owner
+ * @property {readonly string[]} owners
+ * @property {string} scope
+ * @property {boolean} [active]
+ * @property {string} [host]
+ * @property {PluginRootMetadata} [plugin]
+ * @property {PluginRootMetadata} [pluginMetadata]
+ * @property {string} [pluginManifest]
+ * @property {string} [pluginIdentity]
+ * @property {readonly string[]} [pluginIdentities]
+ * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
+ */
+
+/**
  * @typedef {object} StandardSkillRootObservation
  * @property {"standard"} kind
  * @property {string} path
@@ -60,6 +77,7 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {string} [pluginManifest]
  * @property {string} [pluginRoot]
  * @property {readonly string[]} [pluginRoots]
+ * @property {readonly PluginRootContainmentObservation[]} [pluginRootObservations]
  * @property {string} [pluginIdentity]
  * @property {readonly string[]} [pluginIdentities]
  * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
@@ -119,6 +137,7 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {string} [pluginManifest]
  * @property {string} [pluginRoot]
  * @property {readonly string[]} [pluginRoots]
+ * @property {readonly PluginRootContainmentObservation[]} [pluginRootObservations]
  * @property {string} [pluginIdentity]
  * @property {readonly string[]} [pluginIdentities]
  * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
@@ -228,6 +247,40 @@ function normalizedString(value) {
   return typeof value === "string" && value.trim()
     ? value.trim()
     : undefined;
+}
+
+function pluginRootContainmentObservation(observation) {
+  if (observation.origin !== "plugin") return undefined;
+  const roots = unique([
+    ...(Array.isArray(observation.pluginRoots) ? observation.pluginRoots : []),
+    observation.pluginRoot,
+  ].filter(Boolean).map((pluginRoot) => path.resolve(pluginRoot)));
+  if (roots.length === 0) return undefined;
+  return {
+    path: path.resolve(observation.path),
+    roots,
+    owner: observation.owner,
+    owners: [...(observation.owners ?? [observation.owner])],
+    scope: observation.scope,
+    ...(observation.active !== undefined ? { active: observation.active } : {}),
+    ...(normalizedString(observation.host) ? { host: observation.host.trim() } : {}),
+    ...(observation.plugin ? { plugin: structuredClone(observation.plugin) } : {}),
+    ...(observation.pluginMetadata
+      ? { pluginMetadata: structuredClone(observation.pluginMetadata) }
+      : {}),
+    ...(normalizedString(observation.pluginManifest)
+      ? { pluginManifest: observation.pluginManifest.trim() }
+      : {}),
+    ...(normalizedString(observation.pluginIdentity)
+      ? { pluginIdentity: observation.pluginIdentity.trim() }
+      : {}),
+    ...(Array.isArray(observation.pluginIdentities)
+      ? { pluginIdentities: [...observation.pluginIdentities] }
+      : {}),
+    ...(Array.isArray(observation.pluginEvidence)
+      ? { pluginEvidence: structuredClone(observation.pluginEvidence) }
+      : {}),
+  };
 }
 
 /**
@@ -387,6 +440,12 @@ function normalizeRootObservation(observation, diagnostics, observationIndex) {
     normalized.singleSkill ??= false;
     normalized.includeRootSkill ??= true;
   }
+  const containmentObservation = pluginRootContainmentObservation(normalized);
+  if (containmentObservation) {
+    normalized.pluginRootObservations = [containmentObservation];
+  } else {
+    delete normalized.pluginRootObservations;
+  }
   delete normalized.kind;
   return normalized;
 }
@@ -443,6 +502,8 @@ function mergePluginMetadata(existing, incoming) {
     existing.pluginRoots = pluginRoots;
     existing.pluginRoot ??= pluginRoots[0];
   }
+
+  mergeStructuredArray(existing, incoming, "pluginRootObservations");
 
   mergeStructuredArray(existing, incoming, "pluginEvidence");
   const pluginIdentities = unique([

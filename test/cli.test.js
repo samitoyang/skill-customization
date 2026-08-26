@@ -583,6 +583,26 @@ test("CLI reconciliation preflights a nested customization source", async () => 
   assert.equal(reviewed.code, 0, reviewed.stderr);
   assert.equal(JSON.parse(reviewed.stdout).status, "compatible");
   assert.equal(JSON.parse(reviewed.stdout).sourceFingerprint, nestedEffective);
+
+  await writeFile(
+    path.join(nested, "CUSTOMIZATION.md"),
+    "Unreviewed nested maintenance.\n",
+  );
+  const nestedMaintenance = await run([
+    "reconcile",
+    outerDescriptorPath,
+    "--context",
+    "workspace:test",
+    "--state",
+    statePath,
+    "--root",
+    root,
+  ]);
+  assert.equal(nestedMaintenance.code, 1);
+  assert.equal(
+    nestedMaintenance.stderr,
+    "nested customization is not ready: owned-payload-drift\n",
+  );
 });
 
 
