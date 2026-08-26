@@ -8,8 +8,8 @@
 export function createBindingExecutionAdapter(operation) {
   return Object.freeze({
     bindingKey: operation.bindingKey,
-    readBindingStore: operation.readBindingStore,
     resolveBinding: (intent) => operation.resolveBinding(intent),
+    resolveTrackingBinding: (intent) => operation.resolveTrackingBinding(intent),
     validateBinding: (intent) => operation.validateBinding(intent),
   });
 }

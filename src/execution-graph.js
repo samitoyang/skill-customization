@@ -105,51 +105,36 @@ async function forkTrackingAdvisory(descriptor, {
   activePaths,
   bindings,
 }) {
-  let store;
-  try {
-    store = await bindings.readBindingStore();
-  } catch (error) {
+  const tracking = await bindings.resolveTrackingBinding({
+    descriptor,
+    context,
+    customizationRoot,
+  });
+  if (tracking.outcome === "untracked") return undefined;
+  if (tracking.outcome === "state-invalid") {
     return {
       code: "tracking-state-invalid",
       message: "The optional fork tracking state is unreadable or invalid; fork execution is unaffected.",
-      detail: error.message,
+      detail: tracking.detail,
     };
   }
-  const binding = store.bindings[bindings.bindingKey(descriptor.id, context)];
-  if (!binding) return undefined;
-  const lookup = binding.source?.alias ?? binding.source?.path;
-  if (!lookup) {
+  if (tracking.outcome === "source-drift") {
+    return {
+      code: "tracking-source-drift",
+      message: "The optional tracked source differs from its reviewed or confirmed fingerprint; adoption or rebase remains explicit.",
+      expectedFingerprint: descriptor.source.effective_fingerprint,
+      actualFingerprint: tracking.actualFingerprint,
+    };
+  }
+  if (tracking.outcome === "binding-invalid") {
     return {
       code: "tracking-binding-invalid",
-      message: "The optional fork tracking binding is incomplete; fork execution is unaffected.",
+      message: "The optional fork tracking binding is invalid; fork execution is unaffected.",
+      detail: tracking.detail,
     };
   }
   try {
-    let validated;
-    try {
-      validated = await bindings.validateBinding({
-        descriptor,
-        binding,
-        customizationRoot,
-      });
-    } catch (error) {
-      if (error.code === "BINDING_SOURCE_FINGERPRINT_MISMATCH") {
-        return {
-          code: "tracking-source-drift",
-          message: "The optional tracked source differs from its reviewed or confirmed fingerprint; adoption or rebase remains explicit.",
-          expectedFingerprint: descriptor.source.effective_fingerprint,
-          actualFingerprint: error.details?.actualFingerprint,
-        };
-      }
-      return {
-        code: "tracking-binding-invalid",
-        message: "The optional fork tracking binding is invalid; fork execution is unaffected.",
-        detail: error.message,
-      };
-    }
-    const target = await realpath(lookup);
-    const info = await lstat(target);
-    const root = info.isDirectory() ? target : path.dirname(target);
+    const root = await sourceRoot(tracking.binding);
     const expected = descriptor.source.effective_fingerprint;
     let current;
     if (descriptor.source.kind === "customization") {
@@ -184,7 +169,7 @@ async function forkTrackingAdvisory(descriptor, {
       }
       current = tracked.effectiveFingerprint;
     } else {
-      current = validated?.inspection.fingerprint ?? await fingerprintPath(root, {
+      current = tracking.inspection.fingerprint ?? await fingerprintPath(root, {
         excludedPaths: statePathExclusions(statePath),
       });
     }

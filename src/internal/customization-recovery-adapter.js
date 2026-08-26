@@ -11,7 +11,7 @@ function createReadOnlyBindingOperation(operation, { graphReadOnly = false } = {
   };
   return Object.freeze({
     bindingKey: operation.bindingKey,
-    readBindingStore: readStore,
+    resolveTrackingBinding: (intent) => operation.resolveTrackingBinding(intent),
     resolveBinding: async ({ descriptor, context, customizationRoot }) => {
       const store = await readStore();
       const key = operation.bindingKey(descriptor.id, context);

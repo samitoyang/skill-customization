@@ -139,6 +139,27 @@ test("Binding public operations keep state local to the selected path", async ()
   );
 });
 
+test("Binding reports optional tracking state outcomes without exposing records", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-tracking-outcome-"));
+  const statePath = path.join(root, "state", "bindings.json");
+  const operation = createBindingRuntime({ context: { statePath } });
+  const intent = {
+    descriptor: descriptor(),
+    context: "workspace:test",
+    customizationRoot: root,
+  };
+
+  assert.deepEqual(await operation.resolveTrackingBinding(intent), {
+    outcome: "untracked",
+  });
+
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(statePath, "{\n");
+  const invalid = await operation.resolveTrackingBinding(intent);
+  assert.equal(invalid.outcome, "state-invalid");
+  assert.match(invalid.detail, /JSON|unexpected/i);
+});
+
 test("scope follows known target origin and custom paths require a choice", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "scope-"));
   const globalRoot = path.join(root, "global");

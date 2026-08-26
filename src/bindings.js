@@ -1359,12 +1359,53 @@ export function createBindingOperation({
       bindCustomizationInternal(callerIntent(options), operationContext),
     resolveBinding: (options) =>
       resolveBindingInternal(callerIntent(options), operationContext),
+    resolveTrackingBinding: (options) =>
+      resolveTrackingBindingInternal(callerIntent(options), operationContext),
     validateBinding: (options) =>
       validateBindingInternal(callerIntent(options), operationContext),
     validateBindingReadOnly: (options) =>
       validateBindingReadOnlyInternal(callerIntent(options), operationContext),
   };
   return Object.freeze(operation);
+}
+
+/**
+ * Resolve an optional fork tracking Binding without exposing state-store
+ * records to Preflight. Tracking is advisory policy at the caller; Binding
+ * owns the record, target, and fingerprint checks shared with required use.
+ */
+async function resolveTrackingBindingInternal({
+  descriptor,
+  context,
+  customizationRoot,
+}, operationContext) {
+  const { statePath } = operationContext;
+  let store;
+  try {
+    store = await readBindingStore(statePath);
+  } catch (error) {
+    return { outcome: "state-invalid", detail: error.message };
+  }
+
+  const binding = store.bindings[bindingKey(descriptor.id, context)];
+  if (!binding) return { outcome: "untracked" };
+
+  try {
+    const validated = await validateBindingInternal({
+      descriptor,
+      binding,
+      customizationRoot,
+    }, operationContext);
+    return { outcome: "valid", ...validated };
+  } catch (error) {
+    if (error.code === "BINDING_SOURCE_FINGERPRINT_MISMATCH") {
+      return {
+        outcome: "source-drift",
+        actualFingerprint: error.details?.actualFingerprint,
+      };
+    }
+    return { outcome: "binding-invalid", detail: error.message };
+  }
 }
 
 function matchingRoot(targetPath, roots) {
