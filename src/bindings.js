@@ -3563,7 +3563,15 @@ async function resolveBindingInternal({
             return store;
           });
         }
-        if (persisted) return persistedBinding;
+        if (persisted) {
+          // Recovery just validated this canonical target; preserve that
+          // request-scoped capability for the recursive caller that caused
+          // recovery instead of making it resolve the replaced alias again.
+          return attachValidatedBindingTarget(
+            persistedBinding,
+            validatedForPublication.source.target,
+          );
+        }
         if (stateChanged && recoveryAttempts < MAX_RECOVERY_RETRIES) {
           const refreshedContext = withBindingDiscovery(
             operationContext,
