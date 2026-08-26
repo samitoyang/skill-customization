@@ -1,8 +1,13 @@
+import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { bindCustomization, resolveBinding } from "../../src/bindings.js";
+import {
+  bindCustomization,
+  bindingKey,
+  resolveBinding,
+} from "../../src/bindings.js";
 import { createDiscoverySnapshot } from "../../src/discovery.js";
 import { fingerprintPath } from "../../src/fingerprint.js";
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
@@ -100,6 +105,10 @@ await runPerformanceScenario({
       interactive: true,
       confirm: async () => true,
     });
+    // Restore this complete record after every sample. It represents the
+    // stale version-one Binding, including its checked discovery revision,
+    // rather than splicing stale paths into a replacement record.
+    const staleBindingStore = await readFile(statePath, "utf8");
     const discovery = await discoverFixtureSkills({ roots: [initialRoot], managerRecords: [] });
     await rename(path.join(temporary, "plugin", "1"), path.join(temporary, "removed"));
     await mkdir(replacement, { recursive: true });
@@ -110,13 +119,14 @@ await runPerformanceScenario({
       statePath,
       roots: [initialRoot, replacementRoot],
       discovery,
-      staleSource: source,
+      replacement,
+      staleBindingStore,
       metrics: {},
     };
   },
   measure: async (state, { phase }) => {
     const { metrics } = await captureDiscoveryWork(async () => {
-      await resolveBinding({
+      const resolved = await resolveBinding({
         descriptor: state.descriptor,
         context: "global",
         statePath: state.statePath,
@@ -129,6 +139,10 @@ await runPerformanceScenario({
         roots: state.roots,
         managerRecords: [],
       });
+      assert.equal(resolved.source.path, path.resolve(state.replacement));
+      const store = JSON.parse(await readFile(state.statePath, "utf8"));
+      const persisted = store.bindings[bindingKey(state.descriptor.id, "global")];
+      assert.equal(persisted.source.path, path.resolve(state.replacement));
     });
     if (
       metrics.discovery_calls !== 5
@@ -137,11 +151,7 @@ await runPerformanceScenario({
     ) {
       throw new Error("plugin cache continuity discovery work changed");
     }
-    const store = JSON.parse(await readFile(state.statePath, "utf8"));
-    const binding = store.bindings[`${encodeURIComponent(state.descriptor.id)}::global`];
-    binding.source.path = state.staleSource;
-    binding.source.target = state.staleSource;
-    await writeFile(state.statePath, `${JSON.stringify(store, null, 2)}\n`);
+    await writeFile(state.statePath, state.staleBindingStore);
     if (phase === "measure") accumulatePerformanceMetrics(state.metrics, metrics);
   },
   work: (state) => ({
