@@ -1387,8 +1387,9 @@ async function resolveTrackingBindingInternal({
     return { outcome: "state-invalid", detail: error.message };
   }
 
-  const binding = store.bindings[bindingKey(descriptor.id, context)];
-  if (!binding) return { outcome: "untracked" };
+  const key = bindingKey(descriptor.id, context);
+  if (!Object.hasOwn(store.bindings, key)) return { outcome: "untracked" };
+  const binding = store.bindings[key];
 
   try {
     const validated = await validateBindingInternal({
@@ -1396,7 +1397,14 @@ async function resolveTrackingBindingInternal({
       binding,
       customizationRoot,
     }, operationContext);
-    return { outcome: "valid", ...validated };
+    // The execution graph must consume the canonical path Binding checked,
+    // rather than re-resolving a persisted alias after this validation.
+    return {
+      outcome: "valid",
+      sourceRoot: validated.sourceRoot,
+      sourceTarget: validated.currentTarget,
+      inspection: validated.inspection,
+    };
   } catch (error) {
     if (error.code === "BINDING_SOURCE_FINGERPRINT_MISMATCH") {
       return {
@@ -3284,10 +3292,16 @@ async function validateBindingInternal({
     }),
   });
 
-  const { lookupPath, currentTarget } = await currentBindingTarget(binding);
+  const { currentTarget } = await currentBindingTarget(binding);
+  const targetInfo = await lstat(currentTarget);
+  const sourceRoot = targetInfo.isDirectory()
+    ? currentTarget
+    : path.dirname(currentTarget);
   const inspection = await inspectBindingSource({
     descriptor,
-    sourcePath: lookupPath,
+    // Inspect the target that currentBindingTarget just checked.  Reading the
+    // alias again would leave a retarget window between validation and use.
+    sourcePath: currentTarget,
     statePath,
     roots,
     managerRecords,
@@ -3307,6 +3321,7 @@ async function validateBindingInternal({
     binding,
     inspection,
     currentTarget,
+    sourceRoot,
     replacementEvidence,
   };
 }

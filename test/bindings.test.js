@@ -158,6 +158,79 @@ test("Binding reports optional tracking state outcomes without exposing records"
   const invalid = await operation.resolveTrackingBinding(intent);
   assert.equal(invalid.outcome, "state-invalid");
   assert.match(invalid.detail, /JSON|unexpected/i);
+
+  await writeFile(statePath, `${JSON.stringify({
+    version: 1,
+    bindings: { [bindingKey(intent.descriptor.id, intent.context)]: null },
+  })}\n`);
+  const malformed = await operation.resolveTrackingBinding(intent);
+  assert.equal(malformed.outcome, "binding-invalid");
+  assert.match(malformed.detail, /incomplete/i);
+});
+
+test("Binding returns checked canonical tracking outcomes", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-tracking-checked-"));
+  const source = path.join(root, "skills", "review");
+  const statePath = path.join(root, "state", "bindings.json");
+  const item = descriptor();
+  await mkdir(source, { recursive: true });
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  item.source.effective_fingerprint = await fingerprintPath(source);
+  const roots = [{ path: path.dirname(source), scope: "workspace", origin: "fixture" }];
+  await bindCustomization({
+    descriptor: item,
+    sourcePath: source,
+    context: "workspace:test",
+    statePath,
+    roots,
+    interactive: true,
+    confirm: async () => true,
+  });
+
+  const outcome = await createBindingRuntime({ context: { statePath, roots } })
+    .resolveTrackingBinding({ descriptor: item, context: "workspace:test", customizationRoot: root });
+  assert.equal(outcome.outcome, "valid");
+  assert.equal(outcome.sourceRoot, await realpath(source));
+  assert.equal(outcome.sourceTarget, await realpath(source));
+  assert.equal(Object.hasOwn(outcome, "binding"), false);
+
+  await writeFile(path.join(source, "SKILL.md"), "---\nname: review\n---\ndrift\n");
+  const stale = await createBindingRuntime({ context: { statePath, roots } })
+    .resolveTrackingBinding({ descriptor: item, context: "workspace:test", customizationRoot: root });
+  assert.equal(stale.outcome, "source-drift");
+  assert.equal(stale.actualFingerprint, await fingerprintPath(source));
+});
+
+test("Binding reports a retargeted tracking alias as invalid", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "binding-tracking-retargeted-"));
+  const first = path.join(root, "first", "review");
+  const second = path.join(root, "second", "review");
+  const alias = path.join(root, "linked-review");
+  const statePath = path.join(root, "state", "bindings.json");
+  await mkdir(first, { recursive: true });
+  await mkdir(second, { recursive: true });
+  await writeFile(path.join(first, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  await writeFile(path.join(second, "SKILL.md"), "---\nname: review\n---\nsource\n");
+  await symlink(first, alias);
+  const item = descriptor();
+  item.source.effective_fingerprint = await fingerprintPath(first);
+  const roots = [{ path: path.dirname(first), scope: "workspace", origin: "fixture" }];
+  await bindCustomization({
+    descriptor: item,
+    sourcePath: alias,
+    context: "workspace:test",
+    statePath,
+    roots,
+    interactive: true,
+    confirm: async () => true,
+  });
+  await unlink(alias);
+  await symlink(second, alias);
+
+  const outcome = await createBindingRuntime({ context: { statePath, roots } })
+    .resolveTrackingBinding({ descriptor: item, context: "workspace:test", customizationRoot: root });
+  assert.equal(outcome.outcome, "binding-invalid");
+  assert.match(outcome.detail, /retargeted/i);
 });
 
 test("scope follows known target origin and custom paths require a choice", async () => {

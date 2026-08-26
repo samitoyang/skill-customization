@@ -134,7 +134,7 @@ async function forkTrackingAdvisory(descriptor, {
     };
   }
   try {
-    const root = await sourceRoot(tracking.binding);
+    const root = tracking.sourceRoot;
     const expected = descriptor.source.effective_fingerprint;
     let current;
     if (descriptor.source.kind === "customization") {
