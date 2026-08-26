@@ -1459,15 +1459,16 @@ test("versioned cache recovery checks a customization execution graph", async ()
 
   await rename(path.join(root, "plugin", "1"), path.join(root, "removed"));
   await writeFork(versionTwo);
-  await assert.rejects(
-    resolveBinding({
-      descriptor: sourceDescriptor,
-      context,
-      statePath,
-      roots: [rootRecord(versionTwo, "2")],
-    }),
-    (error) => error.code === "BINDING_CUSTOMIZATION_RECOVERY_UNAVAILABLE",
-  );
+  // Public Binding composes the same safe recursive inspection seam as
+  // Preflight, so callers recover a compatible moved customization directly.
+  const recoveredWithoutPreflight = await resolveBinding({
+    descriptor: sourceDescriptor,
+    context,
+    statePath,
+    roots: [rootRecord(versionTwo, "2")],
+    customizationRoot,
+  });
+  assert.equal(recoveredWithoutPreflight.source.path, path.resolve(versionTwo));
   const execution = await preflightCustomization({
     descriptorPath: sourceDescriptorPath,
     context,

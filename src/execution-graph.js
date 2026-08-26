@@ -1,4 +1,4 @@
-import { lstat, realpath } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -11,6 +11,7 @@ import {
   payloadFingerprint,
 } from "./fingerprint.js";
 import { createBindingExecutionAdapter } from "./internal/binding-execution-adapter.js";
+import { validatedBindingTarget } from "./internal/binding-target.js";
 import { attachPublicationToken, publicationTokenFor } from "./internal/publication-token.js";
 import { statePathExclusions } from "./paths.js";
 import { reconcileCustomization } from "./reconcile.js";
@@ -77,8 +78,10 @@ function bindingPublicationStateTreePaths(binding) {
 }
 
 async function sourceRoot(binding) {
-  const lookup = binding.source.alias ?? binding.source.path;
-  const target = await realpath(lookup);
+  const target = validatedBindingTarget(binding);
+  if (typeof target !== "string") {
+    throw new TypeError("Binding did not provide a validated canonical target");
+  }
   const info = await lstat(target);
   return info.isDirectory() ? target : path.dirname(target);
 }
@@ -271,7 +274,13 @@ async function visit({
       }],
       advisories,
       maintenanceHandler: null,
-    }, { paths: [root] });
+    }, {
+      paths: [root],
+      // A fork is a leaf, but its owned payload, descriptor, and provenance
+      // are still recursive runtime inputs. Capture its bounded tree so a
+      // lock-side CAS sees mutations below the leaf root.
+      treePaths: [root],
+    });
   }
 
   let binding;
@@ -394,6 +403,7 @@ async function visit({
       bindingPublicationStateTreePaths(binding),
       publicationTokenFor(sourceResult)?.stateTreePaths ?? [],
     ),
+    treePaths: publicationPaths(publicationTokenFor(sourceResult)?.treePaths ?? []),
     bindings: [
       { key: bindings.bindingKey(descriptor.id, context), binding },
       ...(publicationTokenFor(sourceResult)?.bindings ?? []),

@@ -19,7 +19,9 @@ import {
   payloadFingerprint,
 } from "./fingerprint.js";
 import { createCustomizationRecoveryAdapter } from "./internal/customization-recovery-adapter.js";
+import { attachValidatedBindingTarget } from "./internal/binding-target.js";
 import { publicationTokenFor } from "./internal/publication-token.js";
+import { inspectCustomizationExecution } from "./execution-graph.js";
 import {
   generateLocalIdentity,
   normalizeRepositoryUrl,
@@ -830,7 +832,7 @@ async function fullFingerprintRevision({
       targetPath: sourceRoot,
       entrypoint,
       optionalAdditionalPaths: publicationTokenFor(execution)?.paths ?? [],
-      optionalTreePaths: publicationTokenFor(execution)?.stateTreePaths ?? [],
+      optionalTreePaths: publicationPathsForExecution(execution),
       ignoredPaths: stateEvidenceExcludedPaths(recoveryOperationContext.statePath),
     });
     if (!graphFilesystem) return undefined;
@@ -895,6 +897,11 @@ async function fullFingerprintRevision({
       ? { graphBindings: cloneRevisionValue(publicationTokenFor(execution).bindings) }
       : {}),
   };
+}
+
+function publicationPathsForExecution(execution) {
+  const token = publicationTokenFor(execution);
+  return [...(token?.treePaths ?? []), ...(token?.stateTreePaths ?? [])];
 }
 
 function fullFingerprintRevisionMatches(
@@ -3318,7 +3325,7 @@ async function validateBindingInternal({
     });
   }
   return {
-    binding,
+    binding: attachValidatedBindingTarget(binding, currentTarget),
     inspection,
     currentTarget,
     sourceRoot,
@@ -3630,6 +3637,10 @@ function createPublicBindingOperation(options = {}) {
     runtime,
     selectSource: options.selectSource,
     createOperation: createBindingOperation,
+    // Public Binding is a complete request entry point too: its composition
+    // root supplies recursive inspection for compatible moved customizations.
+    // Binding itself still owns no graph traversal.
+    inspectExecution: inspectCustomizationExecution,
   });
 }
 
