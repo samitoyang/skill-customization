@@ -556,25 +556,26 @@ async function commandReconcile(descriptorPath, options, io) {
         evidence: options.evidence,
       })
     : undefined;
-  let result;
-  try {
-    result = await reconcileBoundCustomization({
-      descriptor,
-      customizationRoot: path.dirname(resolvedDescriptorPath),
-      bindingContext,
-      statePath,
-      discoveryContext: reconciliationDiscoveryContext,
-      cachePath: options.cache,
-      semanticReconciler,
-    });
-  } catch (error) {
-    if (error.code === "CUSTOMIZATION_SOURCE_NOT_READY") {
-      throw new TypeError(error.message, { cause: error });
-    }
-    throw error;
-  }
+  const result = await reconcileBoundCustomization({
+    descriptor,
+    customizationRoot: path.dirname(resolvedDescriptorPath),
+    bindingContext,
+    statePath,
+    discoveryContext: reconciliationDiscoveryContext,
+    cachePath: options.cache,
+    semanticReconciler,
+  });
   outputJson(io, result);
   return result.stopped ? 2 : 0;
+}
+
+function cliErrorForRendering(error) {
+  // Contract-1 rendered this checked-workflow outcome as a plain argument
+  // error. Preserve that output at the rendering seam without making the
+  // command adapter erase the structured library error.
+  return error?.code === "CUSTOMIZATION_SOURCE_NOT_READY"
+    ? new TypeError(error.message, { cause: error })
+    : error;
 }
 
 async function commandPreflight(descriptorPath, options, io) {
@@ -660,7 +661,8 @@ export async function main(argv = process.argv.slice(2), io = process) {
       await commandAcceptMaintenance(positionals[0], options, io);
     }
     return 0;
-  } catch (error) {
+  } catch (caughtError) {
+    const error = cliErrorForRendering(caughtError);
     const action = typeof error.details?.action === "string"
       ? `\nNext action: ${error.details.action}.`
       : "";

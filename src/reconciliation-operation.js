@@ -4,6 +4,7 @@ import { bindingStorePath } from "./bindings.js";
 import { ReconciliationError } from "./errors.js";
 import { inspectCustomizationExecution } from "./execution-graph.js";
 import { createBindingRuntime } from "./internal/binding-runtime.js";
+import { validatedBindingTarget } from "./internal/binding-target.js";
 import { reconcileCustomization } from "./reconcile.js";
 
 function bindingRuntimeFor(discoveryContext, statePath) {
@@ -74,12 +75,18 @@ export async function reconcileBoundCustomization({
     context: bindingContext,
     customizationRoot,
   });
-  const sourcePath = binding.source.alias ?? binding.source.path;
+  // Binding has already checked this request-scoped canonical target. Keep
+  // reconciliation on that capability: consulting a persisted alias here
+  // would permit a retarget between validation and the nested plan/review.
+  const sourcePath = validatedBindingTarget(binding);
+  if (typeof sourcePath !== "string") {
+    throw new TypeError("Binding did not provide a validated canonical target");
+  }
   let sourceEffectiveFingerprint;
   let sourceExecutionPlan;
   if (descriptor.source.kind === "customization") {
     const nested = await inspectCustomizationExecution({
-      descriptorPath: path.join(binding.source.target, "customization.json"),
+      descriptorPath: path.join(sourcePath, "customization.json"),
       context: bindingContext,
       statePath,
       roots: context.roots,

@@ -21,6 +21,7 @@ import {
   fingerprintValues,
   payloadFingerprint,
 } from "../src/fingerprint.js";
+import { discoverSkills } from "../src/discovery.js";
 import { preflightCustomization } from "../src/preflight.js";
 import { reconcileCustomization } from "../src/reconcile.js";
 import { reconcileBoundCustomization } from "../src/index.js";
@@ -318,6 +319,67 @@ test("bound reconciliation reports nested maintenance as a structured library er
       return true;
     },
   );
+});
+
+test("bound reconciliation retains its checked nested target across an alias retarget", async () => {
+  const item = await recursiveFixture();
+  const alias = path.join(item.root, "installed-review-archive");
+  const replacement = path.join(item.root, "replacement-review-archive");
+  await mkdir(replacement);
+  await symlink(item.inner, alias);
+  await bindCustomization({
+    descriptor: item.innerDescriptor,
+    sourcePath: item.base,
+    context: "workspace:retarget-race",
+    statePath: item.statePath,
+    roots: item.roots,
+    interactive: true,
+    confirm: async () => true,
+  });
+  await bindCustomization({
+    descriptor: item.outerDescriptor,
+    sourcePath: alias,
+    context: "workspace:retarget-race",
+    statePath: item.statePath,
+    roots: item.roots,
+    interactive: true,
+    confirm: async () => true,
+  });
+
+  let retargeted = false;
+  const result = await reconcileBoundCustomization({
+    descriptor: item.outerDescriptor,
+    customizationRoot: item.outer,
+    bindingContext: "workspace:retarget-race",
+    statePath: item.statePath,
+    discoveryContext: {
+      roots: item.roots,
+      managerRecords: [],
+      discoveryOptions: { includePlugins: false },
+      discover: async (options) => {
+        const discovered = await discoverSkills(options);
+        if (!retargeted) {
+          retargeted = true;
+          await unlink(alias);
+          await symlink(replacement, alias);
+        }
+        return discovered;
+      },
+    },
+    cachePath: null,
+    semanticReconciler: async ({ sourceEntrypoint, sourceExecutionPlan }) => {
+      assert.equal(sourceEntrypoint, path.join(item.inner, "SKILL.md"));
+      assert.deepEqual(
+        sourceExecutionPlan.map(({ root }) => root),
+        [item.base, item.inner],
+      );
+      return { compatible: true, evidence: "Reviewed the checked nested plan." };
+    },
+  });
+
+  assert.equal(retargeted, true);
+  assert.equal(result.status, "compatible");
+  assert.equal(result.sourceFingerprint, item.innerEffective);
 });
 
 test("reconciliation uses a nested customization's checked effective fingerprint", async () => {
