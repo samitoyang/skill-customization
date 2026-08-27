@@ -584,6 +584,7 @@ async function reconcileOverlay({
   statePath,
   cachePath = compatibilityCachePath(),
   semanticReconciler,
+  verifySource,
 }) {
   const { entrypoint, root: sourceRoot } = await sourceLocation(sourcePath);
   const customizationEntrypoint = await resolveOwnedPath(
@@ -642,6 +643,7 @@ async function reconcileOverlay({
       flags: { ambiguousDrift: false, absorbedDeltas: [] },
     };
   }
+  if (typeof verifySource === "function") await verifySource();
   if (base.checkpointMatch) return { ...base, status: "compatible" };
 
   const cached = await readCompatibility(

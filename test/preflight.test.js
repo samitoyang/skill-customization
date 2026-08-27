@@ -21,10 +21,11 @@ import {
   fingerprintValues,
   payloadFingerprint,
 } from "../src/fingerprint.js";
-import { discoverFixtureSkills } from "./support/discovery-modes.js";
 import { preflightCustomization } from "../src/preflight.js";
 import { reconcileCustomization } from "../src/reconcile.js";
 import { reconcileBoundCustomization } from "../src/index.js";
+import { reconcileBoundCustomizationWithRuntime } from "../src/internal/reconciliation-runtime.js";
+import { inspectCustomizationExecution } from "../src/execution-graph.js";
 import { ReconciliationError } from "../src/errors.js";
 import { acceptMaintenanceUpdate } from "../src/maintenance.js";
 import { discoveryPerformanceChannel } from "../src/performance-diagnostics.js";
@@ -347,7 +348,7 @@ test("bound reconciliation retains its checked nested target across an alias ret
   });
 
   let retargeted = false;
-  const result = await reconcileBoundCustomization({
+  const result = await reconcileBoundCustomizationWithRuntime({
     descriptor: item.outerDescriptor,
     customizationRoot: item.outer,
     bindingContext: "workspace:retarget-race",
@@ -356,30 +357,62 @@ test("bound reconciliation retains its checked nested target across an alias ret
       roots: item.roots,
       managerRecords: [],
       discoveryOptions: { includePlugins: false },
-      discover: async (options) => {
-        const discovered = await discoverFixtureSkills(options);
-        if (!retargeted) {
-          retargeted = true;
-          await unlink(alias);
-          await symlink(replacement, alias);
-        }
-        return discovered;
-      },
     },
     cachePath: null,
-    semanticReconciler: async ({ sourceEntrypoint, sourceExecutionPlan }) => {
-      assert.equal(sourceEntrypoint, path.join(item.inner, "SKILL.md"));
-      assert.deepEqual(
-        sourceExecutionPlan.map(({ root }) => root),
-        [item.base, item.inner],
-      );
-      return { compatible: true, evidence: "Reviewed the checked nested plan." };
+  }, {
+    inspectExecution: async (options) => {
+      const result = await inspectCustomizationExecution(options);
+      if (!retargeted) {
+        retargeted = true;
+        await unlink(alias);
+        await symlink(replacement, alias);
+      }
+      return result;
     },
   });
 
   assert.equal(retargeted, true);
   assert.equal(result.status, "compatible");
   assert.equal(result.sourceFingerprint, item.innerEffective);
+});
+
+test("bound reconciliation rechecks a nested graph before accepting compatibility", async () => {
+  const item = await recursiveFixture();
+  let inspections = 0;
+
+  await assert.rejects(
+    reconcileBoundCustomizationWithRuntime({
+      descriptor: item.outerDescriptor,
+      customizationRoot: item.outer,
+      bindingContext: "workspace:test",
+      statePath: item.statePath,
+      discoveryContext: {
+        roots: item.roots,
+        managerRecords: [],
+        discoveryOptions: { includePlugins: false },
+      },
+      cachePath: null,
+    }, {
+      inspectExecution: async (options) => {
+        const result = await inspectCustomizationExecution(options);
+        inspections += 1;
+        if (inspections === 1) {
+          await writeFile(
+            path.join(item.base, "SKILL.md"),
+            "---\nname: review\n---\nChanged after nested preflight.\n",
+          );
+        }
+        return result;
+      },
+    }),
+    (error) => {
+      assert.ok(error instanceof ReconciliationError);
+      assert.equal(error.code, "CUSTOMIZATION_SOURCE_NOT_READY");
+      assert.equal(error.details.maintenanceHandler.reason, "source-drift");
+      return true;
+    },
+  );
+  assert.equal(inspections, 2);
 });
 
 test("reconciliation uses a nested customization's checked effective fingerprint", async () => {
