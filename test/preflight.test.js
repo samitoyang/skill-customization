@@ -21,7 +21,7 @@ import {
   fingerprintValues,
   payloadFingerprint,
 } from "../src/fingerprint.js";
-import { discoverSkills } from "../src/discovery.js";
+import { discoverFixtureSkills } from "./support/discovery-modes.js";
 import { preflightCustomization } from "../src/preflight.js";
 import { reconcileCustomization } from "../src/reconcile.js";
 import { reconcileBoundCustomization } from "../src/index.js";
@@ -357,7 +357,7 @@ test("bound reconciliation retains its checked nested target across an alias ret
       managerRecords: [],
       discoveryOptions: { includePlugins: false },
       discover: async (options) => {
-        const discovered = await discoverSkills(options);
+        const discovered = await discoverFixtureSkills(options);
         if (!retargeted) {
           retargeted = true;
           await unlink(alias);
