@@ -1,4 +1,14 @@
+/**
+ * @typedef {object} SkillCustomizationErrorOptions
+ * @property {string} [code]
+ * @property {unknown} [details]
+ */
+
 export class SkillCustomizationError extends Error {
+  /**
+   * @param {string} message
+   * @param {SkillCustomizationErrorOptions} [options]
+   */
   constructor(message, { code = "SKILL_CUSTOMIZATION_ERROR", details } = {}) {
     super(message);
     this.name = this.constructor.name;
@@ -8,6 +18,7 @@ export class SkillCustomizationError extends Error {
 }
 
 export class DescriptorError extends SkillCustomizationError {
+  /** @param {string} message @param {unknown} details */
   constructor(message, details) {
     super(message, { code: "INVALID_DESCRIPTOR", details });
   }

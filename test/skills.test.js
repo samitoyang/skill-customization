@@ -460,9 +460,13 @@ test("the package uses a public-document allowlist and verifies its Node 22.14 f
   assert.match(packageJson.scripts["test:ambient"], /--lane ambient/);
   assert.match(packageJson.scripts["test:artifact"], /--lane artifact/);
   assert.match(packageJson.scripts.verify, /npm run test:ambient/);
-  assert.match(packageJson.scripts.verify, /npm run test:artifact/);
+  assert.doesNotMatch(packageJson.scripts.verify, /npm run test:artifact/);
+  assert.equal(packageJson.scripts.prepack, "npm run build:typescript");
+  assert.ok(packageJson.files.includes("dist/src"));
   assert.equal(packageJson.scripts.prepublishOnly, "npm run verify");
   const packageAudit = await read("scripts/check-package.js");
+  assert.match(packageAudit, /verifyEmittedArtifact/);
+  assert.match(packageAudit, /cwd: artifact\.outputDirectory/);
   for (const releaseFile of [
     "docs/adr/0001-managed-recursive-runtime.md",
     "src/maintenance.js",

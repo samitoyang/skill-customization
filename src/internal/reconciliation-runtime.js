@@ -69,6 +69,8 @@ async function checkedNestedExecution({
  * owns source resolution and nested Preflight so callers provide intent and
  * Discovery configuration without transporting source paths, snapshots, or
  * checked execution intermediates.
+ *
+ * @param {ReconcileBoundCustomizationOptions} [options]
  */
 export async function reconcileBoundCustomization({
   ...options
@@ -78,6 +80,21 @@ export async function reconcileBoundCustomization({
 
 // Private composition/test seam. The public operation always supplies the
 // production graph inspector; adapters and snapshots never cross its API.
+/**
+ * @typedef {object} ReconcileBoundCustomizationOptions
+ * @property {import("../descriptor.js").CustomizationDescriptor} descriptor
+ * @property {string} customizationRoot
+ * @property {string} [bindingContext]
+ * @property {string} [statePath]
+ * @property {object} [discoveryContext]
+ * @property {string} [cachePath]
+ * @property {Function} [semanticReconciler]
+ */
+
+/**
+ * @param {ReconcileBoundCustomizationOptions} [options]
+ * @param {{inspectExecution?: typeof inspectCustomizationExecution}} [runtime]
+ */
 export async function reconcileBoundCustomizationWithRuntime({
   descriptor,
   customizationRoot,

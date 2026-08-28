@@ -722,6 +722,29 @@ function candidateMatchesRepository(candidate, locator) {
   return hasRepositoryIdentity();
 }
 
+/**
+ * @typedef {object} DiscoverSkillsOptions
+ * @property {string} [input]
+ * @property {string} [cwd]
+ * @property {string} [home]
+ * @property {Record<string, string | undefined>} [env]
+ * @property {readonly unknown[]} [roots]
+ * @property {readonly unknown[]} [additionalRoots]
+ * @property {boolean} [includePlugins]
+ * @property {Function} [pluginDiscovery]
+ * @property {Record<string, unknown>} [pluginOptions]
+ * @property {unknown[]} [managerRecords]
+ * @property {unknown[]} [managerDiagnostics]
+ * @property {unknown[]} [settingsEvidence]
+ * @property {string[]} [settingsControlPaths]
+ * @property {string} [statePath]
+ * @property {Record<string, unknown>} [managerOptions]
+ * @property {Function} [managerCollector]
+ * @property {string} [customPath]
+ * @property {unknown[]} [rootDiagnostics]
+ */
+
+/** @param {DiscoverSkillsOptions} [options] */
 export async function discoverSkills({
   input,
   cwd = process.cwd(),
@@ -953,6 +976,8 @@ export async function discoverSkills({
  * The optional seed lets a caller reuse a Discovery result it already owns.
  * Inventory and targeted lookups are memoized only for this operation; a new
  * snapshot therefore observes changed roots, evidence, and source content.
+ *
+ * @param {{discovery?: object, roots?: readonly unknown[], managerRecords?: unknown[], options?: DiscoverSkillsOptions, discover?: typeof discoverSkills}} [options]
  */
 export function createDiscoverySnapshot({
   discovery,
@@ -1045,6 +1070,7 @@ export function createDiscoverySnapshot({
     return inventoryPromise;
   }
 
+  /** @param {{input?: string}} [target] */
   async function discoverTarget({ input } = {}) {
     if (input === undefined) return inventory();
     const key = JSON.stringify(input);

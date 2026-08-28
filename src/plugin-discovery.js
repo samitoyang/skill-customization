@@ -1355,6 +1355,14 @@ export const PLUGIN_HOST_SPECIFICATIONS = Object.freeze([
   CURSOR_HOST_ADAPTER,
 ]);
 
+/**
+ * @param {object} [options]
+ * @param {string} [options.home]
+ * @param {string} [options.cwd]
+ * @param {Record<string, string | undefined>} [options.env]
+ * @param {readonly (string | {path: string, origin?: string})[]} [options.workspaceDirectories]
+ * @param {readonly import("./plugin-host-adapters/interface.js").PluginHostAdapter[]} [options.hostSpecifications]
+ */
 export async function discoverPluginSkillRoots({
   home = os.homedir(),
   cwd = process.cwd(),

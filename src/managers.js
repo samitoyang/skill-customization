@@ -464,6 +464,7 @@ async function sqliteQuery(dbPath, sql, run) {
   }
 }
 
+/** @param {string} dbPath @param {{run?: Function}} [options] */
 export async function readXingSqlite(dbPath, { run } = {}) {
   const database = requiredString(dbPath, "xing SQLite database path");
   if (run !== undefined && typeof run !== "function") {
@@ -699,6 +700,7 @@ function jtianlingRecord({ name, installedPath, sourceKey, sourceInfo, bundle })
   };
 }
 
+/** @param {unknown} data @param {{root?: string}} [options] */
 export function parseJtianlingSources(data, { root } = {}) {
   const parsed = jsonValue(data, "jtianling sources.json");
   if (!isObject(parsed)) {

@@ -1262,6 +1262,8 @@ function selectBindingSource(
  * Internal operation seam. Lifecycle configuration arrives through the
  * private runtime composition root; returned methods accept only caller
  * intent and interaction policy.
+ *
+ * @param {{runtime?: object, selectSource?: Function}} [options]
  */
 export function createBindingOperation({
   runtime,

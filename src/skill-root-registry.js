@@ -8,7 +8,6 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
   file: "src/agents.ts",
 });
 
-/** @typedef {import("./provenance.js").PluginProvenanceObservation} PluginProvenanceObservation */
 /** @typedef {import("./plugin-host-adapters/interface.js").PluginHostRootObservation} PluginHostRootObservation */
 /** @typedef {Record<string, unknown>} PluginRootMetadata */
 
@@ -26,7 +25,7 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {string} [pluginManifest]
  * @property {string} [pluginIdentity]
  * @property {readonly string[]} [pluginIdentities]
- * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
+ * @property {readonly import("./provenance.js").PluginProvenanceObservation[]} [pluginEvidence]
  */
 
 /**
@@ -80,7 +79,7 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {readonly PluginRootContainmentObservation[]} [pluginRootObservations]
  * @property {string} [pluginIdentity]
  * @property {readonly string[]} [pluginIdentities]
- * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
+ * @property {readonly import("./provenance.js").PluginProvenanceObservation[]} [pluginEvidence]
  */
 
 /**
@@ -140,7 +139,7 @@ export const SKILL_ROOT_REGISTRY_CHECKPOINT = Object.freeze({
  * @property {readonly PluginRootContainmentObservation[]} [pluginRootObservations]
  * @property {string} [pluginIdentity]
  * @property {readonly string[]} [pluginIdentities]
- * @property {readonly PluginProvenanceObservation[]} [pluginEvidence]
+ * @property {readonly import("./provenance.js").PluginProvenanceObservation[]} [pluginEvidence]
  */
 
 /**

@@ -110,6 +110,17 @@ async function readIfPresent(filePath) {
   }
 }
 
+/**
+ * @param {object} [options]
+ * @param {string} [options.home]
+ * @param {string} [options.cwd]
+ * @param {Record<string, string | undefined>} [options.env]
+ * @param {{vercelLocks?: string[], jtianlingSources?: string[], xingDatabases?: string[]}} [options.sources]
+ * @param {Function} [options.run]
+ * @param {Function} [options.sqliteRun]
+ * @param {Record<string, {command: string, args: string[]}>} [options.commands]
+ * @param {Function} [options.commandAvailable]
+ */
 export async function collectManagerRecords({
   home = os.homedir(),
   cwd = process.cwd(),

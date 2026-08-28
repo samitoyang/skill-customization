@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { access, copyFile, cp, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  cp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -11,11 +20,12 @@ const emittedEntrypoints = Object.freeze([
   "package.json",
   "customization.schema.json",
   "bin/skill-customization.js",
-  "bin/skill-customization.d.ts",
-  "src/index.js",
-  "src/index.d.ts",
-  "src/index.js.map",
-  "src/index.d.ts.map",
+  "dist/bin/skill-customization.js",
+  "dist/bin/skill-customization.d.ts",
+  "dist/src/index.js",
+  "dist/src/index.d.ts",
+  "dist/src/index.js.map",
+  "dist/src/index.d.ts.map",
 ]);
 
 const cliCases = Object.freeze([
@@ -29,7 +39,18 @@ const cliCases = Object.freeze([
   ["unknown-command"],
 ]);
 
-const staticDirectories = Object.freeze([
+const publicationDirectories = Object.freeze([
+  "bin",
+  "docs",
+  "scripts",
+  "skills",
+  "src",
+  "test",
+  ".changeset",
+  ".github",
+]);
+
+const emittedFixtureDirectories = Object.freeze([
   "docs",
   "skills",
   "test/fixtures",
@@ -37,14 +58,17 @@ const staticDirectories = Object.freeze([
   ".github",
 ]);
 
-const staticFiles = Object.freeze([
+const publicationFiles = Object.freeze([
   ".gitignore",
   "AGENTS.md",
   "CHANGELOG.md",
   "CONTEXT.md",
   "CONTRIBUTING.md",
+  "LICENSE",
+  "package.json",
   "README.md",
   "SECURITY.md",
+  "customization.schema.json",
 ]);
 
 function compilerPath(root) {
@@ -83,11 +107,11 @@ function runCompiler(root, outputDirectory) {
   }
 }
 
-export async function buildTypescript({ root = repositoryRoot, outputDirectory = path.join(root, "dist") } = {}) {
+async function prepareOutputDirectory(root, outputDirectory, { replaceDefault = false } = {}) {
   assertSafeOutputDirectory(root, outputDirectory);
   const resolvedOutput = path.resolve(outputDirectory);
   const defaultOutput = path.join(path.resolve(root), "dist");
-  if (resolvedOutput === defaultOutput) {
+  if (replaceDefault && resolvedOutput === defaultOutput) {
     await rm(resolvedOutput, { recursive: true, force: true });
   } else {
     try {
@@ -98,30 +122,94 @@ export async function buildTypescript({ root = repositoryRoot, outputDirectory =
     }
   }
   await mkdir(resolvedOutput);
+  return resolvedOutput;
+}
+
+export async function buildTypescript({
+  root = repositoryRoot,
+  outputDirectory = path.join(root, "dist"),
+} = {}) {
+  const resolvedOutput = await prepareOutputDirectory(root, outputDirectory, {
+    replaceDefault: true,
+  });
   runCompiler(root, resolvedOutput);
-  await copyFile(path.join(root, "package.json"), path.join(resolvedOutput, "package.json"));
-  await copyFile(
-    path.join(root, "customization.schema.json"),
-    path.join(resolvedOutput, "customization.schema.json"),
-  );
-  await copyStaticAssets(root, resolvedOutput);
   return { root, outputDirectory: resolvedOutput };
 }
 
-async function copyStaticAssets(root, outputDirectory) {
-  for (const relativePath of staticFiles) {
+async function copyPublicationInputs(root, outputDirectory) {
+  for (const relativePath of publicationFiles) {
     const source = path.join(root, relativePath);
     const target = path.join(outputDirectory, relativePath);
     await mkdir(path.dirname(target), { recursive: true });
     await copyFile(source, target);
   }
-  for (const relativePath of staticDirectories) {
+  for (const relativePath of publicationDirectories) {
     await cp(
       path.join(root, relativePath),
       path.join(outputDirectory, relativePath),
       { recursive: true },
     );
   }
+}
+
+async function copyEmittedFixtureInputs(root, emittedDirectory) {
+  for (const relativePath of publicationFiles) {
+    const target = path.join(emittedDirectory, relativePath);
+    await mkdir(path.dirname(target), { recursive: true });
+    await copyFile(path.join(root, relativePath), target);
+  }
+  for (const relativePath of emittedFixtureDirectories) {
+    await cp(
+      path.join(root, relativePath),
+      path.join(emittedDirectory, relativePath),
+      { recursive: true },
+    );
+  }
+}
+
+async function rebaseSourceMaps(root, publicationRoot, emittedDirectory) {
+  const maps = (await filesBelow(emittedDirectory)).filter((file) => file.endsWith(".map"));
+  for (const mapPath of maps) {
+    const sourceMap = JSON.parse(await readFile(mapPath, "utf8"));
+    sourceMap.sources = sourceMap.sources.map((source) => {
+      const original = path.resolve(
+        path.dirname(mapPath),
+        sourceMap.sourceRoot ?? "",
+        source,
+      );
+      const relative = path.relative(path.resolve(root), original);
+      if (
+        relative === ""
+        || relative.startsWith(`..${path.sep}`)
+        || path.isAbsolute(relative)
+      ) {
+        throw new Error(`TypeScript source map escapes the repository: ${source}`);
+      }
+      return path.relative(
+        path.dirname(mapPath),
+        path.join(publicationRoot, relative),
+      ).split(path.sep).join("/");
+    });
+    sourceMap.sourceRoot = "";
+    await writeFile(mapPath, `${JSON.stringify(sourceMap)}\n`);
+  }
+}
+
+export async function buildPublicationArtifact({
+  root = repositoryRoot,
+  outputDirectory,
+} = {}) {
+  if (!outputDirectory) {
+    throw new TypeError("publication artifact requires an output directory");
+  }
+  const publicationRoot = await prepareOutputDirectory(root, outputDirectory);
+  await copyPublicationInputs(root, publicationRoot);
+  const emittedDirectory = path.join(publicationRoot, "dist");
+  await mkdir(emittedDirectory);
+  runCompiler(root, emittedDirectory);
+  await copyEmittedFixtureInputs(root, emittedDirectory);
+  await rebaseSourceMaps(root, publicationRoot, emittedDirectory);
+  return { root, outputDirectory: publicationRoot, emittedDirectory };
 }
 
 async function assertFilesExist(outputDirectory) {
@@ -148,8 +236,9 @@ async function assertEmittedJavaScriptIsNodeCompatible(outputDirectory) {
   }
 }
 
-async function assertSourceMaps(root, outputDirectory) {
-  const files = await filesBelow(outputDirectory);
+async function assertSourceMaps(outputDirectory) {
+  const emittedDirectory = path.join(outputDirectory, "dist");
+  const files = await filesBelow(emittedDirectory);
   for (const file of files) {
     if (!file.endsWith(".js") && !file.endsWith(".d.ts")) continue;
     const mapPath = `${file}.map`;
@@ -166,14 +255,17 @@ async function assertSourceMaps(root, outputDirectory) {
         sourceMap.sourceRoot ?? "",
         source,
       );
-      assert.ok(sourceTarget === root || sourceTarget.startsWith(`${root}${path.sep}`));
+      assert.ok(
+        sourceTarget === outputDirectory
+        || sourceTarget.startsWith(`${outputDirectory}${path.sep}`),
+      );
       await access(sourceTarget);
     }
   }
 }
 
 async function assertEmittedTestSuite(root, outputDirectory, { testConcurrency } = {}) {
-  const tests = (await filesBelow(path.join(outputDirectory, "test")))
+  const tests = (await filesBelow(path.join(outputDirectory, "dist", "test")))
     .filter((file) => file.endsWith(".test.js"))
     .filter((file) => path.basename(file) !== "typescript-lane.test.js")
     .sort();
@@ -226,20 +318,27 @@ function runCli(entrypoint, args, root) {
 
 async function assertCliContract(root, outputDirectory) {
   const sourceCli = path.join(root, "bin", "skill-customization.js");
-  const emittedCli = path.join(outputDirectory, "bin", "skill-customization.js");
+  const emittedCli = path.join(outputDirectory, "dist", "bin", "skill-customization.js");
+  const legacyCli = path.join(outputDirectory, "bin", "skill-customization.js");
   for (const args of cliCases) {
-    assert.deepEqual(
-      runCli(emittedCli, args, root),
-      runCli(sourceCli, args, root),
-      `emitted CLI differs for ${args.join(" ") || "no arguments"}`,
-    );
+    const sourceResult = runCli(sourceCli, args, root);
+    for (const [label, entrypoint] of [
+      ["emitted", emittedCli],
+      ["legacy package", legacyCli],
+    ]) {
+      assert.deepEqual(
+        runCli(entrypoint, args, outputDirectory),
+        sourceResult,
+        `${label} CLI differs for ${args.join(" ") || "no arguments"}`,
+      );
+    }
   }
 }
 
 async function assertLibraryContract(root, outputDirectory, packageVersion) {
   const [source, emitted] = await Promise.all([
     import(pathToFileURL(path.join(root, "src", "index.js")).href),
-    import(pathToFileURL(path.join(outputDirectory, "src", "index.js")).href),
+    import(pathToFileURL(path.join(outputDirectory, "dist", "src", "index.js")).href),
   ]);
   assert.deepEqual(Object.keys(emitted).sort(), Object.keys(source).sort());
   for (const contract of ["1", "2", "3", "01"]) {
@@ -260,16 +359,12 @@ async function assertLibraryContract(root, outputDirectory, packageVersion) {
   );
   const [rootRegistryDeclaration, indexDeclaration] = await Promise.all([
     readFile(
-      path.join(outputDirectory, "src", "skill-root-registry.d.ts"),
+      path.join(outputDirectory, "dist", "src", "skill-root-registry.d.ts"),
       "utf8",
     ),
-    readFile(path.join(outputDirectory, "src", "index.d.ts"), "utf8"),
+    readFile(path.join(outputDirectory, "dist", "src", "index.d.ts"), "utf8"),
   ]);
   assert.match(indexDeclaration, /export \* from "\.\/skill-root-registry\.js";/);
-  assert.match(
-    rootRegistryDeclaration,
-    /export type PluginProvenanceObservation = import\("\.\/provenance\.js"\)\.PluginProvenanceObservation;/,
-  );
   const scanRecord = rootRegistryDeclaration.match(
     /export type SkillRootScanRecord = \{([\s\S]*?)\n\};/,
   );
@@ -294,7 +389,7 @@ async function assertLibraryContract(root, outputDirectory, packageVersion) {
   const pluginFieldTypes = new Map([
     ["host", "string"],
     ["plugin", "PluginRootMetadata"],
-    ["pluginEvidence", "readonly PluginProvenanceObservation\\[\\]"],
+    ["pluginEvidence", "readonly import\\(\"\\.\\/provenance\\.js\"\\)\\.PluginProvenanceObservation\\[\\]"],
     ["pluginIdentities", "readonly string\\[\\]"],
     ["pluginIdentity", "string"],
     ["pluginManifest", "string"],
@@ -326,11 +421,17 @@ async function assertLibraryContract(root, outputDirectory, packageVersion) {
 function assertPublishedPackageContract(packageJson) {
   assert.equal(packageJson.type, "module");
   assert.equal(packageJson.engines?.node, ">=22.14.0");
-  assert.equal(packageJson.main, "./src/index.js");
-  assert.equal(packageJson.exports?.["."], "./src/index.js");
+  assert.equal(packageJson.main, "./dist/src/index.js");
+  assert.equal(packageJson.types, "./dist/src/index.d.ts");
+  assert.deepEqual(packageJson.exports?.["."], {
+    types: "./dist/src/index.d.ts",
+    import: "./dist/src/index.js",
+    default: "./dist/src/index.js",
+  });
   assert.equal(packageJson.exports?.["./schema"], "./customization.schema.json");
+  assert.deepEqual(Object.keys(packageJson.exports ?? {}), [".", "./schema"]);
   assert.equal(packageJson.bin?.["skill-customization"], "bin/skill-customization.js");
-  assert.equal(packageJson.files?.includes("dist"), false);
+  assert.equal(packageJson.files?.includes("dist/src"), true);
   assert.equal(packageJson.dependencies, undefined);
   assert.equal(packageJson.optionalDependencies, undefined);
   assert.equal(packageJson.peerDependencies, undefined);
@@ -342,12 +443,12 @@ export async function verifyEmittedArtifact({
   testConcurrency,
 } = {}) {
   if (!outputDirectory) throw new TypeError("TypeScript verification requires an output directory");
-  const artifact = await buildTypescript({ root, outputDirectory });
+  const artifact = await buildPublicationArtifact({ root, outputDirectory });
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   await assertFilesExist(artifact.outputDirectory);
   await assertEmittedSchema(root, artifact.outputDirectory);
-  await assertSourceMaps(path.resolve(root), artifact.outputDirectory);
-  await assertEmittedJavaScriptIsNodeCompatible(artifact.outputDirectory);
+  await assertSourceMaps(artifact.outputDirectory);
+  await assertEmittedJavaScriptIsNodeCompatible(artifact.emittedDirectory);
   await assertCliContract(root, artifact.outputDirectory);
   await assertLibraryContract(root, artifact.outputDirectory, packageJson.version);
   await assertEmittedTestSuite(root, artifact.outputDirectory, { testConcurrency });

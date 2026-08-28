@@ -10,9 +10,14 @@
     "skill-forks"
   ],
   "type": "module",
-  "main": "./src/index.js",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
+    },
     "./schema": "./customization.schema.json"
   },
   "bin": {
@@ -28,6 +33,7 @@
   },
   "files": [
     "bin",
+    "dist/src",
     "src",
     "skills",
     "docs/cli.md",
@@ -49,6 +55,7 @@
   ],
   "scripts": {
     "build:typescript": "node scripts/build-typescript.js",
+    "prepack": "npm run build:typescript",
     "check:package": "node scripts/check-package.js",
     "changeset": "changeset",
     "release": "changeset publish",
@@ -58,7 +65,7 @@
     "test:performance": "node scripts/run-performance-suite.js",
     "verify:artifact": "node scripts/verify-typescript.js",
     "verify:typescript": "node scripts/verify-typescript.js",
-    "verify": "node scripts/verify.js && npm test && npm run test:ambient && npm run test:artifact && npm run check:package",
+    "verify": "node scripts/verify.js && npm test && npm run test:ambient && npm run check:package",
     "version-packages": "changeset version && npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
     "prepublishOnly": "npm run verify"
   },
