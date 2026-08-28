@@ -17,7 +17,9 @@ import {
 } from "../src/fingerprint.js";
 import { main } from "../src/cli.js";
 
-const bin = fileURLToPath(new URL("../bin/skill-customization.js", import.meta.url));
+const root = fileURLToPath(new URL("../", import.meta.url));
+const packageRoot = path.basename(root) === "dist" ? path.dirname(root) : root;
+const bin = path.join(packageRoot, "bin", "skill-customization.js");
 
 function run(args, { env = process.env } = {}) {
   return new Promise((resolve) => {

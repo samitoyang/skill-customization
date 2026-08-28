@@ -18,6 +18,7 @@ const requiredFiles = [
   "SECURITY.md",
   "bin/skill-customization.js",
   "customization.schema.json",
+  "dist/package.json",
   "dist/src/index.d.ts",
   "dist/src/index.d.ts.map",
   "dist/src/index.js",
@@ -35,11 +36,6 @@ const requiredFiles = [
   "package.json",
   "skills/skill-fork/SKILL.md",
   "skills/skill-overlay/SKILL.md",
-  "src/dispatcher-renderer.js",
-  "src/index.js",
-  "src/maintenance.js",
-  "src/owned-payload.js",
-  "src/preflight.js",
 ];
 
 function npmInvocation() {
@@ -92,6 +88,9 @@ try {
   }
   if (forbidden.length > 0) {
     throw new Error(`npm package contains private files: ${forbidden.join(", ")}`);
+  }
+  if ([...files].some((file) => file === "src" || file.startsWith("src/"))) {
+    throw new Error("npm package contains a legacy source execution path");
   }
   const cli = report.files.find(
     ({ path: file }) => file === "bin/skill-customization.js",

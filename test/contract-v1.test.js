@@ -33,7 +33,9 @@ const customizationRoot = path.join(fixtureRoot, "review-local-archive");
 const descriptorPath = path.join(customizationRoot, "customization.json");
 const checkpointRoot = path.join(fixtureRoot, "source-checkpoint", "review");
 const liveRoot = path.join(fixtureRoot, "source-live", "review");
-const bin = fileURLToPath(new URL("../bin/skill-customization.js", import.meta.url));
+const testRoot = fileURLToPath(new URL("../", import.meta.url));
+const packageRoot = path.basename(testRoot) === "dist" ? path.dirname(testRoot) : testRoot;
+const bin = path.join(packageRoot, "bin", "skill-customization.js");
 
 const readJson = async (target) => JSON.parse(await readFile(target, "utf8"));
 

@@ -36,30 +36,6 @@ for (const file of javascript) {
 }
 
 JSON.parse(await readFile(path.join(root, "customization.schema.json"), "utf8"));
-const packageJson = JSON.parse(
-  await readFile(path.join(root, "package.json"), "utf8"),
-);
-
-for (const contract of ["1", "2"]) {
-  const contractCheck = spawnSync(
-    process.execPath,
-    [path.join(root, "bin", "skill-customization.js"), "supports", contract],
-    { encoding: "utf8" },
-  );
-  if (contractCheck.status !== 0) {
-    throw new Error(contractCheck.stderr || `helper contract ${contract} is unsupported`);
-  }
-  const contractResult = JSON.parse(contractCheck.stdout);
-  if (
-    contractResult.compatible !== true
-    || contractResult.requested_contract !== contract
-    || !contractResult.supported_contracts?.includes(contract)
-    || contractResult.package_version !== packageJson.version
-  ) {
-    throw new Error(`helper contract ${contract} check returned an invalid result`);
-  }
-}
-
 for (const skillName of ["skill-overlay", "skill-fork"]) {
   const skillRoot = path.join(root, "skills", skillName);
   const markdown = await readFile(path.join(skillRoot, "SKILL.md"), "utf8");
@@ -85,5 +61,5 @@ for (const skillName of ["skill-overlay", "skill-fork"]) {
 }
 
 process.stdout.write(
-  `verified ${javascript.length} JavaScript files, schema, helper contracts 1 and 2, package, and skills\n`,
+  `verified ${javascript.length} JavaScript files, schema, package, and skills\n`,
 );

@@ -24,14 +24,17 @@ test("publication maps only supported entrypoints to emitted ESM and declaration
     "./schema": "./customization.schema.json",
   });
   assert.deepEqual(Object.keys(packageJson.exports), [".", "./schema"]);
+  assert.equal(packageJson.files.includes("dist/package.json"), true);
+  assert.equal(packageJson.files.includes("src"), false);
 });
 
-test("complete verification owns one emitted-artifact execution", async () => {
+test("complete verification delegates runtime checks to the packed-artifact lane", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(root, "package.json"), "utf8"),
   );
 
-  assert.doesNotMatch(packageJson.scripts.verify, /test:artifact|verify:artifact/);
+  assert.equal(packageJson.scripts.test, "node scripts/verify-typescript.js");
+  assert.doesNotMatch(packageJson.scripts.verify, /npm test|test:ambient|test:artifact/);
   assert.equal(
     (packageJson.scripts.verify.match(/npm run check:package/gu) ?? []).length,
     1,

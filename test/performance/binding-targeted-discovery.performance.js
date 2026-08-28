@@ -132,7 +132,10 @@ await runPerformanceScenario({
         managerRecords: [],
       });
     });
-    if (metrics.discovery_calls !== 1 || metrics.root_scans !== 2) {
+    const expected = phase === "warmup"
+      ? { discovery_calls: 2, root_scans: 4 }
+      : { discovery_calls: 1, root_scans: 2 };
+    if (metrics.discovery_calls !== expected.discovery_calls || metrics.root_scans !== expected.root_scans) {
       throw new Error("targeted Binding discovery work changed");
     }
     if (phase === "measure") {

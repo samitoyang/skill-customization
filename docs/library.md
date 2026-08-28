@@ -2,7 +2,7 @@
 
 Import public functions from `skill-customization`; the package root is the supported Node.js 22.14+, zero-runtime-dependency API. The schema is exported as `skill-customization/schema`.
 
-The package root resolves to verified emitted ESM and publishes its matching TypeScript declarations and source maps. Only the root and schema subpath are supported exports; build layout and internal Binding, Preflight, and Reconciliation composition seams are not import paths. The legacy `skill-customization` executable keeps its existing `bin/skill-customization.js` path during this migration slice.
+The package root resolves to verified emitted ESM and publishes its matching TypeScript declarations and self-contained source maps. The `skill-customization` executable at `bin/skill-customization.js` executes that same emitted CLI. Only the root and schema subpath are supported exports; build layout and internal Binding, Preflight, and Reconciliation composition seams are not import paths.
 
 Primary seams are typed, immutable `ingestDescriptor` results that combine descriptor validation with folder identity, owned-artifact, symlink, and artifact-type checks; normalization and naming; canonical-target and owned-payload fingerprints that exclude clone-local version-control metadata and reject internal symlinks; bounded discovery and manager records; context bindings; targeted reconciliation with entrypoint-derived local identity and recursively checked customization-source identity; recursive `preflightCustomization`; explicit `acceptMaintenanceUpdate`; and canonically contained locked atomic file/JSON updates.
 

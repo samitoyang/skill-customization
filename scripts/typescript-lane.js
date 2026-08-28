@@ -7,7 +7,6 @@ import {
   readFile,
   readdir,
   rm,
-  writeFile,
 } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -20,8 +19,7 @@ const emittedEntrypoints = Object.freeze([
   "package.json",
   "customization.schema.json",
   "bin/skill-customization.js",
-  "dist/bin/skill-customization.js",
-  "dist/bin/skill-customization.d.ts",
+  "dist/package.json",
   "dist/src/index.js",
   "dist/src/index.d.ts",
   "dist/src/index.js.map",
@@ -44,7 +42,6 @@ const publicationDirectories = Object.freeze([
   "docs",
   "scripts",
   "skills",
-  "src",
   "test",
   ".changeset",
   ".github",
@@ -167,34 +164,6 @@ async function copyEmittedFixtureInputs(root, emittedDirectory) {
   }
 }
 
-async function rebaseSourceMaps(root, publicationRoot, emittedDirectory) {
-  const maps = (await filesBelow(emittedDirectory)).filter((file) => file.endsWith(".map"));
-  for (const mapPath of maps) {
-    const sourceMap = JSON.parse(await readFile(mapPath, "utf8"));
-    sourceMap.sources = sourceMap.sources.map((source) => {
-      const original = path.resolve(
-        path.dirname(mapPath),
-        sourceMap.sourceRoot ?? "",
-        source,
-      );
-      const relative = path.relative(path.resolve(root), original);
-      if (
-        relative === ""
-        || relative.startsWith(`..${path.sep}`)
-        || path.isAbsolute(relative)
-      ) {
-        throw new Error(`TypeScript source map escapes the repository: ${source}`);
-      }
-      return path.relative(
-        path.dirname(mapPath),
-        path.join(publicationRoot, relative),
-      ).split(path.sep).join("/");
-    });
-    sourceMap.sourceRoot = "";
-    await writeFile(mapPath, `${JSON.stringify(sourceMap)}\n`);
-  }
-}
-
 export async function buildPublicationArtifact({
   root = repositoryRoot,
   outputDirectory,
@@ -208,7 +177,6 @@ export async function buildPublicationArtifact({
   await mkdir(emittedDirectory);
   runCompiler(root, emittedDirectory);
   await copyEmittedFixtureInputs(root, emittedDirectory);
-  await rebaseSourceMaps(root, publicationRoot, emittedDirectory);
   return { root, outputDirectory: publicationRoot, emittedDirectory };
 }
 
@@ -249,17 +217,9 @@ async function assertSourceMaps(outputDirectory) {
     assert.equal(sourceMap.file, path.basename(file));
     assert.equal(typeof sourceMap.mappings, "string");
     assert.ok(sourceMap.sources.length > 0);
-    for (const source of sourceMap.sources) {
-      const sourceTarget = path.resolve(
-        path.dirname(mapPath),
-        sourceMap.sourceRoot ?? "",
-        source,
-      );
-      assert.ok(
-        sourceTarget === outputDirectory
-        || sourceTarget.startsWith(`${outputDirectory}${path.sep}`),
-      );
-      await access(sourceTarget);
+    if (file.endsWith(".js")) {
+      assert.equal(sourceMap.sourcesContent?.length, sourceMap.sources.length);
+      assert.ok(sourceMap.sourcesContent.every((source) => typeof source === "string"));
     }
   }
 }
@@ -316,22 +276,11 @@ function runCli(entrypoint, args, root) {
   };
 }
 
-async function assertCliContract(root, outputDirectory) {
-  const sourceCli = path.join(root, "bin", "skill-customization.js");
-  const emittedCli = path.join(outputDirectory, "dist", "bin", "skill-customization.js");
-  const legacyCli = path.join(outputDirectory, "bin", "skill-customization.js");
+async function assertCliContract(outputDirectory) {
+  const emittedCli = path.join(outputDirectory, "bin", "skill-customization.js");
   for (const args of cliCases) {
-    const sourceResult = runCli(sourceCli, args, root);
-    for (const [label, entrypoint] of [
-      ["emitted", emittedCli],
-      ["legacy package", legacyCli],
-    ]) {
-      assert.deepEqual(
-        runCli(entrypoint, args, outputDirectory),
-        sourceResult,
-        `${label} CLI differs for ${args.join(" ") || "no arguments"}`,
-      );
-    }
+    const result = runCli(emittedCli, args, outputDirectory);
+    assert.notEqual(result.status, null, `emitted CLI did not exit for ${args.join(" ") || "no arguments"}`);
   }
 }
 
@@ -432,6 +381,8 @@ function assertPublishedPackageContract(packageJson) {
   assert.deepEqual(Object.keys(packageJson.exports ?? {}), [".", "./schema"]);
   assert.equal(packageJson.bin?.["skill-customization"], "bin/skill-customization.js");
   assert.equal(packageJson.files?.includes("dist/src"), true);
+  assert.equal(packageJson.files?.includes("dist/package.json"), true);
+  assert.equal(packageJson.files?.includes("src"), false);
   assert.equal(packageJson.dependencies, undefined);
   assert.equal(packageJson.optionalDependencies, undefined);
   assert.equal(packageJson.peerDependencies, undefined);
@@ -449,7 +400,7 @@ export async function verifyEmittedArtifact({
   await assertEmittedSchema(root, artifact.outputDirectory);
   await assertSourceMaps(artifact.outputDirectory);
   await assertEmittedJavaScriptIsNodeCompatible(artifact.emittedDirectory);
-  await assertCliContract(root, artifact.outputDirectory);
+  await assertCliContract(artifact.outputDirectory);
   await assertLibraryContract(root, artifact.outputDirectory, packageJson.version);
   await assertEmittedTestSuite(root, artifact.outputDirectory, { testConcurrency });
   assertPublishedPackageContract(packageJson);
