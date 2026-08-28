@@ -7,6 +7,7 @@ import {
   readFile,
   readdir,
   rm,
+  writeFile,
 } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -24,6 +25,34 @@ const emittedEntrypoints = Object.freeze([
   "dist/src/index.d.ts",
   "dist/src/index.js.map",
   "dist/src/index.d.ts.map",
+]);
+
+const publicLibraryExports = Object.freeze([
+  "BindingError", "DescriptorError", "DiscoveryError", "MAX_CUSTOMIZATION_DEPTH",
+  "ReconciliationError", "SKILL_ROOT_REGISTRY", "SKILL_ROOT_REGISTRY_CHECKPOINT",
+  "SUPPORTED_HELPER_CONTRACTS", "SkillCustomizationError", "acceptMaintenanceUpdate",
+  "acquireStateLock", "activeSkillInventory", "assertValidDescriptor", "bindCustomization",
+  "bindingKey", "bindingStorePath", "boundedWorkspaceDirectories", "canonicalPath",
+  "checkProvenance", "checkProvenanceCache", "checkProvenanceSelection", "classifyBindingScope",
+  "collectManagerRecords", "compatibilityCachePath", "configuredHostSkillRoots",
+  "confirmDiscoverySelection", "confirmProvenanceDecision", "createDiscoverySnapshot",
+  "defaultManagerSources", "discoverSkills",
+  "excludeSkillRootFromInventory", "fingerprintFile", "fingerprintFiles", "fingerprintPath",
+  "fingerprintValues", "generateLocalIdentity", "helperContractSupport", "hostSkillRootRegistry",
+  "hostSkillRoots", "ingestDescriptor", "isMachineAbsolutePath", "isPathContained",
+  "isPortableRelativePath", "isRepositoryLocator", "isValidHelperContract", "managerSkillRoots",
+  "matchesCustomizationSource", "normalizeAsmList", "normalizeJtianlingSources",
+  "normalizeManagerRecords", "normalizeRepositoryLocator", "normalizeRepositoryUrl",
+  "normalizeSkillName", "normalizeSkillRootObservations", "normalizeUpstreamEntrypoint",
+  "normalizeVercelLock", "normalizeXingCli", "parseAsmJson", "parseJtianlingSources",
+  "parseSkillMetadata", "parseVercelV3Lock", "parseXingJson", "payloadFingerprint",
+  "preflightCustomization", "readBindingStore", "readCheckedDescriptor", "readDescriptor",
+  "readJsonState", "readSkillMetadata", "readSkillName", "readXingSqlite",
+  "reconcileBoundCustomization", "reconcileCustomization", "registrySkillRoots",
+  "renderDispatcher", "resolveBinding", "resolveOwnedPath", "skillRootObservation",
+  "stableProvenanceKey", "statePathExclusions", "suggestCustomizationNames", "updateJsonAtomic",
+  "validateBinding", "validateCustomizationName", "validateDescriptor", "validateSkillName",
+  "writeFileAtomic", "writeJsonAtomic",
 ]);
 
 const cliCases = Object.freeze([
@@ -104,6 +133,36 @@ function runCompiler(root, outputDirectory) {
   }
 }
 
+function sourcePathFromMap(root, mapPath, source) {
+  const resolvedSource = path.resolve(path.dirname(mapPath), source);
+  const relativeSource = path.relative(root, resolvedSource);
+  if (
+    path.isAbsolute(relativeSource)
+    || relativeSource === ".."
+    || relativeSource.startsWith(`..${path.sep}`)
+  ) {
+    throw new Error(`source map contains an unsafe source path: ${source}`);
+  }
+  return { relativeSource, sourcePath: resolvedSource };
+}
+
+async function inlineSourceMapSources(root, outputDirectory) {
+  const maps = (await filesBelow(outputDirectory)).filter((file) => file.endsWith(".map"));
+  for (const mapPath of maps) {
+    const sourceMap = JSON.parse(await readFile(mapPath, "utf8"));
+    const sourceRoot = sourceMap.sourceRoot ?? "";
+    if (sourceRoot !== "") {
+      throw new Error(`source map has unsupported sourceRoot: ${mapPath}`);
+    }
+    const sources = sourceMap.sources.map((source) => sourcePathFromMap(root, mapPath, source));
+    sourceMap.sources = sources.map(({ relativeSource }) => relativeSource);
+    sourceMap.sourcesContent = await Promise.all(
+      sources.map(({ sourcePath }) => readFile(sourcePath, "utf8")),
+    );
+    await writeFile(mapPath, `${JSON.stringify(sourceMap)}\n`);
+  }
+}
+
 async function prepareOutputDirectory(root, outputDirectory, { replaceDefault = false } = {}) {
   assertSafeOutputDirectory(root, outputDirectory);
   const resolvedOutput = path.resolve(outputDirectory);
@@ -130,6 +189,7 @@ export async function buildTypescript({
     replaceDefault: true,
   });
   runCompiler(root, resolvedOutput);
+  await inlineSourceMapSources(root, resolvedOutput);
   return { root, outputDirectory: resolvedOutput };
 }
 
@@ -176,6 +236,7 @@ export async function buildPublicationArtifact({
   const emittedDirectory = path.join(publicationRoot, "dist");
   await mkdir(emittedDirectory);
   runCompiler(root, emittedDirectory);
+  await inlineSourceMapSources(root, emittedDirectory);
   await copyEmittedFixtureInputs(root, emittedDirectory);
   return { root, outputDirectory: publicationRoot, emittedDirectory };
 }
@@ -217,16 +278,17 @@ async function assertSourceMaps(outputDirectory) {
     assert.equal(sourceMap.file, path.basename(file));
     assert.equal(typeof sourceMap.mappings, "string");
     assert.ok(sourceMap.sources.length > 0);
-    if (file.endsWith(".js")) {
-      assert.equal(sourceMap.sourcesContent?.length, sourceMap.sources.length);
-      assert.ok(sourceMap.sourcesContent.every((source) => typeof source === "string"));
-    }
+    assert.ok(sourceMap.sources.every((source) => !path.isAbsolute(source)));
+    assert.equal(sourceMap.sourcesContent?.length, sourceMap.sources.length);
+    assert.ok(sourceMap.sourcesContent.every((source) => typeof source === "string"));
   }
 }
 
 async function assertEmittedTestSuite(root, outputDirectory, { testConcurrency } = {}) {
   const tests = (await filesBelow(path.join(outputDirectory, "dist", "test")))
     .filter((file) => file.endsWith(".test.js"))
+    // This source-layout regression test invokes this verifier itself. Its assertions
+    // live in this lane so the emitted suite remains non-recursive.
     .filter((file) => path.basename(file) !== "typescript-lane.test.js")
     .sort();
   if (tests.length === 0) throw new Error("TypeScript artifact emitted no test files");
@@ -284,28 +346,32 @@ async function assertCliContract(outputDirectory) {
   }
 }
 
-async function assertLibraryContract(root, outputDirectory, packageVersion) {
-  const [source, emitted] = await Promise.all([
-    import(pathToFileURL(path.join(root, "src", "index.js")).href),
-    import(pathToFileURL(path.join(outputDirectory, "dist", "src", "index.js")).href),
-  ]);
-  assert.deepEqual(Object.keys(emitted).sort(), Object.keys(source).sort());
+async function assertLibraryContract(outputDirectory, packageVersion) {
+  const emitted = await import(
+    pathToFileURL(path.join(outputDirectory, "dist", "src", "index.js")).href,
+  );
+  assert.deepEqual(Object.keys(emitted).sort(), publicLibraryExports);
   for (const contract of ["1", "2", "3", "01"]) {
     assert.deepEqual(
       emitted.helperContractSupport(contract, packageVersion),
-      source.helperContractSupport(contract, packageVersion),
+      {
+        compatible: contract === "1" || contract === "2",
+        requested_contract: contract,
+        supported_contracts: ["1", "2"],
+        package_version: packageVersion,
+      },
     );
-    assert.equal(emitted.isValidHelperContract(contract), source.isValidHelperContract(contract));
+    assert.equal(emitted.isValidHelperContract(contract), contract !== "01");
   }
   const metadata = {
     name: "review-local-archive",
     description: "Review work and archive the result locally.",
     "disable-model-invocation": true,
   };
-  assert.equal(
-    emitted.renderDispatcher("semantic-overlay", metadata),
-    source.renderDispatcher("semantic-overlay", metadata),
-  );
+  const dispatcher = emitted.renderDispatcher("semantic-overlay", metadata);
+  assert.match(dispatcher, /^---\nname: "review-local-archive"\ndescription: "Review work and archive the result locally\."\ndisable-model-invocation: true\n---\n/m);
+  assert.match(dispatcher, /# Managed dispatcher/);
+  assert.match(dispatcher, /skill-customization supports 2/);
   const [rootRegistryDeclaration, indexDeclaration] = await Promise.all([
     readFile(
       path.join(outputDirectory, "dist", "src", "skill-root-registry.d.ts"),
@@ -386,6 +452,12 @@ function assertPublishedPackageContract(packageJson) {
   assert.equal(packageJson.dependencies, undefined);
   assert.equal(packageJson.optionalDependencies, undefined);
   assert.equal(packageJson.peerDependencies, undefined);
+  assert.equal(packageJson.scripts?.test, "node scripts/verify-typescript.js");
+  assert.doesNotMatch(packageJson.scripts?.verify ?? "", /npm test|test:ambient|test:artifact/);
+  assert.equal(
+    (packageJson.scripts?.verify?.match(/npm run check:package/gu) ?? []).length,
+    1,
+  );
 }
 
 export async function verifyEmittedArtifact({
@@ -401,7 +473,7 @@ export async function verifyEmittedArtifact({
   await assertSourceMaps(artifact.outputDirectory);
   await assertEmittedJavaScriptIsNodeCompatible(artifact.emittedDirectory);
   await assertCliContract(artifact.outputDirectory);
-  await assertLibraryContract(root, artifact.outputDirectory, packageJson.version);
+  await assertLibraryContract(artifact.outputDirectory, packageJson.version);
   await assertEmittedTestSuite(root, artifact.outputDirectory, { testConcurrency });
   assertPublishedPackageContract(packageJson);
   return artifact;
