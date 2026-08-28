@@ -73,14 +73,17 @@ test("custom output is a self-contained publication artifact", async () => {
       await readFile(path.join(outputDirectory, "package.json"), "utf8"),
     );
     assert.equal(packageJson.exports["."].import, "./dist/src/index.js");
-    await Promise.all([
+    const [, , , , emittedJavaScriptMap, emittedDeclarationMap] = await Promise.all([
       readFile(path.join(outputDirectory, "bin", "skill-customization.js")),
       readFile(path.join(outputDirectory, "customization.schema.json")),
       readFile(path.join(outputDirectory, "dist", "src", "index.js")),
       readFile(path.join(outputDirectory, "dist", "src", "index.d.ts")),
-      readFile(path.join(outputDirectory, "dist", "src", "index.js.map")),
-      readFile(path.join(outputDirectory, "dist", "src", "index.d.ts.map")),
+      readFile(path.join(outputDirectory, "dist", "src", "index.js.map"), "utf8"),
+      readFile(path.join(outputDirectory, "dist", "src", "index.d.ts.map"), "utf8"),
     ]);
+    for (const sourceMap of [emittedJavaScriptMap, emittedDeclarationMap].map(JSON.parse)) {
+      assert.equal(sourceMap.sources.some((source) => source.includes("\\")), false);
+    }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }

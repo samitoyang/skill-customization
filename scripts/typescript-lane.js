@@ -155,7 +155,7 @@ async function inlineSourceMapSources(root, outputDirectory) {
       throw new Error(`source map has unsupported sourceRoot: ${mapPath}`);
     }
     const sources = sourceMap.sources.map((source) => sourcePathFromMap(root, mapPath, source));
-    sourceMap.sources = sources.map(({ relativeSource }) => relativeSource);
+    sourceMap.sources = sources.map(({ relativeSource }) => relativeSource.replaceAll(path.sep, "/"));
     sourceMap.sourcesContent = await Promise.all(
       sources.map(({ sourcePath }) => readFile(sourcePath, "utf8")),
     );
