@@ -149,7 +149,9 @@ await runPerformanceScenario({
       || metrics.root_scans !== 14
       || metrics.git_probes !== 9
     ) {
-      throw new Error("plugin cache continuity discovery work changed");
+      throw new Error(
+        `[DEBUG-ci-performance-counters] plugin cache continuity discovery work changed: ${JSON.stringify({ phase, metrics })}`,
+      );
     }
     await writeFile(state.statePath, state.staleBindingStore);
     if (phase === "measure") accumulatePerformanceMetrics(state.metrics, metrics);
