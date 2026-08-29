@@ -1,11 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { bindCustomization } from "../../src/bindings.js";
 import { fingerprintPath, fingerprintValues, payloadFingerprint } from "../../src/fingerprint.js";
 import { preflightCustomization } from "../../src/preflight.js";
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
+import { createPerformanceFixtureRoot } from "../support/performance-fixture.js";
 import { captureDiscoveryWork } from "../support/performance-metrics.js";
 
 const repository = "https://github.com/example/skills";
@@ -61,7 +61,9 @@ await runPerformanceScenario({
     },
   },
   setup: async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "preflight-discovery-performance-"));
+    const root = await createPerformanceFixtureRoot(
+      "preflight-discovery-performance-",
+    );
     const base = path.join(root, "review");
     const inner = path.join(root, "review-archive");
     const outer = path.join(root, "review-archive-notify");

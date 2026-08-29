@@ -1,5 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
@@ -7,6 +6,7 @@ import {
   repositoryRoot,
   verifyEmittedArtifact,
 } from "../../scripts/typescript-lane.js";
+import { createPerformanceFixtureRoot } from "../support/performance-fixture.js";
 
 const iterations = 5;
 
@@ -24,7 +24,9 @@ await runPerformanceScenario({
     },
   },
   setup: async () => ({
-    temporary: await mkdtemp(path.join(os.tmpdir(), "artifact-verification-performance-")),
+    temporary: await createPerformanceFixtureRoot(
+      "artifact-verification-performance-",
+    ),
     artifactVerifications: 0,
   }),
   measure: async (state) => {

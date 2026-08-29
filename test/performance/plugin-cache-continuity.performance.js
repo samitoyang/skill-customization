@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -12,6 +11,7 @@ import { createDiscoverySnapshot } from "../../src/discovery.js";
 import { fingerprintPath } from "../../src/fingerprint.js";
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
 import { discoverFixtureSkills } from "../support/discovery-modes.js";
+import { createPerformanceFixtureRoot } from "../support/performance-fixture.js";
 import { captureDiscoveryWork } from "../support/performance-metrics.js";
 
 const iterations = 5;
@@ -52,15 +52,17 @@ await runPerformanceScenario({
     maxP95Ms: 3000,
     maxMadMs: 500,
     exactWork: {
-      discovery_calls: 5 * iterations,
-      root_scans: 14 * iterations,
-      git_probes: 9 * iterations,
+      discovery_calls: 3 * iterations,
+      root_scans: 8 * iterations,
+      git_probes: 5 * iterations,
       manager_collections: 0,
       plugin_discovery_calls: 0,
     },
   },
   setup: async () => {
-    const temporary = await mkdtemp(path.join(os.tmpdir(), "plugin-cache-continuity-performance-"));
+    const temporary = await createPerformanceFixtureRoot(
+      "plugin-cache-continuity-performance-",
+    );
     const source = path.join(temporary, "plugin", "1", "skills", "review");
     const replacement = path.join(temporary, "plugin", "2", "skills", "review");
     const statePath = path.join(temporary, "state", "bindings.json");

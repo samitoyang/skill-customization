@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
@@ -12,6 +11,7 @@ import {
   writeAmbientPluginVersion,
 } from "../support/ambient-plugin-fixture.js";
 import { discoverAmbientSkills } from "../support/discovery-modes.js";
+import { createPerformanceFixtureRoot } from "../support/performance-fixture.js";
 import { captureDiscoveryWork } from "../support/performance-metrics.js";
 
 const iterations = 5;
@@ -43,7 +43,9 @@ await runPerformanceScenario({
     },
   },
   setup: async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "ambient-discovery-performance-"));
+    const root = await createPerformanceFixtureRoot(
+      "ambient-discovery-performance-",
+    );
     const home = path.join(root, "home");
     const cwd = path.join(root, "workspace");
     const claudeHome = path.join(home, ".claude");
