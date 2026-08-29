@@ -52,6 +52,29 @@ test("TypeScript verification exercises the emitted CLI and library contracts", 
   assert.match(result.stdout, /verified emitted TypeScript artifact/);
 });
 
+test("plain TypeScript build emits package metadata for prepack", async () => {
+  const temporaryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "skill-customization-build-test-"),
+  );
+  const outputDirectory = path.join(temporaryRoot, "dist");
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [path.join(root, "scripts", "build-typescript.js"), "--out-dir", outputDirectory],
+      { cwd: root, encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const packageJson = JSON.parse(
+      await readFile(path.join(outputDirectory, "package.json"), "utf8"),
+    );
+    assert.equal(packageJson.name, "skill-customization");
+    assert.equal(packageJson.main, "./dist/src/index.js");
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test("custom output is a self-contained publication artifact", async () => {
   const temporaryRoot = await mkdtemp(
     path.join(os.tmpdir(), "skill-customization-publication-test-"),
@@ -81,8 +104,15 @@ test("custom output is a self-contained publication artifact", async () => {
       readFile(path.join(outputDirectory, "dist", "src", "index.js.map"), "utf8"),
       readFile(path.join(outputDirectory, "dist", "src", "index.d.ts.map"), "utf8"),
     ]);
-    for (const sourceMap of [emittedJavaScriptMap, emittedDeclarationMap].map(JSON.parse)) {
+    for (const [mapPath, sourceMap] of [
+      [path.join(outputDirectory, "dist", "src", "index.js.map"), emittedJavaScriptMap],
+      [path.join(outputDirectory, "dist", "src", "index.d.ts.map"), emittedDeclarationMap],
+    ].map(([mapPath, contents]) => [mapPath, JSON.parse(contents)])) {
       assert.equal(sourceMap.sources.some((source) => source.includes("\\")), false);
+      assert.deepEqual(
+        sourceMap.sources.map((source) => path.resolve(path.dirname(mapPath), source)),
+        [path.join(root, "src", "index.js")],
+      );
     }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });

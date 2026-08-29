@@ -672,6 +672,7 @@ async function reconcileOverlay({
     customizationEntrypoint,
     customizationInstructions,
   });
+  if (typeof verifySource === "function") await verifySource();
   const result = reconcileOutcome(base, outcome);
   if (result.status === "compatible") {
     await cacheCompatibility(

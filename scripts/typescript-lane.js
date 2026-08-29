@@ -135,14 +135,15 @@ function runCompiler(root, outputDirectory) {
 
 function sourcePathFromMap(root, mapPath, source) {
   const resolvedSource = path.resolve(path.dirname(mapPath), source);
-  const relativeSource = path.relative(root, resolvedSource);
+  const relativeToRoot = path.relative(root, resolvedSource);
   if (
-    path.isAbsolute(relativeSource)
-    || relativeSource === ".."
-    || relativeSource.startsWith(`..${path.sep}`)
+    path.isAbsolute(relativeToRoot)
+    || relativeToRoot === ".."
+    || relativeToRoot.startsWith(`..${path.sep}`)
   ) {
     throw new Error(`source map contains an unsafe source path: ${source}`);
   }
+  const relativeSource = path.relative(path.dirname(mapPath), resolvedSource);
   return { relativeSource, sourcePath: resolvedSource };
 }
 
@@ -190,6 +191,7 @@ export async function buildTypescript({
   });
   runCompiler(root, resolvedOutput);
   await inlineSourceMapSources(root, resolvedOutput);
+  await copyFile(path.join(root, "package.json"), path.join(resolvedOutput, "package.json"));
   return { root, outputDirectory: resolvedOutput };
 }
 
@@ -210,7 +212,7 @@ async function copyPublicationInputs(root, outputDirectory) {
 }
 
 async function copyEmittedFixtureInputs(root, emittedDirectory) {
-  for (const relativePath of publicationFiles) {
+  for (const relativePath of publicationFiles.filter((file) => file !== "package.json")) {
     const target = path.join(emittedDirectory, relativePath);
     await mkdir(path.dirname(target), { recursive: true });
     await copyFile(path.join(root, relativePath), target);
@@ -234,9 +236,7 @@ export async function buildPublicationArtifact({
   const publicationRoot = await prepareOutputDirectory(root, outputDirectory);
   await copyPublicationInputs(root, publicationRoot);
   const emittedDirectory = path.join(publicationRoot, "dist");
-  await mkdir(emittedDirectory);
-  runCompiler(root, emittedDirectory);
-  await inlineSourceMapSources(root, emittedDirectory);
+  await buildTypescript({ root, outputDirectory: emittedDirectory });
   await copyEmittedFixtureInputs(root, emittedDirectory);
   return { root, outputDirectory: publicationRoot, emittedDirectory };
 }

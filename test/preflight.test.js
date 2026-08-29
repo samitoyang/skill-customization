@@ -415,6 +415,48 @@ test("bound reconciliation rechecks a nested graph before accepting compatibilit
   assert.equal(inspections, 2);
 });
 
+test("bound reconciliation rechecks a nested graph after semantic review", async () => {
+  const item = await recursiveFixture();
+  const descriptor = structuredClone(item.outerDescriptor);
+  descriptor.source.effective_fingerprint =
+    "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+  let inspections = 0;
+
+  await assert.rejects(
+    reconcileBoundCustomizationWithRuntime({
+      descriptor,
+      customizationRoot: item.outer,
+      bindingContext: "workspace:test",
+      statePath: item.statePath,
+      discoveryContext: {
+        roots: item.roots,
+        managerRecords: [],
+        discoveryOptions: { includePlugins: false },
+      },
+      cachePath: null,
+      semanticReconciler: async () => {
+        await writeFile(
+          path.join(item.base, "SKILL.md"),
+          "---\nname: review\n---\nChanged during semantic review.\n",
+        );
+        return { compatible: true, evidence: "reviewed the previous nested graph" };
+      },
+    }, {
+      inspectExecution: async (options) => {
+        inspections += 1;
+        return inspectCustomizationExecution(options);
+      },
+    }),
+    (error) => {
+      assert.ok(error instanceof ReconciliationError);
+      assert.equal(error.code, "CUSTOMIZATION_SOURCE_NOT_READY");
+      assert.equal(error.details.maintenanceHandler.reason, "source-drift");
+      return true;
+    },
+  );
+  assert.equal(inspections, 3);
+});
+
 test("reconciliation uses a nested customization's checked effective fingerprint", async () => {
   const item = await recursiveFixture();
   assert.notEqual(await fingerprintPath(item.inner), item.innerEffective);
