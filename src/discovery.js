@@ -614,6 +614,7 @@ function managerEvidenceFor(candidate, records) {
       ) {
         return false;
       }
+      if (record.name !== candidate.name) return false;
       if (!record.path) return false;
       const recordPath = path.resolve(record.path);
       return (

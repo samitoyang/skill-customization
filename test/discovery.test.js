@@ -592,6 +592,47 @@ test("discovery surfaces provenance conflicts instead of merging silently", asyn
   assert.equal(result.groups[0].provenance.length, 2);
 });
 
+test("manager root evidence follows the record name for each candidate", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "manager-root-evidence-"));
+  const skillsRoot = path.join(root, "skills");
+  const reviewRepository = "https://github.com/example/review";
+  const planningRepository = "https://github.com/example/planning";
+  await writeSkill(skillsRoot, "review");
+  await writeSkill(skillsRoot, "planning");
+  const managerRecords = [
+    {
+      manager: "asm",
+      name: "review",
+      path: skillsRoot,
+      source: { kind: "repository", repository: reviewRepository },
+    },
+    {
+      manager: "asm",
+      name: "planning",
+      path: skillsRoot,
+      source: { kind: "repository", repository: planningRepository },
+    },
+  ];
+
+  const result = await discoverFixtureSkills({
+    roots: [],
+    managerRecords,
+  });
+  const groups = new Map(result.groups.map((group) => [group.name, group]));
+
+  assert.deepEqual(groups.get("review").provenance, [`repository:${reviewRepository}`]);
+  assert.deepEqual(groups.get("planning").provenance, [`repository:${planningRepository}`]);
+  assert.equal(groups.get("review").conflict, false);
+  assert.equal(groups.get("planning").conflict, false);
+
+  const selected = await discoverFixtureSkills({
+    input: reviewRepository,
+    roots: [],
+    managerRecords,
+  });
+  assert.deepEqual(selected.groups.map(({ name }) => name), ["review"]);
+});
+
 
 
 
