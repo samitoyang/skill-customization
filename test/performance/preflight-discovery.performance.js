@@ -6,10 +6,7 @@ import { bindCustomization } from "../../src/bindings.js";
 import { fingerprintPath, fingerprintValues, payloadFingerprint } from "../../src/fingerprint.js";
 import { preflightCustomization } from "../../src/preflight.js";
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
-import {
-  accumulatePerformanceMetrics,
-  captureDiscoveryWork,
-} from "../support/performance-metrics.js";
+import { captureDiscoveryWork } from "../support/performance-metrics.js";
 
 const repository = "https://github.com/example/skills";
 const iterations = 5;
@@ -145,10 +142,9 @@ await runPerformanceScenario({
       statePath,
       roots,
       descriptorPath: path.join(outer, "customization.json"),
-      metrics: {},
     };
   },
-  measure: async (state, { phase }) => {
+  measure: async (state) => {
     const { result, metrics } = await captureDiscoveryWork(() =>
       preflightCustomization({
         descriptorPath: state.descriptorPath,
@@ -164,16 +160,7 @@ await runPerformanceScenario({
     if (metrics.discovery_calls !== 1 || metrics.root_scans !== 1) {
       throw new Error("preflight discovery work changed");
     }
-    if (phase === "measure") {
-      accumulatePerformanceMetrics(state.metrics, metrics);
-    }
+    return metrics;
   },
-  work: (state) => ({
-    discovery_calls: state.metrics.discovery_calls ?? 0,
-    root_scans: state.metrics.root_scans ?? 0,
-    git_probes: state.metrics.git_probes ?? 0,
-    manager_collections: state.metrics.manager_collections ?? 0,
-    plugin_discovery_calls: state.metrics.plugin_discovery_calls ?? 0,
-  }),
   cleanup: ({ root }) => rm(root, { recursive: true, force: true }),
 });

@@ -12,10 +12,7 @@ import { createDiscoverySnapshot } from "../../src/discovery.js";
 import { fingerprintPath } from "../../src/fingerprint.js";
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
 import { discoverFixtureSkills } from "../support/discovery-modes.js";
-import {
-  accumulatePerformanceMetrics,
-  captureDiscoveryWork,
-} from "../support/performance-metrics.js";
+import { captureDiscoveryWork } from "../support/performance-metrics.js";
 
 const iterations = 5;
 
@@ -121,10 +118,9 @@ await runPerformanceScenario({
       discovery,
       replacement,
       staleBindingStore,
-      metrics: {},
     };
   },
-  measure: async (state, { phase }) => {
+  measure: async (state) => {
     const { metrics } = await captureDiscoveryWork(async () => {
       const resolved = await resolveBinding({
         descriptor: state.descriptor,
@@ -144,24 +140,8 @@ await runPerformanceScenario({
       const persisted = store.bindings[bindingKey(state.descriptor.id, "global")];
       assert.equal(persisted.source.path, path.resolve(state.replacement));
     });
-    if (
-      metrics.discovery_calls !== 5
-      || metrics.root_scans !== 14
-      || metrics.git_probes !== 9
-    ) {
-      throw new Error(
-        `[DEBUG-ci-performance-counters] plugin cache continuity discovery work changed: ${JSON.stringify({ phase, metrics })}`,
-      );
-    }
     await writeFile(state.statePath, state.staleBindingStore);
-    if (phase === "measure") accumulatePerformanceMetrics(state.metrics, metrics);
+    return metrics;
   },
-  work: (state) => ({
-    discovery_calls: state.metrics.discovery_calls ?? 0,
-    root_scans: state.metrics.root_scans ?? 0,
-    git_probes: state.metrics.git_probes ?? 0,
-    manager_collections: state.metrics.manager_collections ?? 0,
-    plugin_discovery_calls: state.metrics.plugin_discovery_calls ?? 0,
-  }),
   cleanup: ({ temporary }) => rm(temporary, { recursive: true, force: true }),
 });

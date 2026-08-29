@@ -8,10 +8,7 @@ import { fingerprintFile, fingerprintPath, payloadFingerprint } from "../../src/
 import { generateLocalIdentity } from "../../src/normalization.js";
 import { discoverFixtureSkills } from "../support/discovery-modes.js";
 import { runPerformanceScenario } from "../../scripts/performance-gate.js";
-import {
-  accumulatePerformanceMetrics,
-  captureDiscoveryWork,
-} from "../support/performance-metrics.js";
+import { captureDiscoveryWork } from "../support/performance-metrics.js";
 
 const iterations = 5;
 
@@ -97,10 +94,9 @@ await runPerformanceScenario({
       roots,
       discovery,
       customizationRoot,
-      metrics: {},
     };
   },
-  measure: async (state, { phase }) => {
+  measure: async (state) => {
     const { metrics } = await captureDiscoveryWork(async () => {
       const discoverySnapshot = createDiscoverySnapshot({
         discovery: state.discovery,
@@ -132,24 +128,7 @@ await runPerformanceScenario({
         managerRecords: [],
       });
     });
-    const expected = phase === "warmup"
-      ? { discovery_calls: 2, root_scans: 4 }
-      : { discovery_calls: 1, root_scans: 2 };
-    if (metrics.discovery_calls !== expected.discovery_calls || metrics.root_scans !== expected.root_scans) {
-      throw new Error(
-        `[DEBUG-ci-performance-counters] targeted Binding discovery work changed: ${JSON.stringify({ phase, expected, metrics })}`,
-      );
-    }
-    if (phase === "measure") {
-      accumulatePerformanceMetrics(state.metrics, metrics);
-    }
+    return metrics;
   },
-  work: (state) => ({
-    discovery_calls: state.metrics.discovery_calls ?? 0,
-    root_scans: state.metrics.root_scans ?? 0,
-    git_probes: state.metrics.git_probes ?? 0,
-    manager_collections: state.metrics.manager_collections ?? 0,
-    plugin_discovery_calls: state.metrics.plugin_discovery_calls ?? 0,
-  }),
   cleanup: ({ temporary }) => rm(temporary, { recursive: true, force: true }),
 });

@@ -15,9 +15,3 @@ export async function captureDiscoveryWork(callback) {
     discoveryPerformanceChannel.unsubscribe(listener);
   }
 }
-
-export function accumulatePerformanceMetrics(target, metrics) {
-  for (const [name, value] of Object.entries(metrics)) {
-    target[name] = (target[name] ?? 0) + value;
-  }
-}

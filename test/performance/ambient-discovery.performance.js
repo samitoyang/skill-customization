@@ -12,10 +12,7 @@ import {
   writeAmbientPluginVersion,
 } from "../support/ambient-plugin-fixture.js";
 import { discoverAmbientSkills } from "../support/discovery-modes.js";
-import {
-  accumulatePerformanceMetrics,
-  captureDiscoveryWork,
-} from "../support/performance-metrics.js";
+import { captureDiscoveryWork } from "../support/performance-metrics.js";
 
 const iterations = 5;
 const ambientHostSpecifications = Object.freeze(
@@ -67,11 +64,10 @@ await runPerformanceScenario({
       home,
       cwd,
       env,
-      metrics: {},
       expectedShape: undefined,
     };
   },
-  measure: async (state, { phase }) => {
+  measure: async (state) => {
     const { result, metrics } = await captureDiscoveryWork(() =>
       discoverAmbientSkills({
         input: "review",
@@ -97,9 +93,6 @@ await runPerformanceScenario({
     if (metrics.root_scans !== expectedAmbientRootCount) {
       throw new Error("ambient discovery scanned roots more than expected");
     }
-    if (phase === "measure") {
-      accumulatePerformanceMetrics(state.metrics, metrics);
-    }
     assertBoundedAmbientPluginDiscovery(result, state.root, "1");
     const discoveryShape = ambientDiscoveryShape(result);
     if (state.expectedShape === undefined) {
@@ -108,15 +101,8 @@ await runPerformanceScenario({
     if (JSON.stringify(discoveryShape) !== state.expectedShape) {
       throw new Error("ambient discovery result changed between samples");
     }
+    return metrics;
   },
-  work: (state) => ({
-    discovery_calls: state.metrics.discovery_calls ?? 0,
-    plugin_discovery_calls: state.metrics.plugin_discovery_calls ?? 0,
-    manager_collections: state.metrics.manager_collections ?? 0,
-    git_probes: state.metrics.git_probes ?? 0,
-    plugin_directory_reads: state.metrics.plugin_directory_reads ?? 0,
-    root_scans: state.metrics.root_scans ?? 0,
-    ambient_roots: expectedAmbientRootCount,
-  }),
+  reportWork: () => ({ ambient_roots: expectedAmbientRootCount }),
   cleanup: ({ root }) => rm(root, { recursive: true, force: true }),
 });

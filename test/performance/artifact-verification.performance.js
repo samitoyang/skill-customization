@@ -38,7 +38,7 @@ await runPerformanceScenario({
       outputDirectory,
       testConcurrency: 1,
     });
+    return { artifact_verifications: 1 };
   },
-  work: (state) => ({ artifact_verifications: state.artifactVerifications }),
   cleanup: ({ temporary }) => rm(temporary, { recursive: true, force: true }),
 });

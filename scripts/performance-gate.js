@@ -71,6 +71,12 @@ function normalizeWork(work) {
   return normalized;
 }
 
+function accumulateWork(target, work) {
+  for (const [name, value] of Object.entries(normalizeWork(work))) {
+    target[name] = (target[name] ?? 0) + value;
+  }
+}
+
 function assertBudgetNumber(budget, name) {
   assertFiniteNumber(budget[name], `budget.${name}`);
   if (budget[name] < 0) throw new TypeError(`budget.${name} must not be negative`);
@@ -130,6 +136,8 @@ export function assertPerformanceGate({ report, budget }) {
 /**
  * Run one scenario's setup and operation in a process that the runner has
  * marked as isolated, then emit one structured report after the gate passes.
+ * The operation returns its work counters; this module excludes warmup work
+ * and aggregates measured work so scenarios do not own that lifecycle policy.
  */
 export async function runPerformanceScenario({
   scenario,
@@ -139,7 +147,7 @@ export async function runPerformanceScenario({
   budget,
   setup,
   measure,
-  work,
+  reportWork,
   cleanup,
 }) {
   if (process.env.SKILL_CUSTOMIZATION_PERFORMANCE_MODE !== ISOLATED_MODE) {
@@ -156,8 +164,8 @@ export async function runPerformanceScenario({
   if (typeof setup !== "function" || typeof measure !== "function") {
     throw new TypeError("performance scenario requires setup and measure functions");
   }
-  if (work !== undefined && typeof work !== "function") {
-    throw new TypeError("performance scenario work must be a function");
+  if (reportWork !== undefined && typeof reportWork !== "function") {
+    throw new TypeError("performance scenario reportWork must be a function");
   }
   if (cleanup !== undefined && typeof cleanup !== "function") {
     throw new TypeError("performance scenario cleanup must be a function");
@@ -166,13 +174,25 @@ export async function runPerformanceScenario({
   const state = await setup();
   try {
     for (let iteration = 0; iteration < warmupIterations; iteration += 1) {
-      await measure(state, { phase: "warmup", iteration });
+      await measure(state, { iteration });
     }
     const samples = [];
+    const measuredWork = Object.fromEntries(
+      Object.keys(budget?.exactWork ?? {}).map((name) => [name, 0]),
+    );
     for (let iteration = 0; iteration < iterations; iteration += 1) {
       const started = performance.now();
-      await measure(state, { phase: "measure", iteration });
+      const iterationWork = await measure(state, { iteration });
       samples.push(performance.now() - started);
+      accumulateWork(measuredWork, iterationWork);
+    }
+    const supplementalWork = normalizeWork(
+      reportWork ? await reportWork(state) : undefined,
+    );
+    for (const name of Object.keys(supplementalWork)) {
+      if (measuredWork[name] !== undefined) {
+        throw new Error(`performance reportWork duplicates measured work.${name}`);
+      }
     }
     const durationStats = summarizeDurations(samples);
     const report = {
@@ -186,7 +206,7 @@ export async function runPerformanceScenario({
       duration_ms: durationStats.median,
       duration_stats_ms: durationStats,
       budget: structuredClone(budget ?? {}),
-      work: normalizeWork(work ? await work(state) : undefined),
+      work: { ...measuredWork, ...supplementalWork },
     };
     assertPerformanceGate({ report, budget: budget ?? {} });
     process.stdout.write(`${JSON.stringify(report)}\n`);
