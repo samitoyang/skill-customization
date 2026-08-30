@@ -1,6 +1,6 @@
 {
   "name": "skill-customization",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Portable discovery, binding, provenance, and reconciliation for skill customizations.",
   "keywords": [
     "agent-skills",
