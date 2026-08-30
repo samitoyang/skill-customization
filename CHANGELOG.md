@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+### Minor Changes
+
+- [#56](https://github.com/samitoyang/skill-customization/pull/56) [`446a035`](https://github.com/samitoyang/skill-customization/commit/446a035f38965d0245b3af62fa6ab626c79597f3) Thanks [@samitoyang](https://github.com/samitoyang)! - Export `reconcileBoundCustomization` for context-bound library reconciliation.
+
+- [#56](https://github.com/samitoyang/skill-customization/pull/56) [`5d7353c`](https://github.com/samitoyang/skill-customization/commit/5d7353c3ef998f4105854c0c655d1941ee88b9f3) Thanks [@samitoyang](https://github.com/samitoyang)! - Publish the verified emitted ESM library with TypeScript declarations while retaining the legacy CLI path.
+
 ## 0.3.0
 
 ### Minor Changes
