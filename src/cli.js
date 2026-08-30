@@ -2,30 +2,26 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline/promises";
 
-import {
-  bindCustomization,
-  classifyBindingScope,
-  resolveBinding,
-} from "./bindings.js";
+import { bindingStorePath } from "./bindings.js";
+import { createBindingRuntime } from "./internal/binding-runtime.js";
 import {
   helperContractSupport,
   isValidHelperContract,
 } from "./contracts.js";
 import { readDescriptor } from "./descriptor.js";
 import {
-  activeSkillInventory,
   confirmDiscoverySelection,
   configuredHostSkillRoots,
   discoverSkills,
-  excludeSkillRootFromInventory,
 } from "./discovery.js";
 import { renderDispatcher } from "./dispatcher-renderer.js";
 import { DiscoveryError } from "./errors.js";
 import { fingerprintPath, payloadFingerprint } from "./fingerprint.js";
 import { collectManagerRecords } from "./manager-collector.js";
-import { reconcileCustomization } from "./reconcile.js";
+import { reconcileBoundCustomization } from "./reconciliation-operation.js";
 import { preflightCustomization } from "./preflight.js";
 import { acceptMaintenanceUpdate } from "./maintenance.js";
+import { inspectCustomizationExecution } from "./execution-graph.js";
 
 function usage() {
   return `Usage:
@@ -257,7 +253,9 @@ async function discoveryContext(options = {}) {
       managerRecords: [],
       managerDiagnostics: [],
       hostDiagnostics: [],
+      rootDiagnostics: [],
       settingsEvidence: [],
+      settingsControlPaths: [],
       additionalRoots: [],
       includePlugins: false,
     };
@@ -268,12 +266,14 @@ async function discoveryContext(options = {}) {
   ]);
   return {
     roots: undefined,
-    additionalRoots: configured.roots,
+    additionalRoots: configured.rootObservations,
     includePlugins: parseBooleanOption(options["include-plugins"], "include-plugins") ?? true,
     managerRecords: collected.records,
     managerDiagnostics: collected.diagnostics,
     hostDiagnostics: configured.diagnostics,
+    rootDiagnostics: configured.rootDiagnostics,
     settingsEvidence: configured.settingsEvidence,
+    settingsControlPaths: configured.settingsControlPaths,
   };
 }
 
@@ -285,26 +285,25 @@ function discoveryOptions(context) {
       : {}),
     includePlugins: context.includePlugins,
     managerRecords: context.managerRecords,
+    managerDiagnostics: context.managerDiagnostics,
+    settingsEvidence: context.settingsEvidence,
+    settingsControlPaths: context.settingsControlPaths,
+    ...(context.rootDiagnostics?.length > 0
+      ? { rootDiagnostics: context.rootDiagnostics }
+      : {}),
   };
 }
 
-function discoveryRoots(context) {
-  return context.discoveryRoots ?? context.roots ?? context.additionalRoots;
-}
-
-async function discoverInventory(context) {
-  const discovery = await discoverSkills(discoveryOptions(context));
-  context.discoveryRoots = discovery.searchedRoots;
-  return { discovery, activeSkills: activeSkillInventory(discovery) };
-}
-
-async function discoverBindingInventory(context, descriptorPath, descriptor) {
-  const { activeSkills } = await discoverInventory(context);
-  if (descriptor.activation.mode !== "replace") return activeSkills;
-  return excludeSkillRootFromInventory(
-    activeSkills,
-    path.dirname(path.resolve(descriptorPath)),
-  );
+function createContextBindingOperation(context, statePath) {
+  const resolvedStatePath = statePath ?? bindingStorePath();
+  return createBindingRuntime({
+    context: {
+      ...context,
+      statePath: resolvedStatePath,
+      discoveryOptions: discoveryOptions(context),
+    },
+    inspectExecution: inspectCustomizationExecution,
+  });
 }
 
 async function selectionFromPrompt({
@@ -384,7 +383,6 @@ async function commandDiscover(input, options, io) {
     ...discoveryOptions(context),
     customPath: options["custom-path"],
   });
-  context.discoveryRoots = discovery.searchedRoots;
   discovery.managerDiagnostics = context.managerDiagnostics;
   discovery.hostDiagnostics = context.hostDiagnostics;
   discovery.settingsEvidence = context.settingsEvidence;
@@ -449,61 +447,17 @@ async function commandBind(descriptorPath, options, io) {
   const sourcePath = requireValue(options.source, "--source is required");
   const bindingContext = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const activeSkills = await discoverBindingInventory(
-    context,
-    resolvedDescriptorPath,
-    descriptor,
-  );
-  let confirmedSelection;
-  if (io.stdin.isTTY) {
-    const sourceDiscovery = await discoverSkills({
-      input: sourcePath,
-      ...discoveryOptions(context),
-    });
-    const group = sourceDiscovery.groups[0];
-    if (group?.conflict) {
-      const prompt = readline.createInterface({
-        input: io.stdin,
-        output: io.stderr,
-      });
-      try {
-        confirmedSelection = await selectionFromPrompt({
-          discovery: sourceDiscovery,
-          group,
-          prompt,
-          io,
-          confirmationEvidence: {
-            method: "interactive-cli-binding",
-            customization: descriptor.id,
-            context: bindingContext,
-          },
-        });
-      } finally {
-        prompt.close();
-      }
-    }
-  }
-  let requestedScope = options.scope;
-  if (!requestedScope && io.stdin.isTTY) {
-    try {
-      await classifyBindingScope({
-        sourcePath,
-        roots: discoveryRoots(context),
-      });
-    } catch (error) {
-      if (error.code !== "BINDING_SCOPE_REQUIRED") throw error;
-      requestedScope = await ttyBindingScope(io);
-    }
-  }
+  const statePath = options.state ?? bindingStorePath();
+  const bindingOperation = createContextBindingOperation(context, statePath);
   outputJson(
     io,
-    await bindCustomization({
+    await bindingOperation.bindCustomization({
       descriptor,
       sourcePath,
       context: bindingContext,
-      statePath: options.state,
-      roots: discoveryRoots(context),
-      requestedScope,
+      customizationRoot: path.dirname(resolvedDescriptorPath),
+      requestedScope: options.scope,
+      requestScope: io.stdin.isTTY ? async () => ttyBindingScope(io) : undefined,
       interactive: io.stdin.isTTY,
       confirm: async () => ttyConfirmation(io, `Bind ${descriptor.name} to ${sourcePath}?`),
       confirmReplace: async () =>
@@ -511,9 +465,29 @@ async function commandBind(descriptorPath, options, io) {
           io,
           `Replace ${descriptor.source.skill_name} with customization-first precedence?`,
         ),
-      activeSkills,
-      managerRecords: context.managerRecords,
-      confirmedSelection,
+      selectSource: io.stdin.isTTY
+        ? async ({ discovery: sourceDiscovery, group }) => {
+            const prompt = readline.createInterface({
+              input: io.stdin,
+              output: io.stderr,
+            });
+            try {
+              return await selectionFromPrompt({
+                discovery: sourceDiscovery,
+                group,
+                prompt,
+                io,
+                confirmationEvidence: {
+                  method: "interactive-cli-binding",
+                  customization: descriptor.id,
+                  context: bindingContext,
+                },
+              });
+            } finally {
+              prompt.close();
+            }
+          }
+        : undefined,
     }),
   );
 }
@@ -524,20 +498,14 @@ async function commandResolve(descriptorPath, options, io) {
   );
   const descriptor = await readDescriptor(resolvedDescriptorPath);
   const context = await discoveryContext(options);
-  const activeSkills = await discoverBindingInventory(
-    context,
-    resolvedDescriptorPath,
-    descriptor,
-  );
+  const statePath = options.state ?? bindingStorePath();
+  const bindingOperation = createContextBindingOperation(context, statePath);
   outputJson(
     io,
-    await resolveBinding({
+    await bindingOperation.resolveBinding({
       descriptor,
       context: requireValue(options.context, "--context is required"),
-      statePath: options.state,
-      roots: discoveryRoots(context),
-      managerRecords: context.managerRecords,
-      activeSkills,
+      customizationRoot: path.dirname(resolvedDescriptorPath),
     }),
   );
 }
@@ -547,51 +515,24 @@ async function commandReconcile(descriptorPath, options, io) {
     requireValue(descriptorPath, "descriptor path is required"),
   );
   const descriptor = await readDescriptor(resolvedDescriptorPath);
+  const statePath = options.state ?? bindingStorePath();
   if (options.source) {
     throw new TypeError(
       "--source cannot bypass binding; bind the source and reconcile with --context",
     );
   }
-  let sourcePath;
-  let sourceEffectiveFingerprint;
-  let sourceExecutionPlan;
+  let bindingContext;
+  let reconciliationDiscoveryContext;
   if (descriptor.type === "semantic-overlay") {
     const context = await discoveryContext(options);
-    const activeSkills = await discoverBindingInventory(
-      context,
-      resolvedDescriptorPath,
-      descriptor,
-    );
-    const bindingContext = requireValue(
+    bindingContext = requireValue(
       options.context,
       "--context is required for semantic overlay reconciliation",
     );
-    const binding = await resolveBinding({
-      descriptor,
-      context: bindingContext,
-      statePath: options.state,
-      roots: discoveryRoots(context),
-      managerRecords: context.managerRecords,
-      activeSkills,
-    });
-    sourcePath = binding.source.alias ?? binding.source.path;
-    if (descriptor.source.kind === "customization") {
-      const nested = await preflightCustomization({
-        descriptorPath: path.join(binding.source.target, "customization.json"),
-        context: bindingContext,
-        statePath: options.state,
-        roots: discoveryRoots(context),
-        managerRecords: context.managerRecords,
-        activeSkills,
-      });
-      if (nested.status === "maintenance-required") {
-        throw new TypeError(
-          `nested customization is not ready: ${nested.maintenanceHandler?.reason ?? "unknown"}`,
-        );
-      }
-      sourceEffectiveFingerprint = nested.effectiveFingerprint;
-      sourceExecutionPlan = nested.steps;
-    }
+    reconciliationDiscoveryContext = {
+      ...context,
+      discoveryOptions: discoveryOptions(context),
+    };
   }
   const decision = options.decision;
   if (decision && !["compatible", "absorbed", "incompatible", "ambiguous"].includes(decision)) {
@@ -615,17 +556,26 @@ async function commandReconcile(descriptorPath, options, io) {
         evidence: options.evidence,
       })
     : undefined;
-  const result = await reconcileCustomization({
+  const result = await reconcileBoundCustomization({
     descriptor,
     customizationRoot: path.dirname(resolvedDescriptorPath),
-    sourcePath,
-    sourceEffectiveFingerprint,
-    sourceExecutionPlan,
+    bindingContext,
+    statePath,
+    discoveryContext: reconciliationDiscoveryContext,
     cachePath: options.cache,
     semanticReconciler,
   });
   outputJson(io, result);
   return result.stopped ? 2 : 0;
+}
+
+function cliErrorForRendering(error) {
+  // Contract-1 rendered this checked-workflow outcome as a plain argument
+  // error. Preserve that output at the rendering seam without making the
+  // command adapter erase the structured library error.
+  return error?.code === "CUSTOMIZATION_SOURCE_NOT_READY"
+    ? new TypeError(error.message, { cause: error })
+    : error;
 }
 
 async function commandPreflight(descriptorPath, options, io) {
@@ -634,14 +584,15 @@ async function commandPreflight(descriptorPath, options, io) {
   );
   const contextValue = requireValue(options.context, "--context is required");
   const context = await discoveryContext(options);
-  const { activeSkills } = await discoverInventory(context);
+  const statePath = options.state ?? bindingStorePath();
   const result = await preflightCustomization({
     descriptorPath: resolvedDescriptorPath,
     context: contextValue,
-    statePath: options.state,
-    roots: discoveryRoots(context),
+    statePath,
+    roots: context.roots,
     managerRecords: context.managerRecords,
-    activeSkills,
+    managerDiagnostics: context.managerDiagnostics,
+    discoveryOptions: discoveryOptions(context),
   });
   outputJson(io, result);
   return result.status === "maintenance-required" ? 2 : 0;
@@ -710,7 +661,8 @@ export async function main(argv = process.argv.slice(2), io = process) {
       await commandAcceptMaintenance(positionals[0], options, io);
     }
     return 0;
-  } catch (error) {
+  } catch (caughtError) {
+    const error = cliErrorForRendering(caughtError);
     const action = typeof error.details?.action === "string"
       ? `\nNext action: ${error.details.action}.`
       : "";

@@ -94,6 +94,14 @@ test("directory fingerprints follow a root alias but reject internal symlinks", 
   await symlink(root, alias, "dir");
 
   assert.equal(await fingerprintPath(alias), await fingerprintPath(root));
+  await mkdir(path.join(root, ".state"));
+  await writeFile(path.join(root, ".state", "bindings.json"), "state\n");
+  const excludedReal = await fingerprintPath(root, {
+    excludedPaths: [path.join(root, ".state", "bindings.json")],
+  });
+  assert.equal(await fingerprintPath(alias, {
+    excludedPaths: [path.join(alias, ".state", "bindings.json")],
+  }), excludedReal);
 
   await symlink(
     path.join(external, "shared.md"),

@@ -17,7 +17,6 @@ import {
   readBindingStore,
   resolveBinding,
 } from "../src/bindings.js";
-import { discoverSkills } from "../src/discovery.js";
 import { readDescriptor, validateDescriptor } from "../src/descriptor.js";
 import {
   fingerprintFile,
@@ -25,6 +24,7 @@ import {
   payloadFingerprint,
 } from "../src/fingerprint.js";
 import { reconcileCustomization } from "../src/reconcile.js";
+import { discoverFixtureSkills } from "./support/discovery-modes.js";
 
 const fixtureRoot = fileURLToPath(
   new URL("./fixtures/contract-v1/", import.meta.url),
@@ -33,7 +33,9 @@ const customizationRoot = path.join(fixtureRoot, "review-local-archive");
 const descriptorPath = path.join(customizationRoot, "customization.json");
 const checkpointRoot = path.join(fixtureRoot, "source-checkpoint", "review");
 const liveRoot = path.join(fixtureRoot, "source-live", "review");
-const bin = fileURLToPath(new URL("../bin/skill-customization.js", import.meta.url));
+const testRoot = fileURLToPath(new URL("../", import.meta.url));
+const packageRoot = path.basename(testRoot) === "dist" ? path.dirname(testRoot) : testRoot;
+const bin = path.join(packageRoot, "bin", "skill-customization.js");
 
 const readJson = async (target) => JSON.parse(await readFile(target, "utf8"));
 
@@ -246,7 +248,11 @@ test("helper contract 1: discovery and first-use binding semantics remain stable
     scope: "workspace",
     origin: "project",
   }];
-  const discovery = await discoverSkills({ input: "review", roots });
+  const discovery = await discoverFixtureSkills({
+    input: "review",
+    roots,
+    managerRecords: [],
+  });
   assert.equal(discovery.groups.length, 1);
   assert.equal(discovery.groups[0].name, "review");
   assert.equal(discovery.groups[0].copies[0].path, sourceRoot);

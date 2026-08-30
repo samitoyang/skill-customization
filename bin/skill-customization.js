@@ -1,4 +1,4 @@
 #!/usr/bin/env node
-import { main } from "../src/cli.js";
+import { main } from "../dist/src/cli.js";
 
 process.exitCode = await main();

@@ -49,18 +49,16 @@ test("replacement overlays exclude themselves from active inventory", async () =
   };
   const descriptorPath = path.join(overlayRoot, "customization.json");
   await writeFile(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
-  const activeSource = { name: "review", path: sourceRoot };
-
   await bindCustomization({
     descriptor,
     sourcePath: sourceRoot,
     context: "workspace:test",
     statePath,
     roots,
+    customizationRoot: overlayRoot,
     interactive: true,
     confirm: async () => true,
     confirmReplace: async () => true,
-    activeSkills: [activeSource],
   });
 
   const result = await preflightCustomization({
@@ -68,10 +66,6 @@ test("replacement overlays exclude themselves from active inventory", async () =
     context: "workspace:test",
     statePath,
     roots,
-    activeSkills: [
-      activeSource,
-      { name: "review", path: overlayRoot },
-    ],
   });
 
   assert.equal(result.status, "ready");
@@ -83,16 +77,14 @@ test("replacement overlays exclude themselves from active inventory", async () =
     ],
   );
 
+  const otherRoot = path.join(root, "review-other");
+  await mkdir(otherRoot, { recursive: true });
+  await writeFile(path.join(otherRoot, "SKILL.md"), "---\nname: review\n---\nOther.\n");
   const ambiguous = await preflightCustomization({
     descriptorPath,
     context: "workspace:test",
     statePath,
     roots,
-    activeSkills: [
-      activeSource,
-      { name: "review", path: overlayRoot },
-      { name: "review", path: path.join(root, "other-review") },
-    ],
   });
 
   assert.equal(ambiguous.status, "maintenance-required");

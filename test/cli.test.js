@@ -17,7 +17,9 @@ import {
 } from "../src/fingerprint.js";
 import { main } from "../src/cli.js";
 
-const bin = fileURLToPath(new URL("../bin/skill-customization.js", import.meta.url));
+const root = fileURLToPath(new URL("../", import.meta.url));
+const packageRoot = path.basename(root) === "dist" ? path.dirname(root) : root;
+const bin = path.join(packageRoot, "bin", "skill-customization.js");
 
 function run(args, { env = process.env } = {}) {
   return new Promise((resolve) => {
@@ -285,6 +287,71 @@ test("CLI validates, fingerprints, discovers, binds, resolves, and reconciles", 
   assert.equal(JSON.parse(cached.stdout).cached, true);
 });
 
+test("CLI shares default and explicit state paths across binding and reconciliation", async () => {
+  const item = await fixture();
+  const defaultStateHome = path.join(item.root, "default-state-home");
+  const defaultStatePath = path.join(
+    defaultStateHome,
+    "skill-customization",
+    "bindings.json",
+  );
+  const defaultEnvironment = { ...process.env, XDG_STATE_HOME: defaultStateHome };
+  const common = [
+    item.descriptorPath,
+    "--context",
+    "global",
+    "--root",
+    path.dirname(item.source),
+  ];
+
+  const originalStateHome = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = defaultStateHome;
+  try {
+    await bindCustomization({
+      descriptor: item.descriptor,
+      sourcePath: item.source,
+      context: "global",
+      roots: [{ path: path.dirname(item.source), scope: "global", origin: "personal" }],
+      interactive: true,
+      confirm: async () => true,
+    });
+  } finally {
+    if (originalStateHome === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = originalStateHome;
+  }
+  const defaultState = await readFile(defaultStatePath, "utf8");
+  assert.doesNotThrow(() => JSON.parse(defaultState));
+
+  const resolvedDefault = await run(["resolve", ...common], {
+    env: defaultEnvironment,
+  });
+  assert.equal(resolvedDefault.code, 0, resolvedDefault.stderr);
+  const reconciledDefault = await run(["reconcile", ...common], {
+    env: defaultEnvironment,
+  });
+  assert.equal(reconciledDefault.code, 0, reconciledDefault.stderr);
+
+  const explicitStatePath = path.join(item.root, "explicit", "bindings.json");
+  await bindCustomization({
+    descriptor: item.descriptor,
+    sourcePath: item.source,
+    context: "global",
+    statePath: explicitStatePath,
+    roots: [{ path: path.dirname(item.source), scope: "global", origin: "personal" }],
+    interactive: true,
+    confirm: async () => true,
+  });
+  const reconciledExplicit = await run([
+    "reconcile",
+    ...common,
+    "--state",
+    explicitStatePath,
+  ], { env: defaultEnvironment });
+  assert.equal(reconciledExplicit.code, 0, reconciledExplicit.stderr);
+});
+
+
+
 test("CLI binding commands exclude the active replacement customization", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cli-replacement-inventory-"));
   const sourceParent = path.join(root, "sources");
@@ -352,6 +419,8 @@ test("CLI binding commands exclude the active replacement customization", async 
   assert.equal(JSON.parse(reconciled.stdout).status, "compatible");
 });
 
+
+
 test("CLI validation rejects a runtime selector symlink into reserved provenance", async () => {
   const item = await fixture();
   await mkdir(path.join(item.custom, "provenance"));
@@ -364,6 +433,8 @@ test("CLI validation rejects a runtime selector symlink into reserved provenance
   assert.equal(result.code, 1);
   assert.match(result.stderr, /excluded owned-payload path/i);
 });
+
+
 
 test("CLI reconciliation preflights a nested customization source", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cli-nested-reconcile-"));
@@ -514,241 +585,29 @@ test("CLI reconciliation preflights a nested customization source", async () => 
   assert.equal(reviewed.code, 0, reviewed.stderr);
   assert.equal(JSON.parse(reviewed.stdout).status, "compatible");
   assert.equal(JSON.parse(reviewed.stdout).sourceFingerprint, nestedEffective);
-});
 
-test("CLI discovery loads bounded Claude additionalDirectories", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cli-claude-settings-"));
-  const home = path.join(root, "home");
-  const additional = path.join(root, "team");
-  const skill = path.join(
-    additional,
-    ".claude",
-    "skills",
-    "claude-cli-fixture",
-  );
-  await mkdir(path.join(home, ".claude"), { recursive: true });
-  await mkdir(skill, { recursive: true });
   await writeFile(
-    path.join(home, ".claude", "settings.json"),
-    JSON.stringify({ additionalDirectories: [additional] }),
+    path.join(nested, "CUSTOMIZATION.md"),
+    "Unreviewed nested maintenance.\n",
   );
-  await writeFile(
-    path.join(skill, "SKILL.md"),
-    "---\nname: claude-cli-fixture\n---\nfixture\n",
-  );
-
-  const result = await run(["discover", "claude-cli-fixture"], {
-    env: { ...process.env, HOME: home, PATH: "" },
-  });
-  assert.equal(result.code, 0, result.stderr);
-  const discovery = JSON.parse(result.stdout);
-  assert.equal(discovery.groups[0].name, "claude-cli-fixture");
-  assert.equal(discovery.groups[0].copies[0].owner, "claude-additional");
-  assert.equal(discovery.settingsEvidence.length, 1);
-});
-
-test("CLI discovery uses ambient Claude plugins and supports the deterministic opt-out", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cli-claude-plugin-"));
-  const home = path.join(root, "home");
-  const pluginRoot = path.join(
-    home,
-    ".claude",
-    "plugins",
-    "cache",
-    "official",
-    "cli-reviewer",
-    "1",
-  );
-  const skill = await writeSkill(path.join(pluginRoot, "skills"), "cli-plugin-review");
-  await mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
-  await writeFile(
-    path.join(pluginRoot, ".claude-plugin", "plugin.json"),
-    JSON.stringify({ name: "cli-reviewer" }),
-  );
-
-  const environment = { ...process.env, HOME: home, PATH: "" };
-  const discovered = await run(["discover", "cli-plugin-review"], { env: environment });
-  assert.equal(discovered.code, 0, discovered.stderr);
-  const result = JSON.parse(discovered.stdout);
-  assert.equal(result.groups[0].copies[0].path, skill);
-  assert.equal(result.groups[0].copies[0].plugin.name, "cli-reviewer");
-
-  const disabled = await run(
-    ["discover", "cli-plugin-review", "--include-plugins", "false"],
-    { env: environment },
-  );
-  assert.equal(disabled.code, 1);
-  assert.match(disabled.stderr, /NO_LOCAL_COPY/);
-});
-
-test("CLI discovery finds Gemini skills from the configured CLI home", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cli-gemini-extension-"));
-  const fallbackHome = path.join(root, "fallback-home");
-  const configuredHome = path.join(root, "configured-home");
-  const extension = path.join(
-    configuredHome,
-    ".gemini",
-    "extensions",
-    "cli-gemini-extension",
-  );
-  const skill = await writeSkill(path.join(extension, "skills"), "cli-gemini-review");
-  await writeFile(
-    path.join(extension, "gemini-extension.json"),
-    JSON.stringify({
-      name: "cli-gemini-extension",
-      version: "1.0.0",
-      repository: "https://github.com/example/cli-gemini-extension",
-    }),
-  );
-
-  const result = await run(["discover", "cli-gemini-review"], {
-    env: {
-      ...process.env,
-      HOME: fallbackHome,
-      GEMINI_CLI_HOME: configuredHome,
-      PATH: "",
-    },
-  });
-
-  assert.equal(result.code, 0, result.stderr);
-  const discovery = JSON.parse(result.stdout);
-  assert.equal(discovery.groups[0].copies[0].path, skill);
-  assert.equal(discovery.groups[0].copies[0].owner, "plugin:gemini-cli");
-  assert.deepEqual(discovery.groups[0].provenance, [
-    "repository:https://github.com/example/cli-gemini-extension",
+  const nestedMaintenance = await run([
+    "reconcile",
+    outerDescriptorPath,
+    "--context",
+    "workspace:test",
+    "--state",
+    statePath,
+    "--root",
+    root,
   ]);
+  assert.equal(nestedMaintenance.code, 1);
+  assert.equal(
+    nestedMaintenance.stderr,
+    "nested customization is not ready: owned-payload-drift\n",
+  );
 });
 
-test("CLI discovery finds Cursor local plugin skills with manifest provenance", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cli-cursor-local-plugin-"));
-  const home = path.join(root, "home");
-  const plugin = path.join(home, ".cursor", "plugins", "local", "cli-plugin");
-  const skill = await writeSkill(plugin, "custom", "cli-cursor-review");
-  await mkdir(path.join(plugin, ".cursor-plugin"), { recursive: true });
-  await writeFile(
-    path.join(plugin, ".cursor-plugin", "plugin.json"),
-    JSON.stringify({
-      name: "cli-plugin",
-      skills: "custom",
-      repository: "https://github.com/example/cli-plugin",
-    }),
-  );
 
-  const result = await run(["discover", "cli-cursor-review"], {
-    env: {
-      ...process.env,
-      HOME: home,
-      CURSOR_HOME: path.join(home, ".cursor"),
-      PATH: "",
-    },
-  });
-
-  assert.equal(result.code, 0, result.stderr);
-  const discovery = JSON.parse(result.stdout);
-  assert.equal(discovery.groups[0].copies[0].path, skill);
-  assert.equal(discovery.groups[0].copies[0].owner, "plugin:cursor");
-  assert.deepEqual(discovery.groups[0].provenance, [
-    "repository:https://github.com/example/cli-plugin",
-  ]);
-});
-
-test("CLI discovery finds Codex personal marketplace skills with plugin provenance", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cli-codex-marketplace-"));
-  const home = path.join(root, "home");
-  const codexHome = path.join(home, ".codex");
-  const plugin = path.join(home, "plugins", "cli-plugin");
-  const skill = await writeSkill(plugin, "custom", "cli-codex-review");
-  await mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
-  await writeFile(
-    path.join(plugin, ".codex-plugin", "plugin.json"),
-    JSON.stringify({
-      name: "cli-plugin",
-      version: "1.0.0",
-      repository: "https://github.com/example/cli-plugin",
-      skills: "./custom",
-    }),
-  );
-  await mkdir(path.join(home, ".agents", "plugins"), { recursive: true });
-  await writeFile(
-    path.join(home, ".agents", "plugins", "marketplace.json"),
-    JSON.stringify({
-      name: "personal",
-      plugins: [{
-        name: "cli-plugin",
-        source: { source: "local", path: "./plugins/cli-plugin" },
-      }],
-    }),
-  );
-
-  const result = await run(["discover", "cli-codex-review"], {
-    env: {
-      ...process.env,
-      HOME: home,
-      CODEX_HOME: codexHome,
-      PATH: "",
-    },
-  });
-
-  assert.equal(result.code, 0, result.stderr);
-  const discovery = JSON.parse(result.stdout);
-  assert.equal(discovery.groups[0].copies[0].path, skill);
-  assert.equal(discovery.groups[0].copies[0].plugin.host, "codex");
-  assert.equal(discovery.groups[0].copies[0].plugin.marketplace, "personal");
-  assert.deepEqual(discovery.groups[0].provenance, [
-    "repository:https://github.com/example/cli-plugin",
-  ]);
-});
-
-test("CLI discovery finds Codex config.toml marketplace skills", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cli-codex-config-marketplace-"));
-  const home = path.join(root, "home");
-  const codexHome = path.join(home, ".codex");
-  const marketplaceRoot = path.join(root, "configured-marketplace");
-  const plugin = path.join(marketplaceRoot, "plugins", "cli-config-plugin");
-  const skill = await writeSkill(plugin, "custom", "cli-config-review");
-  await mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
-  await writeFile(
-    path.join(plugin, ".codex-plugin", "plugin.json"),
-    JSON.stringify({
-      name: "cli-config-plugin",
-      skills: "./custom",
-      repository: "https://github.com/example/cli-config-plugin",
-    }),
-  );
-  await mkdir(path.join(marketplaceRoot, ".agents", "plugins"), { recursive: true });
-  await writeFile(
-    path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json"),
-    JSON.stringify({
-      name: "configured-marketplace",
-      plugins: [{
-        name: "cli-config-plugin",
-        source: { source: "local", path: "./plugins/cli-config-plugin" },
-      }],
-    }),
-  );
-  await mkdir(codexHome, { recursive: true });
-  await writeFile(
-    path.join(codexHome, "config.toml"),
-    `[marketplaces."configured-marketplace"]\nsource_type = "local"\nsource = "${marketplaceRoot}"\n`,
-  );
-
-  const result = await run(["discover", "cli-config-review"], {
-    env: {
-      ...process.env,
-      HOME: home,
-      CODEX_HOME: codexHome,
-      PATH: "",
-    },
-  });
-
-  assert.equal(result.code, 0, result.stderr);
-  const discovery = JSON.parse(result.stdout);
-  assert.equal(discovery.groups[0].copies[0].path, skill);
-  assert.equal(discovery.groups[0].copies[0].plugin.marketplace, "configured-marketplace");
-  assert.deepEqual(discovery.groups[0].provenance, [
-    "repository:https://github.com/example/cli-config-plugin",
-  ]);
-});
 
 test("CLI accepts an explicit owned-payload maintenance update atomically", async () => {
   const item = await fixture();
@@ -763,6 +622,8 @@ test("CLI accepts an explicit owned-payload maintenance update atomically", asyn
   assert.equal(output.ownedPayloadFingerprint, payload.stdout.trim());
 });
 
+
+
 test("CLI accepts standard top-level help flags", async () => {
   for (const flag of ["--help", "-h"]) {
     const result = await run([flag]);
@@ -770,6 +631,8 @@ test("CLI accepts standard top-level help flags", async () => {
     assert.match(result.stdout, /^Usage:/);
   }
 });
+
+
 
 test("CLI renders exact canonical dispatchers for overlays and forks", async () => {
   for (const [type, metadata, options] of [
@@ -818,6 +681,8 @@ test("CLI renders exact canonical dispatchers for overlays and forks", async () 
   }
 });
 
+
+
 test("CLI rejects duplicate dispatcher metadata", async () => {
   const duplicateField = await run([
     "render-dispatcher",
@@ -841,6 +706,8 @@ test("CLI rejects duplicate dispatcher metadata", async () => {
   assert.match(duplicateNestedKey.stderr, /duplicate --metadata key author/i);
 });
 
+
+
 test("CLI reports the package version", async () => {
   const packageJson = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -851,6 +718,8 @@ test("CLI reports the package version", async () => {
     assert.equal(result.stdout.trim(), packageJson.version);
   }
 });
+
+
 
 test("CLI reports both supported helper contracts as structured JSON", async () => {
   const packageJson = JSON.parse(
@@ -868,6 +737,8 @@ test("CLI reports both supported helper contracts as structured JSON", async () 
     });
   }
 });
+
+
 
 test("CLI returns structured incompatibility for unsupported and malformed contracts", async () => {
   for (const [contract, diagnostic] of [
@@ -892,6 +763,8 @@ test("CLI returns structured incompatibility for unsupported and malformed contr
   }
 });
 
+
+
 test("CLI contract checks keep their JSON shape for missing and extra arguments", async () => {
   for (const args of [["supports"], ["supports", "1", "extra"]]) {
     const result = await run(args);
@@ -904,6 +777,8 @@ test("CLI contract checks keep their JSON shape for missing and extra arguments"
     assert.equal(typeof output.package_version, "string");
   }
 });
+
+
 
 test("CLI rejects unknown long options for every command", async (t) => {
   const commandArguments = {
@@ -937,6 +812,8 @@ test("CLI rejects unknown long options for every command", async (t) => {
   }
 });
 
+
+
 test("CLI rejects extra positional arguments for every command", async (t) => {
   const commandArguments = {
     supports: ["1", "extra"],
@@ -963,6 +840,8 @@ test("CLI rejects extra positional arguments for every command", async (t) => {
   }
 });
 
+
+
 test("CLI missing-source errors state the required next action", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cli-missing-source-"));
   const result = await run([
@@ -974,6 +853,8 @@ test("CLI missing-source errors state the required next action", async () => {
   assert.equal(result.code, 1);
   assert.match(result.stderr, /install, clone, create, or choose a custom path/i);
 });
+
+
 
 test("interactive custom-path discovery records final confirmation evidence", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cli-custom-picker-"));

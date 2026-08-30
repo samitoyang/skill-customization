@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { lstat, mkdir } from "node:fs/promises";
 
+import { DESCRIPTOR_INVARIANTS } from "./descriptor-invariants.js";
 import {
   assertValidDescriptor,
   readDescriptor,
@@ -18,7 +19,7 @@ import {
   writeJsonAtomic,
 } from "./state.js";
 
-const FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
+const FINGERPRINT = new RegExp(DESCRIPTOR_INVARIANTS.patterns.fingerprint.source);
 
 async function publishForkDiff(root, descriptor, contents) {
   const currentDiffPath = await resolveOwnedPath(root, descriptor.fork.diff, {

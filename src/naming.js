@@ -1,8 +1,11 @@
-const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+import { DESCRIPTOR_INVARIANTS } from "./descriptor-invariants.js";
+
+const KEBAB = new RegExp(DESCRIPTOR_INVARIANTS.patterns.skillName.source);
+const MAX_NAME_LENGTH = DESCRIPTOR_INVARIANTS.patterns.skillName.maxLength;
 const AVOIDED_SUFFIXES = ["-overlay", "-fork", "-custom"];
 
 export function validateSkillName(name) {
-  return typeof name === "string" && KEBAB.test(name) && name.length <= 63
+  return typeof name === "string" && KEBAB.test(name) && name.length <= MAX_NAME_LENGTH
     ? []
     : ["name must be lowercase kebab-case and shorter than 64 characters"];
 }
@@ -14,7 +17,7 @@ export function normalizeSkillName(value) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .replace(/-+/g, "-")
-    .slice(0, 63)
+    .slice(0, MAX_NAME_LENGTH)
     .replace(/-+$/g, "");
 }
 

@@ -1,4 +1,12 @@
-export * from "./bindings.js";
+export {
+  bindingKey,
+  bindingStorePath,
+  bindCustomization,
+  classifyBindingScope,
+  readBindingStore,
+  resolveBinding,
+  validateBinding,
+} from "./bindings.js";
 export * from "./contracts.js";
 export * from "./descriptor.js";
 export * from "./discovery.js";
@@ -12,7 +20,9 @@ export * from "./naming.js";
 export * from "./normalization.js";
 export * from "./paths.js";
 export * from "./preflight.js";
+export * from "./provenance.js";
 export * from "./reconcile.js";
+export * from "./reconciliation-operation.js";
 export * from "./state.js";
 export * from "./skill-metadata.js";
 export * from "./skill-root-registry.js";

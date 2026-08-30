@@ -2,6 +2,7 @@ import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { DESCRIPTOR_INVARIANTS } from "./descriptor-invariants.js";
 import { assertValidDescriptor } from "./descriptor.js";
 import { ReconciliationError } from "./errors.js";
 import {
@@ -15,10 +16,11 @@ import {
   isSourceFingerprintExcludedPath,
   isVersionControlMetadataPath,
 } from "./owned-payload.js";
-import { resolveOwnedPath } from "./paths.js";
+import { resolveOwnedPath, statePathExclusions } from "./paths.js";
 import { readJsonState, updateJsonAtomic } from "./state.js";
 
 const EMPTY_CACHE = { version: 1, compatibility: {} };
+const FINGERPRINT = new RegExp(DESCRIPTOR_INVARIANTS.patterns.fingerprint.source);
 
 export function compatibilityCachePath({ env = process.env, home = os.homedir() } = {}) {
   return env.XDG_STATE_HOME
@@ -579,8 +581,10 @@ async function reconcileOverlay({
   sourcePath,
   sourceEffectiveFingerprint,
   sourceExecutionPlan,
+  statePath,
   cachePath = compatibilityCachePath(),
   semanticReconciler,
+  verifySource,
 }) {
   const { entrypoint, root: sourceRoot } = await sourceLocation(sourcePath);
   const customizationEntrypoint = await resolveOwnedPath(
@@ -603,7 +607,7 @@ async function reconcileOverlay({
   });
   if (
     descriptor.source.kind === "customization"
-    && !/^sha256:[0-9a-f]{64}$/.test(sourceEffectiveFingerprint ?? "")
+    && !FINGERPRINT.test(sourceEffectiveFingerprint ?? "")
   ) {
     throw new ReconciliationError(
       "customization sources require their checked effective fingerprint",
@@ -612,7 +616,9 @@ async function reconcileOverlay({
   }
   const sourceFingerprint = descriptor.source.kind === "customization"
     ? sourceEffectiveFingerprint
-    : await fingerprintPath(sourceRoot);
+    : await fingerprintPath(sourceRoot, {
+        excludedPaths: statePathExclusions(statePath),
+      });
   const sourceIdentityFingerprint = descriptor.source.kind === "local"
     ? await fingerprintFile(entrypoint)
     : undefined;
@@ -637,6 +643,7 @@ async function reconcileOverlay({
       flags: { ambiguousDrift: false, absorbedDeltas: [] },
     };
   }
+  if (typeof verifySource === "function") await verifySource();
   if (base.checkpointMatch) return { ...base, status: "compatible" };
 
   const cached = await readCompatibility(
@@ -665,6 +672,7 @@ async function reconcileOverlay({
     customizationEntrypoint,
     customizationInstructions,
   });
+  if (typeof verifySource === "function") await verifySource();
   const result = reconcileOutcome(base, outcome);
   if (result.status === "compatible") {
     await cacheCompatibility(

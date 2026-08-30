@@ -1,13 +1,19 @@
-import { lstat, realpath } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import path from "node:path";
 
-import { readDescriptor } from "./descriptor.js";
-import { excludeSkillRootFromInventory } from "./discovery.js";
+import {
+  matchesCustomizationSource,
+  readCheckedDescriptor,
+} from "./descriptor.js";
 import {
   fingerprintPath,
   fingerprintValues,
   payloadFingerprint,
 } from "./fingerprint.js";
+import { createBindingExecutionAdapter } from "./internal/binding-execution-adapter.js";
+import { validatedBindingTarget } from "./internal/binding-target.js";
+import { attachPublicationToken, publicationTokenFor } from "./internal/publication-token.js";
+import { statePathExclusions } from "./paths.js";
 import { reconcileCustomization } from "./reconcile.js";
 
 export const MAX_CUSTOMIZATION_DEPTH = 32;
@@ -49,19 +55,45 @@ function effectiveFingerprint(descriptor, ownedFingerprint, sourceFingerprint) {
   );
 }
 
+function publicationPaths(...values) {
+  return [...new Set(values.flat().filter((value) => typeof value === "string"))]
+    .sort((left, right) => left.localeCompare(right, "en"));
+}
+
+// Publication evidence is an internal hand-off between Preflight and Binding
+// recovery.  Keep it off the result interface: callers receive an execution
+// plan, not the implementation details of the CAS that made it safe.
+function withPublicationToken(result, token) {
+  return attachPublicationToken(result, token);
+}
+
+function bindingPublicationPaths(binding) {
+  return binding.evidenceRevision?.filesystem?.entries
+    ?.map(({ path: evidencePath }) => evidencePath)
+    ?? [];
+}
+
+function bindingPublicationStateTreePaths(binding) {
+  return binding.evidenceRevision?.filesystem?.stateTreePaths ?? [];
+}
+
 async function sourceRoot(binding) {
-  const lookup = binding.source.alias ?? binding.source.path;
-  const target = await realpath(lookup);
+  const target = validatedBindingTarget(binding);
+  if (typeof target !== "string") {
+    throw new TypeError("Binding did not provide a validated canonical target");
+  }
   const info = await lstat(target);
   return info.isDirectory() ? target : path.dirname(target);
 }
 
-function matchesCustomizationSource(source, descriptor) {
-  return source.kind === "customization"
-    && source.id === descriptor.id
-    && source.type === descriptor.type
-    && source.skill_name === descriptor.name
-    && source.license === descriptor.license;
+async function checkedCustomizationSource(source, root) {
+  const descriptorPath = path.join(root, "customization.json");
+  const checked = await readCheckedDescriptor(descriptorPath);
+  return {
+    descriptorPath,
+    checked,
+    matches: matchesCustomizationSource(source, checked.descriptor),
+  };
 }
 
 async function forkTrackingAdvisory(descriptor, {
@@ -70,77 +102,64 @@ async function forkTrackingAdvisory(descriptor, {
   statePath,
   roots,
   managerRecords,
-  activeSkills,
+  discoverySnapshot,
   depth,
   activeIds,
   activePaths,
   bindings,
 }) {
-  let store;
-  try {
-    store = await bindings.readBindingStore(statePath);
-  } catch (error) {
+  const tracking = await bindings.resolveTrackingBinding({
+    descriptor,
+    context,
+    customizationRoot,
+  });
+  if (tracking.outcome === "untracked") return undefined;
+  if (tracking.outcome === "state-invalid") {
     return {
       code: "tracking-state-invalid",
       message: "The optional fork tracking state is unreadable or invalid; fork execution is unaffected.",
-      detail: error.message,
+      detail: tracking.detail,
     };
   }
-  const binding = store.bindings[bindings.bindingKey(descriptor.id, context)];
-  if (!binding) return undefined;
-  const lookup = binding.source?.alias ?? binding.source?.path;
-  if (!lookup) {
+  if (tracking.outcome === "source-drift") {
+    return {
+      code: "tracking-source-drift",
+      message: "The optional tracked source differs from its reviewed or confirmed fingerprint; adoption or rebase remains explicit.",
+      expectedFingerprint: descriptor.source.effective_fingerprint,
+      actualFingerprint: tracking.actualFingerprint,
+    };
+  }
+  if (tracking.outcome === "binding-invalid") {
     return {
       code: "tracking-binding-invalid",
-      message: "The optional fork tracking binding is incomplete; fork execution is unaffected.",
+      message: "The optional fork tracking binding is invalid; fork execution is unaffected.",
+      detail: tracking.detail,
     };
   }
   try {
-    let validated;
-    try {
-      const trackingInventory = await excludeSkillRootFromInventory(
-        activeSkills,
-        customizationRoot,
-      );
-      validated = await bindings.validateBinding({
-        descriptor,
-        binding,
-        roots,
-        managerRecords,
-        activeSkills: trackingInventory,
-      });
-    } catch (error) {
-      return {
-        code: "tracking-binding-invalid",
-        message: "The optional fork tracking binding is invalid; fork execution is unaffected.",
-        detail: error.message,
-      };
-    }
-    const target = await realpath(lookup);
-    const info = await lstat(target);
-    const root = info.isDirectory() ? target : path.dirname(target);
+    const root = tracking.sourceRoot;
     const expected = descriptor.source.effective_fingerprint;
     let current;
     if (descriptor.source.kind === "customization") {
-      const nestedDescriptorPath = path.join(root, "customization.json");
-      const nestedDescriptor = await readDescriptor(nestedDescriptorPath);
-      if (!matchesCustomizationSource(descriptor.source, nestedDescriptor)) {
+      const nested = await checkedCustomizationSource(descriptor.source, root);
+      if (!nested.matches) {
         return {
           code: "tracking-binding-invalid",
           message: "The optional fork tracking binding does not match the reviewed customization identity; fork execution is unaffected.",
         };
       }
       const tracked = await visit({
-        descriptorPath: nestedDescriptorPath,
+        descriptorPath: nested.descriptorPath,
         context,
         statePath,
         roots,
         managerRecords,
-        activeSkills,
+        discoverySnapshot,
         depth: depth + 1,
         activeIds,
         activePaths,
         bindings,
+        checkedDescriptor: nested.checked,
       });
       if (tracked.status === "maintenance-required") {
         return {
@@ -153,7 +172,9 @@ async function forkTrackingAdvisory(descriptor, {
       }
       current = tracked.effectiveFingerprint;
     } else {
-      current = validated?.inspection.fingerprint ?? await fingerprintPath(root);
+      current = tracking.inspection.fingerprint ?? await fingerprintPath(root, {
+        excludedPaths: statePathExclusions(statePath),
+      });
     }
     if (current !== expected) {
       return {
@@ -179,14 +200,16 @@ async function visit({
   statePath,
   roots,
   managerRecords,
-  activeSkills,
+  discoverySnapshot,
   depth,
   activeIds,
   activePaths,
   bindings,
+  checkedDescriptor,
 }) {
-  const descriptor = await readDescriptor(descriptorPath);
-  const root = await realpath(path.dirname(path.resolve(descriptorPath)));
+  const checked = checkedDescriptor ?? await readCheckedDescriptor(descriptorPath);
+  const descriptor = checked.descriptor;
+  const root = checked.location.canonicalRoot;
   if (depth > MAX_CUSTOMIZATION_DEPTH) {
     return maintenance(
       descriptor,
@@ -223,7 +246,7 @@ async function visit({
 
   if (descriptor.type === "fork") {
     try {
-      await reconcileCustomization({ descriptor, customizationRoot: root });
+      await reconcileCustomization({ descriptor, customizationRoot: root, statePath });
     } catch (error) {
       return maintenance(descriptor, root, "fork-payload-or-provenance-drift", error.message);
     }
@@ -233,14 +256,14 @@ async function visit({
       statePath,
       roots,
       managerRecords,
-      activeSkills,
+      discoverySnapshot,
       depth,
       activeIds: nextIds,
       activePaths: nextPaths,
       bindings,
     });
     const advisories = advisory ? [advisory] : [];
-    return {
+    return withPublicationToken({
       status: advisories.length > 0 ? "ready-with-advisory" : "ready",
       effectiveFingerprint: effectiveFingerprint(descriptor, ownedFingerprint),
       steps: [{
@@ -251,16 +274,13 @@ async function visit({
       }],
       advisories,
       maintenanceHandler: null,
-    };
-  }
-
-  let bindingInventory;
-  try {
-    bindingInventory = descriptor.activation.mode === "replace"
-      ? await excludeSkillRootFromInventory(activeSkills, root)
-      : activeSkills;
-  } catch (error) {
-    return maintenance(descriptor, root, "binding-maintenance", error.message);
+    }, {
+      paths: [root],
+      // A fork is a leaf, but its owned payload, descriptor, and provenance
+      // are still recursive runtime inputs. Capture its bounded tree so a
+      // lock-side CAS sees mutations below the leaf root.
+      treePaths: [root],
+    });
   }
 
   let binding;
@@ -268,12 +288,17 @@ async function visit({
     binding = await bindings.resolveBinding({
       descriptor,
       context,
-      statePath,
-      roots,
-      managerRecords,
-      activeSkills: bindingInventory,
+      customizationRoot: root,
     });
   } catch (error) {
+    if (error.code === "BINDING_SOURCE_FINGERPRINT_MISMATCH") {
+      return maintenance(
+        descriptor,
+        root,
+        "source-drift",
+        "The full source effective fingerprint changed.",
+      );
+    }
     return maintenance(descriptor, root, "binding-maintenance", error.message);
   }
 
@@ -286,9 +311,8 @@ async function visit({
 
   let sourceResult;
   if (descriptor.source.kind === "customization") {
-    const nestedDescriptorPath = path.join(boundRoot, "customization.json");
-    const nestedDescriptor = await readDescriptor(nestedDescriptorPath);
-    if (!matchesCustomizationSource(descriptor.source, nestedDescriptor)) {
+    const nested = await checkedCustomizationSource(descriptor.source, boundRoot);
+    if (!nested.matches) {
       return maintenance(
         descriptor,
         root,
@@ -297,16 +321,17 @@ async function visit({
       );
     }
     sourceResult = await visit({
-      descriptorPath: nestedDescriptorPath,
+      descriptorPath: nested.descriptorPath,
       context,
       statePath,
       roots,
       managerRecords,
-      activeSkills,
+      discoverySnapshot,
       depth: depth + 1,
       activeIds: nextIds,
       activePaths: nextPaths,
       bindings,
+      checkedDescriptor: nested.checked,
     });
     if (sourceResult.status === "maintenance-required") return sourceResult;
     if (
@@ -321,7 +346,9 @@ async function visit({
       );
     }
   } else {
-    const actualSourceFingerprint = await fingerprintPath(boundRoot);
+    const actualSourceFingerprint = await fingerprintPath(boundRoot, {
+      excludedPaths: statePathExclusions(statePath),
+    });
     if (actualSourceFingerprint !== descriptor.source.effective_fingerprint) {
       return maintenance(
         descriptor,
@@ -349,7 +376,7 @@ async function visit({
     sourceResult.effectiveFingerprint,
   );
   const advisories = [...sourceResult.advisories];
-  return {
+  return withPublicationToken({
     status: advisories.length > 0 ? "ready-with-advisory" : "ready",
     effectiveFingerprint: currentEffective,
     steps: [
@@ -363,7 +390,25 @@ async function visit({
     ],
     advisories,
     maintenanceHandler: null,
-  };
+  }, {
+    // Binding already records the source, provenance, replacement, plugin,
+    // and manager evidence it accepted.  Thread only this private token into
+    // recovery; public Preflight results keep their established shape.
+    paths: publicationPaths(
+      root,
+      bindingPublicationPaths(binding),
+      publicationTokenFor(sourceResult)?.paths ?? [],
+    ),
+    stateTreePaths: publicationPaths(
+      bindingPublicationStateTreePaths(binding),
+      publicationTokenFor(sourceResult)?.stateTreePaths ?? [],
+    ),
+    treePaths: publicationPaths(publicationTokenFor(sourceResult)?.treePaths ?? []),
+    bindings: [
+      { key: bindings.bindingKey(descriptor.id, context), binding },
+      ...(publicationTokenFor(sourceResult)?.bindings ?? []),
+    ],
+  });
 }
 
 export async function inspectCustomizationExecution({
@@ -372,22 +417,24 @@ export async function inspectCustomizationExecution({
   statePath,
   roots,
   managerRecords = [],
-  activeSkills,
+  managerDiagnostics = [],
+  discoverySnapshot,
   bindings,
 }) {
   if (typeof context !== "string" || !context.trim()) {
     throw new TypeError("preflight context is required");
   }
+  const executionBindings = createBindingExecutionAdapter(bindings);
   return visit({
     descriptorPath: path.resolve(descriptorPath),
     context,
     statePath,
     roots,
     managerRecords,
-    activeSkills,
+    discoverySnapshot,
     depth: 1,
     activeIds: new Set(),
     activePaths: new Set(),
-    bindings,
+    bindings: executionBindings,
   });
 }

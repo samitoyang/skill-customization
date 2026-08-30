@@ -56,6 +56,10 @@ function unique(values) {
   return [...new Set(values.filter(Boolean).map((value) => path.resolve(value)))];
 }
 
+function recordsFromControlPath(records, controlPath) {
+  return records.map((record) => ({ ...record, controlPath }));
+}
+
 export function defaultManagerSources({
   home = os.homedir(),
   cwd = process.cwd(),
@@ -86,6 +90,7 @@ export function managerSkillRoots(records) {
   return records
     .filter(({ path: managerPath }) => managerPath)
     .map((record) => ({
+      kind: "manager",
       path:
         path.basename(record.path).toLowerCase() === "skill.md"
           ? path.dirname(record.path)
@@ -105,6 +110,17 @@ async function readIfPresent(filePath) {
   }
 }
 
+/**
+ * @param {object} [options]
+ * @param {string} [options.home]
+ * @param {string} [options.cwd]
+ * @param {Record<string, string | undefined>} [options.env]
+ * @param {{vercelLocks?: string[], jtianlingSources?: string[], xingDatabases?: string[]}} [options.sources]
+ * @param {Function} [options.run]
+ * @param {Function} [options.sqliteRun]
+ * @param {Record<string, {command: string, args: string[]}>} [options.commands]
+ * @param {Function} [options.commandAvailable]
+ */
 export async function collectManagerRecords({
   home = os.homedir(),
   cwd = process.cwd(),
@@ -127,13 +143,18 @@ export async function collectManagerRecords({
   for (const lockPath of sources.vercelLocks ?? []) {
     try {
       const data = await readIfPresent(lockPath);
-      if (data === undefined) continue;
+      if (data === undefined) {
+        diagnostics.push({ manager: "vercel", source: lockPath, status: "missing" });
+        continue;
+      }
       const scope = workspaceDirectories.some((directory) =>
         path.resolve(lockPath).startsWith(`${path.resolve(directory)}${path.sep}`),
       )
         ? "workspace"
         : "global";
-      records.push(...parseVercelV3Lock(data, { lockPath, scope }));
+      records.push(...recordsFromControlPath(
+        parseVercelV3Lock(data, { lockPath, scope }), lockPath,
+      ));
       diagnostics.push({ manager: "vercel", source: lockPath, status: "read" });
     } catch (error) {
       diagnostics.push({ manager: "vercel", source: lockPath, status: "error", error: error.message });
@@ -163,11 +184,12 @@ export async function collectManagerRecords({
   if (!records.some(({ manager }) => manager === "xing")) {
     for (const database of sources.xingDatabases ?? []) {
       if (!(await access(database).then(() => true, () => false))) {
+        diagnostics.push({ manager: "xing", source: database, status: "missing" });
         continue;
       }
       try {
         const parsed = await readXingSqlite(database, { run: sqliteRun });
-        records.push(...parsed);
+        records.push(...recordsFromControlPath(parsed, database));
         diagnostics.push({ manager: "xing", source: database, status: "read", records: parsed.length });
         break;
       } catch (error) {
@@ -179,10 +201,13 @@ export async function collectManagerRecords({
   for (const sourcePath of sources.jtianlingSources ?? []) {
     try {
       const data = await readIfPresent(sourcePath);
-      if (data === undefined) continue;
+      if (data === undefined) {
+        diagnostics.push({ manager: "jtianling", source: sourcePath, status: "missing" });
+        continue;
+      }
       const libraryRoot = path.dirname(sourcePath);
       const parsed = parseJtianlingSources(data, { root: libraryRoot });
-      records.push(...parsed);
+      records.push(...recordsFromControlPath(parsed, sourcePath));
       diagnostics.push({ manager: "jtianling", source: sourcePath, status: "read", records: parsed.length });
     } catch (error) {
       diagnostics.push({ manager: "jtianling", source: sourcePath, status: "error", error: error.message });
